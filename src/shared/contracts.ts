@@ -13,6 +13,9 @@ export interface MediaItem {
   type: ItemType;
   overview: string;
   productionYear: number | null;
+  premiereYear: number | null;
+  officialRating: string | null;
+  communityRating: number | null;
   runTimeTicks: number;
   genres: string[];
   primaryImageAspectRatio: number | null;
@@ -48,6 +51,10 @@ export interface PublicServerInfo {
   id: string;
   name: string;
   version: string;
+}
+
+export interface ServerConnection extends PublicServerInfo {
+  connectionId: string;
 }
 
 export interface DiscoveredServer extends PublicServerInfo {
@@ -96,7 +103,7 @@ export type RpcResult<T> =
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
 
 export interface ServerUrlInput { url: string }
-export interface LoginInput { serverUrl: string; username: string; password: string; remember: boolean }
+export interface LoginInput { connectionId: string; username: string; password: string; remember: boolean }
 export interface ItemIdInput { itemId: string }
 export interface LibraryItemsInput { type: "Movie" | "Series"; limit: number }
 export interface SearchInput { query: string }
@@ -108,7 +115,7 @@ export interface PlaybackIdInput { playbackId: string }
 export interface JellyfinBridge {
   server: {
     discover(): Promise<DiscoveredServer[]>;
-    connect(input: ServerUrlInput): Promise<PublicServerInfo>;
+    connect(input: ServerUrlInput): Promise<ServerConnection>;
   };
   session: {
     login(input: LoginInput): Promise<SafeSession>;

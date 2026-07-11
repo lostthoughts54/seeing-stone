@@ -41,7 +41,8 @@ function safeResult<T>(handler: Handler<T>): Handler<RpcResult<T>> {
 }
 
 function assertAuthorizedSender(event: IpcMainInvokeEvent, window: BrowserWindow): void {
-  if (event.sender !== window.webContents || event.senderFrame !== event.sender.mainFrame) {
+  if (window.isDestroyed() || window.webContents.isDestroyed()
+    || event.sender !== window.webContents || event.senderFrame !== event.sender.mainFrame) {
     throw new AppError("UNAUTHORIZED_IPC", "This request is not authorized.");
   }
   let url: URL;
@@ -69,12 +70,12 @@ export function registerIpcHandlers(
   };
 
   register(IPC.serverDiscover, () => discoverServers());
-  register(IPC.serverConnect, (input) => api.getPublicServerInfo(serverUrlSchema.strict().parse(input).url));
+  register(IPC.serverConnect, (input) => api.connect(serverUrlSchema.strict().parse(input).url));
   register(IPC.sessionLogin, async (input) => {
     const value = loginSchema.strict().parse(input);
     artwork.clear();
     playback.clear();
-    return api.login(value.serverUrl, value.username, value.password, value.remember);
+    return api.login(value.connectionId, value.username, value.password, value.remember);
   });
   register(IPC.sessionRestore, async () => {
     const session = await api.restore();

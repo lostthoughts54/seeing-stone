@@ -1,12 +1,22 @@
-const SECRET_KEYS = /token|password|authorization|api[_-]?key|path|url/i;
+const SECRET_KEYS = /token|password|authorization|api[_-]?key|device[_-]?id|path|url/i;
 const TOKEN_PATTERN = /([?&](?:api_key|token)=)[^&\s]+/gi;
-const AUTH_PATTERN = /((?:X-Emby-Authorization|X-MediaBrowser-Token|Authorization)\s*[:=]\s*)[^,\s]+/gi;
-const WINDOWS_PATH_PATTERN = /\b[A-Za-z]:\\(?:[^\s"']+\\)*[^\s"']*/g;
+const JSON_SECRET_PATTERN = /((?:"|')?(?:access[_-]?token|token|password|authorization|api[_-]?key|device[_-]?id|X-Emby-Authorization|X-MediaBrowser-Token)(?:"|')?\s*:\s*)(?:"[^"\r\n]*"|'[^'\r\n]*')/gi;
+const AUTH_PATTERN = /((?:X-Emby-Authorization|X-MediaBrowser-Token|Authorization)\s*[:=]\s*)[^\r\n]*/gi;
+const JELLYFIN_TOKEN_PATTERN = /(\bToken\s*=\s*)(?:"[^"]*"|'[^']*'|[^,\s]+)/gi;
+const SECRET_VALUE_PATTERN = /(\b(?:AccessToken|Password|ApiKey|DeviceId)\s*=\s*)(?:"[^"]*"|'[^']*'|[^,\s]+)/gi;
+const FILE_URL_PATTERN = /\bfile:\/\/[^\r\n"'<>|]*/gi;
+const QUOTED_WINDOWS_PATH_PATTERN = /(["'])(?:[A-Za-z]:[\\/]|\\\\)[^"'\r\n]*\1/g;
+const WINDOWS_PATH_PATTERN = /(?:\b[A-Za-z]:[\\/]|\\\\)[^\r\n"'<>|]*/g;
 
 export function redactText(value: string): string {
   return value
     .replace(TOKEN_PATTERN, "$1[REDACTED]")
+    .replace(JSON_SECRET_PATTERN, "$1[REDACTED]")
     .replace(AUTH_PATTERN, "$1[REDACTED]")
+    .replace(JELLYFIN_TOKEN_PATTERN, "$1[REDACTED]")
+    .replace(SECRET_VALUE_PATTERN, "$1[REDACTED]")
+    .replace(FILE_URL_PATTERN, "[REDACTED_PATH]")
+    .replace(QUOTED_WINDOWS_PATH_PATTERN, "$1[REDACTED_PATH]$1")
     .replace(WINDOWS_PATH_PATTERN, "[REDACTED_PATH]");
 }
 

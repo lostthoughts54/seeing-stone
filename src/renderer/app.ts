@@ -110,6 +110,7 @@ interface RendererState {
   episodes: MediaItem[];
   playbackItem: MediaItem | null;
   playbackId: string | null;
+  playbackRequestId: number;
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
   searchRequestId: number;
@@ -138,6 +139,7 @@ const state: RendererState = {
   episodes: [],
   playbackItem: null,
   playbackId: null,
+  playbackRequestId: 0,
   lastFocusElement: null,
   searchTimer: null,
   searchRequestId: 0,
@@ -233,6 +235,18 @@ function preferredArtwork(item: MediaItem, shape: "poster" | "landscape"): Image
   return hasImage(item, "Primary") ? "Primary" : "";
 }
 
+const imageRequestIds = new WeakMap<HTMLImageElement, number>();
+
+function clearImage(image: HTMLImageElement, fallback: HTMLElement | null = null): void {
+  imageRequestIds.set(image, (imageRequestIds.get(image) || 0) + 1);
+  image.onload = null;
+  image.onerror = null;
+  image.removeAttribute("src");
+  image.classList.remove("is-loading", "use-contain");
+  image.classList.add("is-hidden");
+  if (fallback) fallback.classList.remove("is-hidden");
+}
+
 async function setImage(
   image: HTMLImageElement,
   fallback: HTMLElement | null,
@@ -240,23 +254,28 @@ async function setImage(
   kind: ImageKind | "",
   options: ImageOptions = {},
 ): Promise<void> {
-  const url = kind ? await imageUrl(item, kind, options).catch(() => "") : "";
+  const requestId = (imageRequestIds.get(image) || 0) + 1;
+  imageRequestIds.set(image, requestId);
   image.onload = null;
   image.onerror = null;
+  image.removeAttribute("src");
   image.classList.remove("is-hidden");
   image.classList.add("is-loading");
   if (fallback) fallback.classList.remove("is-hidden");
+  const url = kind ? await imageUrl(item, kind, options).catch(() => "") : "";
+  if (imageRequestIds.get(image) !== requestId) return;
   if (!url) {
-    image.removeAttribute("src");
     image.classList.remove("is-loading");
     image.classList.add("is-hidden");
     return;
   }
   image.onload = () => {
+    if (imageRequestIds.get(image) !== requestId) return;
     image.classList.remove("is-loading");
     if (fallback) fallback.classList.add("is-hidden");
   };
   image.onerror = () => {
+    if (imageRequestIds.get(image) !== requestId) return;
     image.classList.remove("is-loading");
     image.classList.add("is-hidden");
     if (fallback) fallback.classList.remove("is-hidden");
@@ -274,11 +293,20 @@ function initials(name = ""): string {
 }
 
 function itemYear(item: MediaItem | null | undefined): number | "" {
-  return item?.productionYear || "";
+  return item?.productionYear || item?.premiereYear || "";
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function errorCode(error: unknown): string {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : "";
 }
 
 function runtime(item: MediaItem | null | undefined): string {
@@ -316,7 +344,9 @@ function metadataParts(item: MediaItem): string[] {
   if (item?.type === "Episode" && item.seriesName) parts.push(item.seriesName);
   if (episodeCode(item)) parts.push(episodeCode(item));
   if (itemYear(item)) parts.push(String(itemYear(item)));
+  if (item.officialRating) parts.push(item.officialRating);
   if (runtime(item)) parts.push(runtime(item));
+  if (item.communityRating) parts.push(`${item.communityRating.toFixed(1)}/10`);
   return parts;
 }
 
@@ -426,9 +456,10 @@ async function loadInitialData(): Promise<void> {
     await loadHome();
     setRoute("home");
   } catch (error) {
-    if (error instanceof Error && error.name === "SESSION_EXPIRED") {
-      await window.jellyfin.session.logout();
+    if (errorCode(error) === "SESSION_EXPIRED") {
+      await window.jellyfin.session.logout().catch(() => undefined);
       state.session = null;
+      resetSignedInState();
       showLogin("Your Jellyfin session expired. Sign in again.");
       return;
     }
@@ -437,7 +468,7 @@ async function loadInitialData(): Promise<void> {
     message.className = "empty-state";
     message.textContent = "Jellyfin could not load the home screen.";
     homeRows.append(message);
-    showToast(error instanceof Error ? error.message : "Jellyfin could not load the home screen.");
+    showToast(errorMessage(error, "Jellyfin could not load the home screen."));
   }
 }
 
@@ -829,6 +860,7 @@ function noteDownloadIntent(item: MediaItem): void {
 
 async function playItem(item: MediaItem): Promise<void> {
   if (!canPlay(item)) return;
+  const requestId = ++state.playbackRequestId;
   state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   state.playbackItem = item;
   playerTitle.textContent = item.type === "Episode" && item.seriesName ? item.seriesName : item.name || "Now Playing";
@@ -846,8 +878,13 @@ async function playItem(item: MediaItem): Promise<void> {
       resumeMode: item.userData.playbackPositionTicks > 0 ? "resume" : "start-over",
     });
   } catch (error) {
+    if (requestId !== state.playbackRequestId) return;
     await closePlayer();
     showToast(errorMessage(error, "Playback could not be started."));
+    return;
+  }
+  if (requestId !== state.playbackRequestId) {
+    await window.jellyfin.playback.stop({ playbackId: resolved.playbackId }).catch(() => undefined);
     return;
   }
   state.playbackId = resolved.playbackId;
@@ -864,6 +901,7 @@ async function playItem(item: MediaItem): Promise<void> {
 }
 
 async function closePlayer(): Promise<void> {
+  state.playbackRequestId += 1;
   const playbackId = state.playbackId;
   videoPlayer.pause();
   videoPlayer.removeAttribute("src");
@@ -873,32 +911,107 @@ async function closePlayer(): Promise<void> {
   document.body.classList.remove("is-playing");
   state.playbackItem = null;
   state.playbackId = null;
-  if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
   state.lastFocusElement?.focus?.();
+  if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
 
 function resetSignedInState(): void {
+  if (state.searchTimer) clearTimeout(state.searchTimer);
+  if (state.toastTimer) clearTimeout(state.toastTimer);
+  state.searchTimer = null;
+  state.toastTimer = null;
+  state.detailsRequestId += 1;
+  state.searchRequestId += 1;
+  state.playbackRequestId += 1;
   state.libraries = [];
   state.homeRows = [];
   state.resumeItems = [];
   state.nextUpItems = [];
   state.featureItem = null;
+  state.currentRoute = "home";
+  state.returnRoute = "home";
+  state.returnScrollTop = 0;
+  state.searchReturnRoute = "home";
+  state.searchReturnScrollTop = 0;
+  state.libraryType = "Movie";
   state.libraryCache = { Movie: null, Series: null };
   state.detailItem = null;
   state.detailPlayItem = null;
+  state.seasons = [];
+  state.episodes = [];
+  state.playbackItem = null;
+  state.playbackId = null;
+  state.lastFocusElement = null;
+
+  clearImage(featureImage);
+  clearImage(detailBackdrop);
+  clearImage(detailPoster, detailPosterFallback);
+  renderFeature(null);
+  homeRows.replaceChildren();
+  libraryGrid.replaceChildren();
+  searchRows.replaceChildren();
+  episodeList.replaceChildren();
+  seasonSelect.replaceChildren();
+  seasonSelect.disabled = true;
+  episodeSection.classList.add("is-hidden");
+
+  libraryTitle.textContent = "Movies";
+  searchTitle.textContent = "Search";
+  detailEyebrow.textContent = "";
+  detailTitle.textContent = "";
+  detailMeta.replaceChildren();
+  detailOverview.textContent = "";
+  detailGenres.replaceChildren();
+  detailHero.classList.add("has-no-poster");
+  detailPosterFrame.classList.add("is-hidden");
+  detailPosterFallback.textContent = "";
+  detailPlayButton.disabled = true;
+  detailPlayButton.onclick = null;
+  detailPlayLabel.textContent = "Play";
+  detailDownloadButton.disabled = true;
+  detailDownloadButton.onclick = null;
+  detailTrailerButton.disabled = true;
+  detailTrailerButton.onclick = null;
+
+  videoPlayer.pause();
+  videoPlayer.onloadedmetadata = null;
+  videoPlayer.removeAttribute("src");
+  videoPlayer.load();
+  playerView.classList.add("is-hidden");
+  document.body.classList.remove("is-playing");
+  playerTitle.textContent = "";
+  playerMeta.textContent = "";
+  playerSourceBadge.textContent = "";
+
   searchInput.value = "";
+  userLabel.textContent = "";
+  serverLabel.textContent = "";
+  profileInitial.textContent = "J";
   profileMenu.classList.add("is-hidden");
   profileButton.setAttribute("aria-expanded", "false");
+  toast.textContent = "";
+  toast.classList.add("is-hidden");
+  setButtonActive(libraryMoviesButton, true);
+  setButtonActive(libraryShowsButton, false);
+  setRoute("home");
+  contentScroller.scrollTop = 0;
 }
 
 async function bootstrap(): Promise<void> {
-  state.session = await window.jellyfin.session.restore();
-  if (!state.session.authenticated) {
-    showLogin();
-    await discoverServers();
-    return;
+  try {
+    state.session = await window.jellyfin.session.restore();
+    if (state.session.server) serverUrlInput.value = state.session.server.address;
+    if (state.session.authenticated) {
+      await loadInitialData();
+      return;
+    }
+  } catch {
+    state.session = null;
   }
-  await loadInitialData();
+  showLogin();
+  try {
+    await discoverServers();
+  } catch { /* The login view retains manual server entry. */ }
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -906,9 +1019,9 @@ loginForm.addEventListener("submit", async (event) => {
   setLoginMessage("Signing in...");
   const serverUrl = normalizeServerUrl(serverUrlInput.value);
   try {
-    await window.jellyfin.server.connect({ url: serverUrl });
+    const connection = await window.jellyfin.server.connect({ url: serverUrl });
     state.session = await window.jellyfin.session.login({
-      serverUrl,
+      connectionId: connection.connectionId,
       username: usernameInput.value.trim(),
       password: passwordInput.value,
       remember: true,
@@ -975,7 +1088,12 @@ refreshButton.addEventListener("click", async () => {
 
 logoutButton.addEventListener("click", async () => {
   await closePlayer();
-  await window.jellyfin.session.logout();
+  try {
+    await window.jellyfin.session.logout();
+  } catch (error) {
+    showToast(errorMessage(error, "Sign out could not be completed."));
+    return;
+  }
   state.session = null;
   resetSignedInState();
   showLogin("Signed out.");
@@ -983,7 +1101,6 @@ logoutButton.addEventListener("click", async () => {
 });
 
 closePlayerButton.addEventListener("click", () => { void closePlayer(); });
-videoPlayer.addEventListener("ended", () => { void closePlayer(); });
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

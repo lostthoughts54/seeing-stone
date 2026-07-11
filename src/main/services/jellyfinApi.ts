@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   HomePayload,
   LibrarySummary,
@@ -5,6 +6,7 @@ import type {
   MediaSourceCapabilities,
   PublicServerInfo,
   SafeSession,
+  ServerConnection,
 } from "../../shared/contracts";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
@@ -26,6 +28,9 @@ const ITEM_FIELDS = [
   "ParentIndexNumber",
   "RunTimeTicks",
   "ProductionYear",
+  "PremiereDate",
+  "OfficialRating",
+  "CommunityRating",
 ].join(",");
 
 type JsonRecord = Record<string, unknown>;
@@ -51,12 +56,19 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function premiereYear(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  return year >= 1000 && year <= 9999 ? year : null;
+}
+
 export function normalizeServerUrl(value: string): string {
   const parsed = new URL(value.trim());
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new AppError("INVALID_SERVER", "Use an HTTP or HTTPS Jellyfin address.");
-  if (parsed.username || parsed.password) throw new AppError("INVALID_SERVER", "Server addresses cannot contain credentials.");
-  parsed.hash = "";
-  parsed.search = "";
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new AppError("INVALID_SERVER", "Use an HTTP or HTTPS Jellyfin address.", 400);
+  if (parsed.username || parsed.password) throw new AppError("INVALID_SERVER", "Server addresses cannot contain credentials.", 400);
+  if (parsed.search || parsed.hash) throw new AppError("INVALID_SERVER", "Server addresses cannot contain a query or fragment.", 400);
   return parsed.toString().replace(/\/$/, "");
 }
 
@@ -72,6 +84,9 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
     type: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].includes(type) ? type : "Video",
     overview: asString(item.Overview),
     productionYear: nullableNumber(item.ProductionYear),
+    premiereYear: premiereYear(item.PremiereDate),
+    officialRating: nullableString(item.OfficialRating)?.slice(0, 32) ?? null,
+    communityRating: nullableNumber(item.CommunityRating),
     runTimeTicks: asNumber(item.RunTimeTicks),
     genres: Array.isArray(item.Genres) ? item.Genres.filter((entry): entry is string => typeof entry === "string").slice(0, 32) : [],
     primaryImageAspectRatio: nullableNumber(item.PrimaryImageAspectRatio),
@@ -111,9 +126,19 @@ function sanitizeLibrary(value: unknown): LibrarySummary {
 }
 
 interface AuthenticatedState extends StoredSession {}
+interface PendingConnection {
+  server: PublicServerInfo;
+  expiresAt: number;
+}
+
+const CONNECTION_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_CONNECTIONS = 16;
 
 export class JellyfinApi {
   private session: AuthenticatedState | null = null;
+  private sessionController = new AbortController();
+  private sessionMutationTail: Promise<void> = Promise.resolve();
+  private readonly pendingConnections = new Map<string, PendingConnection>();
 
   constructor(
     private readonly identity: DeviceIdentity,
@@ -136,54 +161,86 @@ export class JellyfinApi {
     return { address, id, name: asString(value.ServerName, "Jellyfin"), version: asString(value.Version) };
   }
 
-  async login(serverUrl: string, username: string, password: string, remember: boolean): Promise<SafeSession> {
+  async connect(serverUrl: string): Promise<ServerConnection> {
     const server = await this.getPublicServerInfo(serverUrl);
-    let response: Response;
-    try {
-      response = await fetch(`${server.address}/Users/AuthenticateByName`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Emby-Authorization": this.authorizationHeader() },
-        body: JSON.stringify({ Username: username, Pw: password }),
-        signal: AbortSignal.timeout(10000),
-        redirect: "manual",
-      });
-    } catch {
-      throw new AppError("SERVER_UNREACHABLE", "The Jellyfin server could not be reached.");
+    const now = Date.now();
+    for (const [id, pending] of this.pendingConnections) {
+      if (pending.expiresAt <= now) this.pendingConnections.delete(id);
     }
-    if (!response.ok) throw new AppError("AUTH_FAILED", response.status === 401 ? "The username or password was not accepted." : "Jellyfin sign-in failed.", response.status);
-    const result = asRecord(await response.json());
-    const user = asRecord(result.User);
-    const accessToken = asString(result.AccessToken);
-    const userId = asString(user.Id);
-    if (!accessToken || !userId) throw new AppError("AUTH_FAILED", "Jellyfin returned an incomplete sign-in response.");
-    this.session = {
-      serverUrl: server.address,
-      serverId: server.id,
-      serverName: server.name,
-      serverVersion: server.version,
-      userId,
-      userName: asString(user.Name, username),
-      accessToken,
-    };
-    await this.sessionStore.save(this.session, remember);
-    return this.safeSession();
+    while (this.pendingConnections.size >= MAX_PENDING_CONNECTIONS) {
+      const oldest = this.pendingConnections.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.pendingConnections.delete(oldest);
+    }
+    const connectionId = randomUUID();
+    this.pendingConnections.set(connectionId, { server, expiresAt: now + CONNECTION_TTL_MS });
+    return { ...server, connectionId };
+  }
+
+  async login(connectionId: string, username: string, password: string, remember: boolean): Promise<SafeSession> {
+    return this.runSessionMutation(async () => {
+      const pending = this.pendingConnections.get(connectionId);
+      if (!pending || pending.expiresAt <= Date.now()) {
+        this.pendingConnections.delete(connectionId);
+        throw new AppError("INVALID_CONNECTION", "Connect to the Jellyfin server again before signing in.", 400);
+      }
+      const server = pending.server;
+      let response: Response;
+      try {
+        response = await fetch(`${server.address}/Users/AuthenticateByName`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Emby-Authorization": this.authorizationHeader() },
+          body: JSON.stringify({ Username: username, Pw: password }),
+          signal: AbortSignal.timeout(10000),
+          redirect: "manual",
+        });
+      } catch {
+        throw new AppError("SERVER_UNREACHABLE", "The Jellyfin server could not be reached.");
+      }
+      if (!response.ok) throw new AppError("AUTH_FAILED", response.status === 401 ? "The username or password was not accepted." : "Jellyfin sign-in failed.", response.status);
+      const result = asRecord(await response.json());
+      const user = asRecord(result.User);
+      const accessToken = asString(result.AccessToken);
+      const userId = asString(user.Id);
+      if (!accessToken || !userId) throw new AppError("AUTH_FAILED", "Jellyfin returned an incomplete sign-in response.");
+      const authenticatedSession: AuthenticatedState = {
+        serverUrl: server.address,
+        serverId: server.id,
+        serverName: server.name,
+        serverVersion: server.version,
+        userId,
+        userName: asString(user.Name, username),
+        accessToken,
+      };
+      await this.sessionStore.save(authenticatedSession, remember);
+      this.setSession(authenticatedSession);
+      this.pendingConnections.delete(connectionId);
+      return this.safeSession();
+    });
   }
 
   async restore(): Promise<SafeSession> {
-    const stored = await this.sessionStore.restore();
-    if (!stored) {
-      this.session = null;
-      return this.safeSession();
-    }
-    this.session = stored;
-    try {
-      await this.request(`/Users/${encodeURIComponent(stored.userId)}`);
-      return this.safeSession();
-    } catch {
-      this.session = null;
-      await this.sessionStore.clear();
-      return this.safeSession();
-    }
+    return this.runSessionMutation(async () => {
+      const stored = await this.sessionStore.restore();
+      if (!stored) {
+        this.setSession(null);
+        return this.safeSession();
+      }
+      this.setSession(stored);
+      try {
+        await this.request(`/Users/${encodeURIComponent(stored.userId)}`);
+        return this.safeSession();
+      } catch (error) {
+        if (error instanceof AppError && error.code === "SESSION_EXPIRED") {
+          this.setSession(null);
+          await this.sessionStore.clear();
+          return this.safeSession();
+        }
+        // A protected session remains authoritative while the server is offline.
+        // Only an explicit 401 proves that the token is no longer valid.
+        return this.safeSession();
+      }
+    });
   }
 
   getSafeSession(): SafeSession {
@@ -191,9 +248,12 @@ export class JellyfinApi {
   }
 
   async logout(): Promise<SafeSession> {
-    this.session = null;
-    await this.sessionStore.clear();
-    return this.safeSession();
+    return this.runSessionMutation(async () => {
+      await this.sessionStore.clear();
+      this.setSession(null);
+      this.pendingConnections.clear();
+      return this.safeSession();
+    });
   }
 
   async getLibraries(): Promise<LibrarySummary[]> {
@@ -206,7 +266,7 @@ export class JellyfinApi {
     const libraries = await this.getLibraries();
     const session = this.requireSession();
     const [resumeResult, nextUpResult, ...latestResults] = await Promise.all([
-      this.request(`/Users/${encodeURIComponent(session.userId)}/Items/Resume`, { Limit: "20", Fields: ITEM_FIELDS }),
+      this.request(`/Users/${encodeURIComponent(session.userId)}/Items/Resume`, { Limit: "20", MediaTypes: "Video", Fields: ITEM_FIELDS }),
       this.request("/Shows/NextUp", { UserId: session.userId, Limit: "20", Fields: ITEM_FIELDS }),
       ...libraries
         .filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows")
@@ -320,18 +380,40 @@ export class JellyfinApi {
     return true;
   }
 
-  async fetchArtwork(itemId: string, kind: string, options: Record<string, string>): Promise<Response> {
+  async fetchArtwork(itemId: string, kind: string, options: Record<string, string>, signal?: AbortSignal): Promise<Response> {
     const index = kind === "Backdrop" ? "/0" : "";
-    return this.fetchAuthenticated(`/Items/${encodeURIComponent(itemId)}/Images/${encodeURIComponent(kind)}${index}`, options);
+    const headersController = new AbortController();
+    const requestSignal = signal
+      ? AbortSignal.any([signal, headersController.signal])
+      : headersController.signal;
+    const timeout = setTimeout(() => headersController.abort(), 15000);
+    try {
+      return await this.fetchAuthenticated(
+        `/Items/${encodeURIComponent(itemId)}/Images/${encodeURIComponent(kind)}${index}`,
+        options,
+        { signal: requestSignal },
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  async fetchStaticStream(itemId: string, mediaSourceId: string, range?: string): Promise<Response> {
+  async fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response> {
     const headers: Record<string, string> = {};
     if (range) headers.Range = range;
-    return this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
-      static: "true",
-      mediaSourceId,
-    }, { headers });
+    const headersController = new AbortController();
+    const requestSignal = signal
+      ? AbortSignal.any([signal, headersController.signal])
+      : headersController.signal;
+    const timeout = setTimeout(() => headersController.abort(), 15000);
+    try {
+      return await this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
+        static: "true",
+        mediaSourceId,
+      }, { headers, signal: requestSignal });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async reportAuthoritativePlayback(event: {
@@ -359,15 +441,25 @@ export class JellyfinApi {
   }
 
   private async request(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<unknown> {
+    const expectedSession = this.session;
+    const expectedController = this.sessionController;
     const response = await this.fetchAuthenticated(path, params, init);
     if (response.status === 204) return null;
-    return response.json();
+    const result = await response.json();
+    if (this.session !== expectedSession || this.sessionController !== expectedController) {
+      throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
+    }
+    return result;
   }
 
   private async fetchAuthenticated(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<Response> {
     const session = this.requireSession();
+    const sessionController = this.sessionController;
     const url = new URL(`${session.serverUrl}${path}`);
     for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
+    const signals = [sessionController.signal];
+    if (init.signal) signals.push(init.signal);
+    else signals.push(AbortSignal.timeout(15000));
     let response: Response;
     try {
       response = await fetch(url, {
@@ -378,11 +470,18 @@ export class JellyfinApi {
           "X-MediaBrowser-Token": session.accessToken,
           ...(init.headers || {}),
         },
-        signal: init.signal ?? AbortSignal.timeout(15000),
+        signal: AbortSignal.any(signals),
         redirect: "manual",
       });
     } catch {
+      if (this.session !== session || this.sessionController !== sessionController) {
+        throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
+      }
       throw new AppError("SERVER_UNAVAILABLE", "The Jellyfin server is unavailable.");
+    }
+    if (this.session !== session || this.sessionController !== sessionController) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
     }
     if (!response.ok) {
       if (response.status === 401) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
@@ -405,6 +504,24 @@ export class JellyfinApi {
   private requireSession(): AuthenticatedState {
     if (!this.session) throw new AppError("NOT_AUTHENTICATED", "Sign in to Jellyfin first.", 401);
     return this.session;
+  }
+
+  private setSession(session: AuthenticatedState | null): void {
+    this.sessionController.abort();
+    this.sessionController = new AbortController();
+    this.session = session;
+  }
+
+  private async runSessionMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionMutationTail;
+    let release!: () => void;
+    this.sessionMutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private safeSession(): SafeSession {

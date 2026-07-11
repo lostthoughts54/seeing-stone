@@ -16,10 +16,10 @@ import {
   type PlaybackStartInput,
   type PlaybackStartResult,
   type PlaybackState,
-  type PublicServerInfo,
   type RpcResult,
   type SafeSession,
   type SearchInput,
+  type ServerConnection,
   type ServerUrlInput,
 } from "../shared/contracts";
 
@@ -27,9 +27,13 @@ async function invoke<T>(channel: string, input?: unknown): Promise<T> {
   const result = await ipcRenderer.invoke(channel, input) as RpcResult<T>;
   if (!result || typeof result !== "object" || typeof result.ok !== "boolean") throw new Error("The application returned an invalid response.");
   if (!result.ok) {
-    const error = new Error(result.error.message);
-    error.name = result.error.code;
-    throw error;
+    // Plain data survives Electron's isolated-world promise bridge intact.
+    // Error instances are normalized and lose an assigned application code.
+    throw Object.freeze({
+      code: result.error.code,
+      message: result.error.message,
+      retryable: result.error.retryable,
+    });
   }
   return result.data;
 }
@@ -37,7 +41,7 @@ async function invoke<T>(channel: string, input?: unknown): Promise<T> {
 const bridge: JellyfinBridge = {
   server: {
     discover: () => invoke<DiscoveredServer[]>(IPC.serverDiscover),
-    connect: (input: ServerUrlInput) => invoke<PublicServerInfo>(IPC.serverConnect, input),
+    connect: (input: ServerUrlInput) => invoke<ServerConnection>(IPC.serverConnect, input),
   },
   session: {
     login: (input: LoginInput) => invoke<SafeSession>(IPC.sessionLogin, input),

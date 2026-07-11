@@ -76,7 +76,17 @@ test("safe DTOs and logs remove paths, tokens, and server-only fields", () => {
   assert.equal(serialized.includes("Sensitive"), false);
   assert.equal(serialized.includes("SECRET_TOKEN_SENTINEL"), false);
   assert.equal(serialized.includes("MediaSources"), false);
-  assert.equal(redactText("x?api_key=SECRET_TOKEN_SENTINEL D:\\Sensitive\\movie.mkv").includes("SECRET_TOKEN_SENTINEL"), false);
+  const unsafeLog = [
+    "x?api_key=SECRET_TOKEN_SENTINEL",
+    'X-Emby-Authorization: MediaBrowser Client="LocalFirst Jellyfin", Token="SECRET_TOKEN_SENTINEL"',
+    '{"Authorization":"Bearer JSON_SECRET_TOKEN_SENTINEL"}',
+    "D:\\Sensitive Folder\\Private Movie.mkv",
+    "D:/Forward Slash Secret/Private Movie.mkv",
+  ].join("\n");
+  const safeLog = redactText(unsafeLog);
+  assert.equal(safeLog.includes("SECRET_TOKEN_SENTINEL"), false);
+  assert.equal(safeLog.includes("Sensitive Folder"), false);
+  assert.equal(safeLog.includes("Private Movie"), false);
   assert.equal(JSON.stringify(sanitizeLogValue({ accessToken: "SECRET_TOKEN_SENTINEL" })).includes("SECRET_TOKEN_SENTINEL"), false);
 });
 
@@ -129,7 +139,8 @@ test("authenticated networking stays main-side and returns allowlisted payloads"
       clientVersion: "0.4.0",
       deviceName: "Windows Desktop",
     }, new SecureSessionStore(directory, memoryOnly), async () => undefined);
-    const safeSession = await api.login("http://127.0.0.1:8096", "Viewer", "password", true);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    const safeSession = await api.login(connection.connectionId, "Viewer", "password", true);
     const home = await api.getHome();
     const capabilities = await api.getMediaSourceCapabilities("movie-1");
     const payload = JSON.stringify({ safeSession, home, capabilities });
@@ -180,7 +191,7 @@ test("artwork and playback expose only opaque application URLs", async () => {
     async fetchStaticStream() { return new Response("video", { headers: { "Content-Type": "video/mp4" } }); },
   });
   const started = await playback.start("movie-1", "resume");
-  assert.equal(started.mediaUrl, "jellyfin-media://stream/current");
+  assert.equal(started.mediaUrl, `jellyfin-media://stream/${started.playbackId}`);
   assert.equal(JSON.stringify(started).includes("private-source-id"), false);
   assert.equal(JSON.stringify(started).includes("http"), false);
 });
@@ -189,7 +200,10 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   const renderer = await fs.readFile("src/renderer/app.ts", "utf8");
   const preload = await fs.readFile("src/preload/index.ts", "utf8");
   const contracts = await fs.readFile("src/shared/contracts.ts", "utf8");
-  const main = await fs.readFile("src/main/index.ts", "utf8");
+  const main = [
+    await fs.readFile("src/main/index.ts", "utf8"),
+    await fs.readFile("src/main/electronSecurity.ts", "utf8"),
+  ].join("\n");
   assert.doesNotMatch(renderer, /\bfetch\s*\(|localStorage|sessionStorage|accessToken|api_key|ipcRenderer|window\.open/);
   assert.doesNotMatch(renderer, /from\s+["'](?:node:|electron|.*\/main\/)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^,]+,\s*ipcRenderer/);
@@ -208,13 +222,14 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   assert.match(main, /setPermissionCheckHandler/);
   assert.match(main, /onBeforeRequest/);
   assert.match(main, /setWindowOpenHandler/);
+  assert.match(main, /requestSingleInstanceLock/);
   assert.match(main, /connect-src 'none'/);
   assert.doesNotMatch(main, /unsafe-inline|unsafe-eval/);
 });
 
 test("IPC schemas reject extra headers, paths, commands, and arguments", () => {
   assert.throws(() => loginSchema.strict().parse({
-    serverUrl: "http://127.0.0.1:8096",
+    connectionId: "11111111-1111-4111-8111-111111111111",
     username: "Viewer",
     password: "password",
     remember: true,

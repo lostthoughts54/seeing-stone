@@ -12,9 +12,10 @@
     "build:renderer": "vite build",
     "clean": "node scripts/clean.mjs",
     "start": "electron .",
-    "test": "pnpm run typecheck && pnpm run test:unit && pnpm run test:core",
+    "test": "pnpm run typecheck && pnpm run test:unit && pnpm run test:core && pnpm run test:electron",
     "test:unit": "vitest run",
-    "test:core": "pnpm run build:main && node --test tests-node/*.test.cjs",
+    "test:core": "pnpm run clean && pnpm run build:main && node --test tests-node/*.test.cjs",
+    "test:electron": "pnpm run build && node tests-electron/runtime.cjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },

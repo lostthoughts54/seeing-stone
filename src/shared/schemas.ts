@@ -3,7 +3,7 @@ import { z } from "zod";
 export const serverUrlSchema = z.object({ url: z.string().trim().url().max(2048) });
 
 export const loginSchema = z.object({
-  serverUrl: z.string().trim().url().max(2048),
+  connectionId: z.string().uuid(),
   username: z.string().trim().min(1).max(256),
   password: z.string().max(4096),
   remember: z.boolean(),
