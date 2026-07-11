@@ -1,0 +1,39 @@
+import { z } from "zod";
+
+export const serverUrlSchema = z.object({ url: z.string().trim().url().max(2048) });
+
+export const loginSchema = z.object({
+  serverUrl: z.string().trim().url().max(2048),
+  username: z.string().trim().min(1).max(256),
+  password: z.string().max(4096),
+  remember: z.boolean(),
+});
+
+export const itemIdSchema = z.object({ itemId: z.string().min(1).max(128) });
+
+export const libraryItemsSchema = z.object({
+  type: z.enum(["Movie", "Series"]),
+  limit: z.number().int().min(1).max(500),
+});
+
+export const searchSchema = z.object({ query: z.string().trim().min(1).max(256) });
+
+export const episodesSchema = z.object({
+  seriesId: z.string().min(1).max(128),
+  seasonId: z.string().min(1).max(128),
+});
+
+export const artworkSchema = z.object({
+  itemId: z.string().min(1).max(128),
+  kind: z.enum(["Primary", "Backdrop", "Thumb"]),
+  tag: z.string().min(1).max(256).optional(),
+  width: z.number().int().min(32).max(2400).optional(),
+  height: z.number().int().min(32).max(2400).optional(),
+});
+
+export const playbackStartSchema = z.object({
+  itemId: z.string().min(1).max(128),
+  resumeMode: z.enum(["resume", "start-over"]),
+});
+
+export const playbackIdSchema = z.object({ playbackId: z.string().uuid() });

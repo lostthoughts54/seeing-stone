@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LocalFirst Jellyfin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <section id="loginView" class="login-view">
+        <div class="login-art" aria-hidden="true">
+          <div class="poster-grid">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+
+        <form id="loginForm" class="login-card">
+          <div class="brand large">
+            <span class="brand-mark">LF</span>
+            <div>
+              <strong>LocalFirst</strong>
+              <span>Jellyfin, with downloads in mind</span>
+            </div>
+          </div>
+
+          <div class="login-copy">
+            <h1>Connect to Jellyfin</h1>
+            <p>Choose a server found on your network, then sign in.</p>
+          </div>
+
+          <label for="serverUrlInput"><span>Server URL</span></label>
+          <div class="server-input-row">
+            <input id="serverUrlInput" type="url" placeholder="http://192.168.1.10:8096" autocomplete="url" required />
+            <button id="discoverButton" type="button">Search Network</button>
+          </div>
+
+          <div id="serverDiscovery" class="server-discovery" role="status">
+            <div class="discovery-status">
+              <span id="discoveryDot" class="discovery-dot"></span>
+              <span id="discoveryMessage">Ready to search for Jellyfin.</span>
+            </div>
+            <div id="serverResults" class="server-results"></div>
+          </div>
+
+          <label for="usernameInput">
+            <span>Username</span>
+            <input id="usernameInput" type="text" autocomplete="username" required />
+          </label>
+
+          <label for="passwordInput">
+            <span>Password</span>
+            <input id="passwordInput" type="password" autocomplete="current-password" />
+          </label>
+
+          <button class="primary" type="submit">Sign In</button>
+          <p id="loginMessage" class="form-message" role="status"></p>
+        </form>
+      </section>
+
+      <section id="mainView" class="main-view is-hidden">
+        <header class="app-header">
+          <button id="brandHomeButton" class="brand-button" type="button" aria-label="Home">
+            <span class="brand-mark">LF</span>
+            <strong>LocalFirst</strong>
+          </button>
+
+          <nav class="desktop-nav" aria-label="Primary navigation">
+            <button id="navHomeButton" class="is-active" type="button">Home</button>
+            <button id="navMoviesButton" type="button">Movies</button>
+            <button id="navShowsButton" type="button">Shows</button>
+          </nav>
+
+          <div class="header-actions">
+            <label class="header-search" for="searchInput">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"></circle>
+                <path d="M16.5 16.5 21 21"></path>
+              </svg>
+              <input id="searchInput" type="search" placeholder="Search" autocomplete="off" />
+            </label>
+            <button id="profileButton" class="profile-button" type="button" aria-label="Account menu" aria-expanded="false">
+              <span id="profileInitial">L</span>
+            </button>
+          </div>
+
+          <div id="profileMenu" class="profile-menu is-hidden">
+            <strong id="userLabel">Signed in</strong>
+            <span id="serverLabel">Jellyfin</span>
+            <button id="refreshButton" type="button">Refresh Home</button>
+            <button id="logoutButton" type="button">Sign Out</button>
+          </div>
+        </header>
+
+        <main id="contentScroller" class="content-scroller">
+          <section id="homeView" class="view home-view">
+            <section id="featureHero" class="feature-hero">
+              <img id="featureImage" class="feature-image is-hidden" alt="" />
+              <div class="feature-shade"></div>
+              <div class="feature-copy">
+                <p id="featureEyebrow" class="eyebrow">Your Jellyfin</p>
+                <h1 id="featureTitle">Loading your library</h1>
+                <p id="featureOverview">Recently watched and newly added titles will appear here.</p>
+                <div class="action-row">
+                  <button id="featurePlayButton" class="primary" type="button" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg>
+                    Play
+                  </button>
+                  <button id="featureInfoButton" type="button" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6"></path><path d="M12 7h.01"></path></svg>
+                    More Info
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <div id="homeRows" class="home-rows" aria-live="polite"></div>
+          </section>
+
+          <section id="libraryView" class="view library-view is-hidden">
+            <header class="page-heading">
+              <p class="eyebrow">Library</p>
+              <h1 id="libraryTitle">Movies</h1>
+              <div class="segmented-control" aria-label="Library type">
+                <button id="libraryMoviesButton" class="is-active" type="button">Movies</button>
+                <button id="libraryShowsButton" type="button">Shows</button>
+              </div>
+            </header>
+            <div id="libraryGrid" class="poster-grid-view" aria-live="polite"></div>
+          </section>
+
+          <section id="searchView" class="view search-view is-hidden">
+            <header class="page-heading">
+              <p class="eyebrow">Search</p>
+              <h1 id="searchTitle">Search</h1>
+            </header>
+            <div id="searchRows" class="home-rows" aria-live="polite"></div>
+          </section>
+
+          <section id="detailsView" class="view details-view is-hidden">
+            <button id="detailsBackButton" class="back-button" type="button" aria-label="Go back" title="Go back">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+            </button>
+
+            <section id="detailHero" class="detail-hero">
+              <img id="detailBackdrop" class="detail-backdrop is-hidden" alt="" />
+              <div class="detail-shade"></div>
+              <div class="detail-hero-content">
+                <div id="detailPosterFrame" class="detail-poster-frame">
+                  <img id="detailPoster" class="detail-poster is-hidden" alt="" />
+                  <span id="detailPosterFallback">LF</span>
+                </div>
+                <div class="detail-copy">
+                  <p id="detailEyebrow" class="eyebrow">Jellyfin</p>
+                  <h1 id="detailTitle">Title</h1>
+                  <div id="detailMeta" class="detail-meta"></div>
+                  <p id="detailOverview" class="detail-overview"></p>
+                  <div id="detailGenres" class="genre-list"></div>
+                  <div class="action-row detail-actions">
+                    <button id="detailPlayButton" class="primary" type="button" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg>
+                      <span id="detailPlayLabel">Play</span>
+                    </button>
+                    <button id="detailDownloadButton" type="button" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                      Download
+                    </button>
+                    <button id="detailTrailerButton" type="button" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"></rect><path d="m10 9 5 3-5 3z"></path></svg>
+                      Trailer
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section id="episodeSection" class="episode-section is-hidden">
+              <div class="episode-heading">
+                <h2>Episodes</h2>
+                <select id="seasonSelect" aria-label="Season"></select>
+              </div>
+              <ol id="episodeList" class="episode-list"></ol>
+            </section>
+          </section>
+        </main>
+
+        <nav class="mobile-nav" aria-label="Mobile navigation">
+          <button id="mobileHomeButton" class="is-active" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"></path><path d="M5 10.5V21h5v-6h4v6h5V10.5"></path></svg>
+            Home
+          </button>
+          <button id="mobileSearchButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 21 21"></path></svg>
+            Search
+          </button>
+          <button id="mobileLibraryButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5v5H4z"></path><path d="M15 5h5v5h-5z"></path><path d="M4 15h5v5H4z"></path><path d="M15 15h5v5h-5z"></path></svg>
+            Library
+          </button>
+        </nav>
+      </section>
+
+      <section id="playerView" class="player-view is-hidden" aria-label="Video player">
+        <video id="videoPlayer" controls preload="metadata"></video>
+        <div class="player-topbar">
+          <div class="player-title-block">
+            <strong id="playerTitle">Now Playing</strong>
+            <span id="playerMeta"></span>
+          </div>
+          <span id="playerSourceBadge" class="source-badge">Server</span>
+        </div>
+        <button id="closePlayerButton" class="player-close" type="button" aria-label="Close player" title="Close player">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg>
+        </button>
+      </section>
+
+      <div id="toast" class="toast is-hidden" role="status"></div>
+    </div>
+
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
