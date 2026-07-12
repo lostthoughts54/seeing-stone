@@ -682,6 +682,11 @@ select {
   width: 100%;
 }
 
+.media-card.poster .media-art img {
+  object-fit: cover;
+  object-position: center;
+}
+
 .art-fallback {
   color: #dedee3;
   font-size: 1.9rem;

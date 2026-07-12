@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 9;
+const EXPECTED_TESTS = 10;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -426,6 +426,40 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("rendered poster cards use fixed 2:3 cover geometry", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(() => {
+        const card = document.createElement("button");
+        const art = document.createElement("span");
+        const poster = document.createElement("img");
+        const episode = document.createElement("span");
+        const episodeImage = document.createElement("img");
+        card.className = "media-card poster";
+        card.style.width = "180px";
+        art.className = "media-art";
+        episode.className = "episode-thumb";
+        art.append(poster);
+        episode.append(episodeImage);
+        card.append(art);
+        document.body.append(card, episode);
+        const rectangle = art.getBoundingClientRect();
+        const value = {
+          width: rectangle.width,
+          height: rectangle.height,
+          posterFit: getComputedStyle(poster).objectFit,
+          posterPosition: getComputedStyle(poster).objectPosition,
+          episodeFit: getComputedStyle(episodeImage).objectFit,
+        };
+        card.remove();
+        episode.remove();
+        return value;
+      })()`);
+      assert.ok(result.width > 0);
+      assert.ok(Math.abs(result.height - (result.width * 1.5)) < 1);
+      assert.equal(result.posterFit, "cover");
+      assert.equal(result.posterPosition, "50% 50%");
+      assert.equal(result.episodeFit, "contain");
     });
 
     await test("renderer preserves safe reauthentication context and scrubs expired-account UI", async () => {
