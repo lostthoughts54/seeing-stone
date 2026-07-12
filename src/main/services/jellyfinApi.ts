@@ -416,6 +416,45 @@ export class JellyfinApi {
     }
   }
 
+  async fetchTranscodedStream(
+    itemId: string,
+    mediaSourceId: string,
+    playSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const headersController = new AbortController();
+    const requestSignal = signal
+      ? AbortSignal.any([signal, headersController.signal])
+      : headersController.signal;
+    // Starting ffmpeg can take longer than an ordinary API response, while
+    // the caller's signal remains authoritative for the response body.
+    const timeout = setTimeout(() => headersController.abort(), 45000);
+    try {
+      return await this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream.mp4`, {
+        static: "false",
+        mediaSourceId,
+        deviceId: this.identity.deviceId,
+        playSessionId,
+        videoCodec: "h264",
+        audioCodec: "aac",
+        audioBitRate: "256000",
+        audioChannels: "2",
+        maxAudioChannels: "2",
+        transcodingMaxAudioChannels: "2",
+        videoBitRate: "40000000",
+        maxVideoBitDepth: "8",
+        requireAvc: "true",
+        enableAutoStreamCopy: "true",
+        allowVideoStreamCopy: "true",
+        allowAudioStreamCopy: "true",
+        context: "Streaming",
+        transcodeReasons: "ContainerNotSupported",
+      }, { signal: requestSignal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async reportAuthoritativePlayback(event: {
     kind: "start" | "progress" | "stop";
     itemId: string;

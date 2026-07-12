@@ -74,6 +74,7 @@ describe("JellyfinApi main-side boundary", () => {
     const observedRequests: Array<{ url: URL; init: RequestInit | undefined }> = [];
     const openedUrls: string[] = [];
     let streamSignal: AbortSignal | undefined;
+    let transcodeSignal: AbortSignal | undefined;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       const headers = new Headers(init?.headers);
@@ -97,6 +98,10 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname.endsWith("/Videos/movie-1/stream")) {
         streamSignal = init?.signal ?? undefined;
         return new Response("video", { headers: { "Content-Type": "video/mp4" } });
+      }
+      if (url.pathname.endsWith("/Videos/movie-1/stream.mp4")) {
+        transcodeSignal = init?.signal ?? undefined;
+        return new Response("transcoded-video", { headers: { "Content-Type": "video/mp4" } });
       }
       if (url.pathname.startsWith("/Sessions/Playing")) return new Response(null, { status: 204 });
       throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
@@ -190,8 +195,23 @@ describe("JellyfinApi main-side boundary", () => {
 
     vi.useFakeTimers();
     await api.fetchStaticStream("movie-1", "source-1");
+    const transcoded = await api.fetchTranscodedStream("movie-1", "source-1", "33333333-3333-4333-8333-333333333333");
+    expect(await transcoded.text()).toBe("transcoded-video");
     await vi.advanceTimersByTimeAsync(15001);
     expect(streamSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(transcodeSignal?.aborted).toBe(false);
+    const transcodeRequest = observedRequests.find(({ url }) => url.pathname.endsWith("/stream.mp4"));
+    expect(transcodeRequest?.url.searchParams.get("static")).toBe("false");
+    expect(transcodeRequest?.url.searchParams.get("mediaSourceId")).toBe("source-1");
+    expect(transcodeRequest?.url.searchParams.get("deviceId")).toBe(identity.deviceId);
+    expect(transcodeRequest?.url.searchParams.get("playSessionId")).toBe("33333333-3333-4333-8333-333333333333");
+    expect(transcodeRequest?.url.searchParams.get("videoCodec")).toBe("h264");
+    expect(transcodeRequest?.url.searchParams.get("audioCodec")).toBe("aac");
+    expect(transcodeRequest?.url.searchParams.get("transcodingMaxAudioChannels")).toBe("2");
+    expect(transcodeRequest?.url.searchParams.get("maxVideoBitDepth")).toBe("8");
+    expect(transcodeRequest?.url.searchParams.get("requireAvc")).toBe("true");
+    expect(transcodeRequest?.url.searchParams.has("api_key")).toBe(false);
     vi.useRealTimers();
   });
 

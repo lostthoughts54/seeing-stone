@@ -5,14 +5,18 @@ interface PlaybackApi {
   getDetails(itemId: string): Promise<import("../../shared/contracts").MediaItem>;
   getMediaSourceCapabilities(itemId: string): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
   fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response>;
+  fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response>;
 }
 
 interface PlaybackRecord {
   id: string;
   itemId: string;
   mediaSourceId: string;
+  delivery: "direct" | "transcode";
   requests: Set<AbortController>;
 }
+
+const BROWSER_CONTAINERS = new Set(["mp4", "m4v", "mov", "webm", "ogg", "ogv"]);
 
 export class PlaybackSessionService {
   private current: PlaybackRecord | null = null;
@@ -39,13 +43,24 @@ export class PlaybackSessionService {
       throw error;
     }
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
-    const source = capabilities.sources.find((entry) => entry.supportsDirectStream || entry.supportsDirectPlay) ?? capabilities.sources[0];
+    const directSource = capabilities.sources.find((entry) =>
+      BROWSER_CONTAINERS.has(entry.container?.toLowerCase() || "")
+      && (entry.supportsDirectStream || entry.supportsDirectPlay),
+    );
+    const source = directSource
+      ?? capabilities.sources.find((entry) => entry.supportsTranscoding)
+      ?? capabilities.sources[0];
     if (!source) {
       this.state = { playbackId: null, itemId, phase: "error", source: null, error: "No playable media source is available." };
       throw new AppError("NO_MEDIA_SOURCE", "No playable media source is available.", 422);
     }
+    const delivery = source === directSource ? "direct" : "transcode";
+    if (delivery === "transcode" && !source.supportsTranscoding) {
+      this.state = { playbackId: null, itemId, phase: "error", source: null, error: "This media requires server transcoding, but transcoding is unavailable." };
+      throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
+    }
     const playbackId = randomUUID();
-    this.current = { id: playbackId, itemId, mediaSourceId: source.id, requests: new Set() };
+    this.current = { id: playbackId, itemId, mediaSourceId: source.id, delivery, requests: new Set() };
     this.state = { playbackId, itemId, phase: "ready", source: "server", error: null };
     return {
       playbackId,
@@ -87,12 +102,19 @@ export class PlaybackSessionService {
     playback.requests.add(requestController);
     let upstream: Response;
     try {
-      upstream = await this.api.fetchStaticStream(
-        playback.itemId,
-        playback.mediaSourceId,
-        request.headers.get("range") || undefined,
-        requestController.signal,
-      );
+      upstream = playback.delivery === "transcode"
+        ? await this.api.fetchTranscodedStream(
+          playback.itemId,
+          playback.mediaSourceId,
+          playback.id,
+          requestController.signal,
+        )
+        : await this.api.fetchStaticStream(
+          playback.itemId,
+          playback.mediaSourceId,
+          request.headers.get("range") || undefined,
+          requestController.signal,
+        );
     } catch (error) {
       playback.requests.delete(requestController);
       if (requestController.signal.aborted) return new Response(null, { status: 404 });
@@ -108,6 +130,11 @@ export class PlaybackSessionService {
     for (const name of ["content-type", "content-length", "content-range", "accept-ranges"]) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
+    }
+    if (playback.delivery === "transcode") {
+      headers.set("Content-Type", "video/mp4");
+      headers.delete("Content-Range");
+      headers.delete("Accept-Ranges");
     }
     const body = upstream.body
       ? this.trackBody(upstream.body, requestController, playback)

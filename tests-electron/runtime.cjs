@@ -161,7 +161,7 @@ async function runElectronChild() {
           itemId,
           sources: [{
             id: "runtime-source-id",
-            container: "mkv",
+            container: "mp4",
             size: 4,
             supportsDirectPlay: true,
             supportsDirectStream: true,
