@@ -63,6 +63,14 @@ describe("renderer and preload security boundary", () => {
     expect(preload).toContain("ipcRenderer.removeListener(IPC.playbackStateChanged, receive)");
   });
 
+  it("uses a native BaseWindow host without a Chromium surface covering mpv", async () => {
+    const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
+    expect(player).toContain('import { BaseWindow, BrowserWindow } from "electron"');
+    expect(player).toContain("private host: BaseWindow | null");
+    expect(player).toContain("const host = new BaseWindow({");
+    expect(player).not.toMatch(/const host = new BrowserWindow\s*\(/);
+  });
+
   it("pins hardened BrowserWindow settings and renderer network denial", async () => {
     const main = [
       await readFile("src/main/index.ts", "utf8"),

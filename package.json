@@ -19,6 +19,7 @@
     "test:core": "pnpm run clean && pnpm run build:main && node --test tests-node/*.test.cjs",
     "test:electron": "pnpm run build && node tests-electron/runtime.cjs",
     "test:mpv-runtime": "pnpm run build:main && node scripts/mpv-runtime-acceptance.cjs",
+    "test:mpv-visual": "pnpm run build:main && node scripts/mpv-visual-acceptance.cjs",
     "test:authenticated": "pnpm run build && node scripts/authenticated-parity.cjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"

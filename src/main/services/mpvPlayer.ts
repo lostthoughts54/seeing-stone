@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { BrowserWindow } from "electron";
+import { BaseWindow, BrowserWindow } from "electron";
 import type {
   PlaybackStartResult,
   PlaybackState,
@@ -34,7 +34,7 @@ function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
   };
 }
 
-function hwnd(window: BrowserWindow): number {
+function hwnd(window: BaseWindow): number {
   const value = window.getNativeWindowHandle();
   const handle = value.length >= 8 ? value.readBigUInt64LE() : BigInt(value.readUInt32LE());
   return Number(handle & 0xffffffffn);
@@ -62,7 +62,7 @@ function tracks(value: unknown): { audioTracks: PlaybackTrack[]; subtitleTracks:
 
 export class MpvPlayerService {
   private state = emptyState();
-  private host: BrowserWindow | null = null;
+  private host: BaseWindow | null = null;
   private process: ChildProcess | null = null;
   private ipc: MpvIpcClient | null = null;
   private source: ResolvedPlaybackSource | null = null;
@@ -309,9 +309,12 @@ export class MpvPlayerService {
     throw new Error(`mpv property ${property} was unavailable.`);
   }
 
-  private createHost(): BrowserWindow {
+  private createHost(): BaseWindow {
     const bounds = this.mainWindow.getBounds();
-    const host = new BrowserWindow({
+    // BaseWindow deliberately has no Chromium WebContents surface. On Windows,
+    // attaching mpv to a BrowserWindow HWND can leave its native child window
+    // behind Chromium's compositor: audio plays, but every video pixel is hidden.
+    const host = new BaseWindow({
       parent: this.mainWindow,
       title: "LocalFirst Jellyfin Player",
       x: bounds.x,
@@ -323,13 +326,6 @@ export class MpvPlayerService {
       show: false,
       backgroundColor: "#000000",
       autoHideMenuBar: true,
-      webPreferences: {
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        webSecurity: true,
-        devTools: false,
-      },
     });
     host.setMenu(null);
     host.on("close", (event) => {
