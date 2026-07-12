@@ -37,7 +37,10 @@ function createHarness() {
     getMediaSourceCapabilities: vi.fn(),
   };
   const artwork = { clear: vi.fn(), getUrl: vi.fn() };
-  const playback = { clear: vi.fn(), start: vi.fn(), stop: vi.fn(), getState: vi.fn() };
+  const playback = {
+    clear: vi.fn(), start: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), selectAudio: vi.fn(),
+    selectSubtitle: vi.fn(), setFullscreen: vi.fn(), stop: vi.fn(), getState: vi.fn(),
+  };
   registerIpcHandlers(ipcMain as never, window as never, api as never, artwork as never, playback as never);
   const validEvent = { sender: webContents, senderFrame: frame };
   return { handlers, frame, webContents, window, api, artwork, playback, login, getSafeSession, validEvent };
@@ -46,7 +49,8 @@ function createHarness() {
 describe("IPC authorization and allowlist", () => {
   it("registers exactly the declared narrow channels and no reporting transport", () => {
     const { handlers } = createHarness();
-    expect([...handlers.keys()].sort()).toEqual([...Object.values(IPC)].sort());
+    const invokeChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged);
+    expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
     expect([...handlers.keys()].join(" ")).not.toMatch(/report|sessions\/playing|request|fetch|filesystem|shell|command/i);
   });
 

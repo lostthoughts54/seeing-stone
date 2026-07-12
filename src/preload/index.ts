@@ -13,9 +13,13 @@ import {
   type MediaItem,
   type MediaSourceCapabilities,
   type PlaybackIdInput,
+  type PlaybackFullscreenInput,
+  type PlaybackPauseInput,
+  type PlaybackSeekInput,
   type PlaybackStartInput,
   type PlaybackStartResult,
   type PlaybackState,
+  type PlaybackTrackInput,
   type RpcResult,
   type SafeSession,
   type SearchInput,
@@ -69,8 +73,18 @@ const bridge: JellyfinBridge = {
   },
   playback: {
     start: (input: PlaybackStartInput) => invoke<PlaybackStartResult>(IPC.playbackStart, input),
+    setPaused: (input: PlaybackPauseInput) => invoke<PlaybackState>(IPC.playbackSetPaused, input),
+    seek: (input: PlaybackSeekInput) => invoke<PlaybackState>(IPC.playbackSeek, input),
+    selectAudio: (input: PlaybackTrackInput) => invoke<PlaybackState>(IPC.playbackSelectAudio, input),
+    selectSubtitle: (input: PlaybackTrackInput) => invoke<PlaybackState>(IPC.playbackSelectSubtitle, input),
+    setFullscreen: (input: PlaybackFullscreenInput) => invoke<PlaybackState>(IPC.playbackSetFullscreen, input),
     stop: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackStop, input),
     getState: () => invoke<PlaybackState>(IPC.playbackGetState),
+    subscribe: (listener: (state: PlaybackState) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: PlaybackState) => listener(state);
+      ipcRenderer.on(IPC.playbackStateChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.playbackStateChanged, receive);
+    },
   },
 };
 

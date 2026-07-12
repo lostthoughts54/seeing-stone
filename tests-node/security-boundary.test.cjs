@@ -192,8 +192,9 @@ test("artwork and playback expose only opaque application URLs", async () => {
   });
   const started = await playback.start("movie-1", "resume");
   assert.equal(started.mediaUrl, `jellyfin-media://stream/${started.playbackId}`);
-  assert.equal(JSON.stringify(started).includes("private-source-id"), false);
+  assert.equal(started.mediaSourceId, "private-source-id");
   assert.equal(JSON.stringify(started).includes("http"), false);
+  assert.equal(started.durationTicks, item.runTimeTicks);
 });
 
 test("renderer/preload boundary contains no privileged escape hatch or report channel", async () => {

@@ -10,8 +10,8 @@ export interface AuthoritativePlaybackEvent {
 }
 
 /**
- * Main-only reporting boundary. Milestone 3 will feed this service from mpv's
- * authoritative JSON IPC events; renderer events are never accepted here.
+ * Main-only reporting boundary fed by mpv's authoritative JSON IPC events;
+ * renderer events are never accepted here.
  */
 export class PlaybackReportingService {
   constructor(private readonly api: JellyfinApi, private readonly logger: AppLogger) {}

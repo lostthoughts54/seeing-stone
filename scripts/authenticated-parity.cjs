@@ -7,7 +7,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--authenticated-parity-child";
 const PARENT_ENV = "JELLYFIN_PARITY_PARENT";
-const REQUIRED_TESTS = 11;
+const REQUIRED_TESTS = 15;
 
 if (!process.versions.electron) {
   try {
@@ -69,6 +69,8 @@ async function runElectronChild() {
   let rendererSession = null;
   let ipcChannels = [];
   let playbackToStop = null;
+  let player = null;
+  const playbackReports = [];
   let testsRun = 0;
   let testsPassed = 0;
   let testsFailed = 0;
@@ -94,10 +96,14 @@ async function runElectronChild() {
     const { ArtworkService } = require("../dist/main/services/artwork.js");
     const { DeviceIdentityService } = require("../dist/main/services/deviceIdentity.js");
     const { JellyfinApi } = require("../dist/main/services/jellyfinApi.js");
+    const { logger } = require("../dist/main/services/logger.js");
+    const { MpvPlayerService } = require("../dist/main/services/mpvPlayer.js");
+    const { resolveMpvRuntime } = require("../dist/main/services/mpvRuntime.js");
+    const { PlaybackReportingService } = require("../dist/main/services/playbackReporting.js");
     const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
     const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 
-    ipcChannels = Object.values(IPC);
+    ipcChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged);
     rendererSession = security.hardenSession();
     const identity = await new DeviceIdentityService(
       productionUserData,
@@ -108,18 +114,25 @@ async function runElectronChild() {
     const sessionStore = new SecureSessionStore(productionUserData, security.createSafeStorageProtector());
     const api = new JellyfinApi(identity, sessionStore, async () => { throw coded("EXTERNAL_OPEN_DISABLED"); });
     const artwork = new ArtworkService(api);
-    const playback = new PlaybackSessionService(api);
+    const playbackSource = new PlaybackSessionService(api);
 
     rendererSession.protocol.handle("app", security.serveRendererAsset);
     rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
       try { return await artwork.handle(request); } catch { return new Response(null, { status: 502 }); }
     });
-    rendererSession.protocol.handle("jellyfin-media", async (request) => {
-      try { return await playback.handle(request); } catch { return new Response(null, { status: 502 }); }
-    });
-
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback);
+    const runtime = await resolveMpvRuntime({ packaged: false, resourcesPath: process.resourcesPath, moduleDirectory: resolve(__dirname, "../dist/main") });
+    const reporting = new PlaybackReportingService(api, logger);
+    player = new MpvPlayerService(mainWindow, playbackSource, {
+      acceptAuthoritativeEvent: async (event) => {
+        playbackReports.push({ kind: event.kind, positionTicks: event.positionTicks, paused: event.paused });
+        await reporting.acceptAuthoritativeEvent(event);
+      },
+    }, runtime);
+    player.onState((state) => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
+    });
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, player);
     await mainWindow.loadURL(security.APP_URL);
     await waitForAuthenticated(mainWindow);
 
@@ -134,20 +147,42 @@ async function runElectronChild() {
     await test("seasons and episodes load through typed IPC", () => requireScenario(live, "episodes"));
     await test("opaque authorized artwork loads in the renderer", () => requireScenario(live, "artwork"));
     await test("media-source capabilities are sanitized", () => requireScenario(live, "mediaSources"));
-    await test("narrow playback start returns one opaque source", () => requireScenario(live, "playbackStart"));
-    await test("renderer video accepts the resolved source", () => requireScenario(live, "video"));
-    await test("authorized media protocol returns stream bytes", async () => {
-      if (!live.playback?.mediaUrl || !live.playback?.playbackId) throw coded("NO_PLAYBACK_SESSION");
-      const response = await rendererSession.fetch(live.playback.mediaUrl, {
-        headers: { Range: "bytes=0-65535" },
-        signal: AbortSignal.timeout(60000),
-      });
-      if (response.status !== 200 && response.status !== 206) throw coded("MEDIA_RANGE_STATUS");
-      if (!response.body) throw coded("MEDIA_BODY_MISSING");
-      const reader = response.body.getReader();
-      const chunk = await reader.read();
-      await reader.cancel().catch(() => undefined);
-      if (chunk.done || !chunk.value?.byteLength) throw coded("MEDIA_BYTES_MISSING");
+    await test("UI Play launches main-owned mpv without exposing a source", () => requireScenario(live, "mpvStart"));
+    await test("typed mpv pause and seek controls use authoritative state", () => requireScenario(live, "mpvTransport"));
+    await test("typed mpv track selection remains allowlisted", () => requireScenario(live, "mpvTracks"));
+    await test("Electron-owned mpv fullscreen toggles through typed IPC", () => requireScenario(live, "mpvFullscreen"));
+    await test("embedded mpv output follows Electron player-window resize", async () => {
+      let bounds;
+      try { bounds = player.setWindowSize(960, 640); }
+      catch { throw coded("MPV_HOST_UNAVAILABLE_FOR_RESIZE"); }
+      if (bounds.width !== 960 || bounds.height !== 640) throw coded("MPV_HOST_RESIZE_FAILED");
+      await delay(250);
+      let output;
+      try { output = await player.getOutputDimensions(); }
+      catch { throw coded("MPV_OUTPUT_DIMENSIONS_UNAVAILABLE"); }
+      if (output.width < 900 || output.height < 540) throw coded("MPV_OUTPUT_RESIZE_FAILED");
+    });
+    await test("closing mpv restores the prior route and scroll position", async () => {
+      if (!live.playback?.playbackId) throw coded("MPV_START_DEPENDENCY");
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        await window.jellyfin.playback.stop({ playbackId: ${JSON.stringify(live.playback.playbackId)} });
+        const state = await window.jellyfin.playback.getState();
+        return {
+          stopped: !state.playbackId,
+          detailsVisible: !document.getElementById("detailsView").classList.contains("is-hidden"),
+          scrollTop: document.getElementById("contentScroller").scrollTop,
+        };
+      })()`);
+      if (!result.stopped) throw coded("MPV_STOP_FAILED");
+      if (!result.detailsVisible) throw coded("MPV_ROUTE_NOT_RESTORED");
+      if (Math.abs(result.scrollTop - live.priorScroll) > 1) throw coded("MPV_SCROLL_NOT_RESTORED");
+      playbackToStop = null;
+    });
+    await test("authoritative mpv events drive main-only Jellyfin playback reporting", () => {
+      if (playbackReports[0]?.kind !== "start") throw coded("MPV_REPORT_START_MISSING");
+      if (!playbackReports.some((report) => report.kind === "progress")) throw coded("MPV_REPORT_PROGRESS_MISSING");
+      if (playbackReports.at(-1)?.kind !== "stop") throw coded("MPV_REPORT_STOP_MISSING");
+      if (playbackReports.some((report) => !Number.isFinite(report.positionTicks) || report.positionTicks < 0)) throw coded("MPV_REPORT_POSITION_INVALID");
     });
   } finally {
     if (mainWindow && playbackToStop?.playbackId && !mainWindow.isDestroyed()) {
@@ -156,10 +191,11 @@ async function runElectronChild() {
         `window.jellyfin.playback.stop({ playbackId: ${playbackId} }).catch(() => undefined)`,
       ).catch(() => undefined);
     }
+    await player?.clear().catch(() => undefined);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     for (const channel of ipcChannels) ipcMain.removeHandler(channel);
     if (rendererSession) {
-      for (const scheme of ["app", "jellyfin-artwork", "jellyfin-media"]) {
+      for (const scheme of ["app", "jellyfin-artwork"]) {
         if (rendererSession.protocol.isProtocolHandled(scheme)) rendererSession.protocol.unhandle(scheme);
       }
       await rendererSession.closeAllConnections().catch(() => undefined);
@@ -203,7 +239,7 @@ async function waitForAuthenticated(window) {
 async function runRendererScenarios(window) {
   return window.webContents.executeJavaScript(`(async () => {
     const results = {};
-    const context = { candidates: [], series: [], episodes: [], playback: null };
+    const context = { candidates: [], series: [], episodes: [], playback: null, priorScroll: 0 };
     const safeCode = (error) => {
       const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "SCENARIO_FAILED";
       return /^[A-Z0-9_]{1,64}$/.test(code) ? code : "SCENARIO_FAILED";
@@ -216,7 +252,7 @@ async function runRendererScenarios(window) {
     const waitFor = async (predicate, timeout = 20000) => {
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
-        if (predicate()) return true;
+        if (await predicate()) return true;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return false;
@@ -226,7 +262,7 @@ async function runRendererScenarios(window) {
       if (seen.has(value)) return false;
       seen.add(value);
       for (const [key, entry] of Object.entries(value)) {
-        if (/(?:token|path|headers|mediaSources|mediaStreams|transcodingUrl|directStreamUrl)/i.test(key)) return true;
+        if (/(?:token|path|headers|mediaSources|mediaStreams|mediaUrl|transcodingUrl|directStreamUrl)/i.test(key)) return true;
         if (hasForbiddenKey(entry, seen)) return true;
       }
       return false;
@@ -367,7 +403,7 @@ async function runRendererScenarios(window) {
       return {};
     });
 
-    await run("video", async () => {
+    await run("mpvStart", async () => {
       if (!context.mediaItem) throw coded("MEDIA_SOURCE_DEPENDENCY");
       const input = document.getElementById("searchInput");
       input.value = context.mediaItem.name;
@@ -386,32 +422,62 @@ async function runRendererScenarios(window) {
       card.click();
       const detailsReady = await waitFor(() => !document.getElementById("detailsView").classList.contains("is-hidden") && document.getElementById("detailTitle").textContent === context.mediaItem.name && !document.getElementById("detailPlayButton").disabled);
       if (!detailsReady) throw coded("PLAYBACK_DETAILS_NOT_READY");
+      const scroller = document.getElementById("contentScroller");
+      scroller.scrollTop = Math.min(120, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+      context.priorScroll = scroller.scrollTop;
       document.getElementById("detailPlayButton").click();
-      const video = document.getElementById("videoPlayer");
-      const accepted = await waitFor(() => !document.getElementById("playerView").classList.contains("is-hidden") && video.src.startsWith("jellyfin-media://stream/") && video.readyState >= 1 && !video.error, 60000);
-      if (!accepted) throw coded("VIDEO_SOURCE_REJECTED_" + (context.mediaContainer || "UNKNOWN"));
-      document.getElementById("closePlayerButton").click();
-      const stopped = await waitFor(() => document.getElementById("playerView").classList.contains("is-hidden"));
-      if (!stopped) throw coded("PLAYBACK_UI_DID_NOT_CLOSE");
-      const stopDeadline = Date.now() + 10000;
-      while (Date.now() < stopDeadline) {
-        const state = await window.jellyfin.playback.getState();
-        if (!state.playbackId) return {};
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw coded("PLAYBACK_STOP_TIMEOUT");
-    });
-
-    await run("playbackStart", async () => {
-      if (!context.mediaItem || !context.capabilities) throw coded("MEDIA_SOURCE_DEPENDENCY");
-      const playback = await window.jellyfin.playback.start({ itemId: context.mediaItem.id, resumeMode: "resume" });
-      const sourceIds = context.capabilities.sources.map((source) => source.id);
-      if (!playback.playbackId || !playback.mediaUrl.startsWith("jellyfin-media://stream/") || playback.mediaUrl.includes(context.mediaItem.id) || sourceIds.some((id) => playback.mediaUrl.includes(id))) throw coded("PLAYBACK_URL_NOT_OPAQUE");
-      context.playback = playback;
+      let playback = null;
+      const accepted = await waitFor(async () => {
+        playback = await window.jellyfin.playback.getState();
+        return Boolean(playback.playbackId && ["playing", "paused", "buffering"].includes(playback.phase) && playback.durationTicks > 0);
+      }, 60000);
+      if (!accepted || !playback || hasForbiddenKey(playback) || JSON.stringify(playback).includes("jellyfin-media://")) throw coded("MPV_SOURCE_NOT_ACCEPTED_" + (context.mediaContainer || "UNKNOWN"));
+      context.playback = { playbackId: playback.playbackId };
       return {};
     });
 
-    return { results, playback: context.playback ? { playbackId: context.playback.playbackId, mediaUrl: context.playback.mediaUrl } : null };
+    await run("mpvTransport", async () => {
+      if (!context.playback) throw coded("MPV_START_DEPENDENCY");
+      const playbackId = context.playback.playbackId;
+      try { await window.jellyfin.playback.setPaused({ playbackId, paused: true }); }
+      catch { throw coded("MPV_PAUSE_COMMAND_FAILED"); }
+      const paused = await waitFor(async () => (await window.jellyfin.playback.getState()).paused === true);
+      if (!paused) throw coded("MPV_PAUSE_FAILED");
+      let beforeSeek;
+      try { beforeSeek = await window.jellyfin.playback.getState(); }
+      catch { throw coded("MPV_STATE_BEFORE_SEEK_FAILED"); }
+      const target = Math.min(5 * 10000000, Math.max(0, beforeSeek.durationTicks - (2 * 10000000)));
+      try { await window.jellyfin.playback.seek({ playbackId, positionTicks: target }); }
+      catch { throw coded("MPV_SEEK_COMMAND_FAILED"); }
+      const sought = await waitFor(async () => Math.abs((await window.jellyfin.playback.getState()).positionTicks - target) < 2 * 10000000);
+      if (!sought) throw coded("MPV_SEEK_FAILED");
+      try { await window.jellyfin.playback.setPaused({ playbackId, paused: false }); }
+      catch { throw coded("MPV_RESUME_COMMAND_FAILED"); }
+      return {};
+    });
+
+    await run("mpvTracks", async () => {
+      if (!context.playback) throw coded("MPV_START_DEPENDENCY");
+      const playbackId = context.playback.playbackId;
+      const state = await window.jellyfin.playback.getState();
+      const audio = state.audioTracks.find((track) => track.selected) || state.audioTracks[0] || null;
+      const subtitle = state.subtitleTracks.find((track) => track.selected) || state.subtitleTracks[0] || null;
+      await window.jellyfin.playback.selectAudio({ playbackId, trackId: audio?.id || null });
+      await window.jellyfin.playback.selectSubtitle({ playbackId, trackId: subtitle?.id || null });
+      return {};
+    });
+
+    await run("mpvFullscreen", async () => {
+      if (!context.playback) throw coded("MPV_START_DEPENDENCY");
+      const playbackId = context.playback.playbackId;
+      const entered = await window.jellyfin.playback.setFullscreen({ playbackId, fullscreen: true });
+      if (!entered.fullscreen) throw coded("MPV_FULLSCREEN_ENTER_FAILED");
+      const left = await window.jellyfin.playback.setFullscreen({ playbackId, fullscreen: false });
+      if (left.fullscreen) throw coded("MPV_FULLSCREEN_EXIT_FAILED");
+      return {};
+    });
+
+    return { results, playback: context.playback ? { playbackId: context.playback.playbackId } : null, priorScroll: context.priorScroll };
   })()`, true);
 }
 

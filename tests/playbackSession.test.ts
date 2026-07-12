@@ -29,7 +29,7 @@ const item: MediaItem = {
 };
 
 describe("PlaybackSessionService", () => {
-  it("returns only an opaque application URL and resolves the authenticated stream internally", async () => {
+  it("keeps the authenticated source main-only and resolves an opaque internal stream", async () => {
     const fetchStaticStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const fetchTranscodedStream = vi.fn();
     const service = new PlaybackSessionService({
@@ -42,10 +42,12 @@ describe("PlaybackSessionService", () => {
     });
     const started = await service.start(item.id, "resume");
     expect(started.mediaUrl).toBe(`jellyfin-media://stream/${started.playbackId}`);
-    expect(JSON.stringify(started)).not.toContain("source-1");
+    expect(started.mediaSourceId).toBe("source-1");
     expect(JSON.stringify(started)).not.toContain("http");
     expect(started.resumePositionTicks).toBe(50000000);
+    expect(started.durationTicks).toBe(100000000);
     expect((await service.handle(new Request(started.mediaUrl))).status).toBe(200);
+    expect((await service.handle(new Request(started.mediaUrl))).headers.get("Accept-Ranges")).toBe("bytes");
     expect(fetchStaticStream).toHaveBeenCalledWith("movie-1", "source-1", undefined, expect.any(AbortSignal));
     expect(fetchTranscodedStream).not.toHaveBeenCalled();
 
@@ -77,8 +79,10 @@ describe("PlaybackSessionService", () => {
     expect((await pending).status).toBe(404);
   });
 
-  it("uses a main-owned MP4 transcode for MKV without exposing the Jellyfin URL", async () => {
-    const fetchStaticStream = vi.fn();
+  it("direct-plays MKV through the main proxy for mpv without browser transcoding", async () => {
+    const fetchStaticStream = vi.fn(async () => new Response("matroska-video", {
+      headers: { "Content-Type": "video/x-matroska", "Accept-Ranges": "bytes" },
+    }));
     const fetchTranscodedStream = vi.fn(async () => new Response("transcoded-video", {
       headers: { "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes" },
     }));
@@ -95,19 +99,19 @@ describe("PlaybackSessionService", () => {
     const response = await service.handle(new Request(started.mediaUrl, { headers: { Range: "bytes=100-200" } }));
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Content-Type")).toBe("video/mp4");
-    expect(response.headers.has("Accept-Ranges")).toBe(false);
-    expect(fetchStaticStream).not.toHaveBeenCalled();
-    expect(fetchTranscodedStream).toHaveBeenCalledWith("movie-1", "mkv-source", started.playbackId, expect.any(AbortSignal));
-    expect(JSON.stringify(started)).not.toContain("mkv-source");
+    expect(response.headers.get("Content-Type")).toBe("video/x-matroska");
+    expect(response.headers.get("Accept-Ranges")).toBe("bytes");
+    expect(fetchStaticStream).toHaveBeenCalledWith("movie-1", "mkv-source", "bytes=100-200", expect.any(AbortSignal));
+    expect(fetchTranscodedStream).not.toHaveBeenCalled();
+    expect(started.mediaSourceId).toBe("mkv-source");
     expect(JSON.stringify(started)).not.toContain("http");
   });
 
-  it("fails clearly when an incompatible container cannot be transcoded", async () => {
+  it("fails clearly when Jellyfin offers neither direct delivery nor transcoding", async () => {
     const service = new PlaybackSessionService({
       async getDetails() { return item; },
       async getMediaSourceCapabilities() {
-        return { itemId: item.id, sources: [{ id: "mkv-source", container: "mkv", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: false }] };
+        return { itemId: item.id, sources: [{ id: "unavailable-source", container: "bin", size: 5, supportsDirectPlay: false, supportsDirectStream: false, supportsTranscoding: false }] };
       },
       fetchStaticStream: vi.fn(),
       fetchTranscodedStream: vi.fn(),

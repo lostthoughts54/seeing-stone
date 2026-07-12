@@ -85,16 +85,32 @@ export interface MediaSourceCapabilities {
 
 export interface PlaybackStartResult {
   playbackId: string;
-  mediaUrl: string;
   resumePositionTicks: number;
-  source: "server";
+  durationTicks: number;
+  source: "server" | "local";
+}
+
+export interface PlaybackTrack {
+  id: number;
+  type: "audio" | "subtitle";
+  title: string | null;
+  language: string | null;
+  selected: boolean;
 }
 
 export interface PlaybackState {
   playbackId: string | null;
   itemId: string | null;
-  phase: "idle" | "resolving" | "ready" | "stopped" | "error";
-  source: "server" | null;
+  phase: "idle" | "resolving" | "loading" | "playing" | "paused" | "buffering" | "ended" | "stopped" | "error";
+  source: "server" | "local" | null;
+  positionTicks: number;
+  durationTicks: number;
+  paused: boolean;
+  buffering: boolean;
+  seekable: boolean;
+  fullscreen: boolean;
+  audioTracks: PlaybackTrack[];
+  subtitleTracks: PlaybackTrack[];
   error: string | null;
 }
 
@@ -111,6 +127,10 @@ export interface EpisodesInput { seriesId: string; seasonId: string }
 export interface ArtworkInput { itemId: string; kind: ImageKind; tag?: string; width?: number; height?: number }
 export interface PlaybackStartInput { itemId: string; resumeMode: "resume" | "start-over" }
 export interface PlaybackIdInput { playbackId: string }
+export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
+export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
+export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
+export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
 
 export interface JellyfinBridge {
   server: {
@@ -145,8 +165,14 @@ export interface JellyfinBridge {
   };
   playback: {
     start(input: PlaybackStartInput): Promise<PlaybackStartResult>;
+    setPaused(input: PlaybackPauseInput): Promise<PlaybackState>;
+    seek(input: PlaybackSeekInput): Promise<PlaybackState>;
+    selectAudio(input: PlaybackTrackInput): Promise<PlaybackState>;
+    selectSubtitle(input: PlaybackTrackInput): Promise<PlaybackState>;
+    setFullscreen(input: PlaybackFullscreenInput): Promise<PlaybackState>;
     stop(input: PlaybackIdInput): Promise<PlaybackState>;
     getState(): Promise<PlaybackState>;
+    subscribe(listener: (state: PlaybackState) => void): () => void;
   };
 }
 
@@ -168,6 +194,12 @@ export const IPC = {
   artworkGetUrl: "artwork:get-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
   playbackStart: "playback:start",
+  playbackSetPaused: "playback:set-paused",
+  playbackSeek: "playback:seek",
+  playbackSelectAudio: "playback:select-audio",
+  playbackSelectSubtitle: "playback:select-subtitle",
+  playbackSetFullscreen: "playback:set-fullscreen",
   playbackStop: "playback:stop",
   playbackGetState: "playback:get-state",
+  playbackStateChanged: "playback:state-changed",
 } as const;

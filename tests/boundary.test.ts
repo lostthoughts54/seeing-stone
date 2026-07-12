@@ -41,11 +41,26 @@ describe("renderer and preload security boundary", () => {
       "src/main/services/deviceIdentity.ts",
       "src/main/services/secureSession.ts",
       "src/main/services/jellyfinApi.ts",
+      "src/main/services/mpvIpc.ts",
+      "src/main/services/mpvPlayer.ts",
+      "src/main/services/mpvRuntime.ts",
+      "src/main/services/playbackProxy.ts",
       "src/main/services/playbackSession.ts",
       "src/main/services/serverDiscovery.ts",
     ];
     const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/readFileSync|writeFileSync|execSync|spawnSync|sendSync/);
+  });
+
+  it("keeps mpv executable, arguments, capabilities, and paths out of renderer IPC", async () => {
+    const contracts = await readFile("src/shared/contracts.ts", "utf8");
+    const preload = await readFile("src/preload/index.ts", "utf8");
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    const rendererBoundary = `${contracts}\n${preload}\n${renderer}`;
+    expect(rendererBoundary).not.toMatch(/mediaUrl|input-ipc-server|--wid|mpv\.exe|child_process|spawn\s*\(/i);
+    expect(rendererBoundary).not.toMatch(/interface\s+Playback\w*Input[^}]*?(?:path|url|args|command|executable)\s*:/is);
+    expect(preload).toContain("ipcRenderer.on(IPC.playbackStateChanged, receive)");
+    expect(preload).toContain("ipcRenderer.removeListener(IPC.playbackStateChanged, receive)");
   });
 
   it("pins hardened BrowserWindow settings and renderer network denial", async () => {
@@ -75,9 +90,10 @@ describe("renderer and preload security boundary", () => {
       "const rendererSession = hardenSession()",
       'rendererSession.protocol.handle("app"',
       'rendererSession.protocol.handle("jellyfin-artwork"',
-      'rendererSession.protocol.handle("jellyfin-media"',
       "registerIpcHandlers(ipcMain, mainWindow",
     ]) expect(main).toContain(wiring);
+    expect(main).not.toContain('rendererSession.protocol.handle("jellyfin-media"');
+    expect(main).toContain('"media-src \'none\'"');
   });
 
   it("guards reused artwork elements and playback resolution against stale async results", async () => {

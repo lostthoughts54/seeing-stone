@@ -9,15 +9,19 @@ import {
   itemIdSchema,
   libraryItemsSchema,
   loginSchema,
+  playbackFullscreenSchema,
   playbackIdSchema,
+  playbackPauseSchema,
+  playbackSeekSchema,
   playbackStartSchema,
+  playbackTrackSchema,
   searchSchema,
   serverUrlSchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
 import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
-import type { PlaybackSessionService } from "./services/playbackSession";
+import type { MpvPlayerService } from "./services/mpvPlayer";
 import { discoverServers } from "./services/serverDiscovery";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
@@ -55,7 +59,7 @@ export function registerIpcHandlers(
   window: BrowserWindow,
   api: JellyfinApi,
   artwork: ArtworkService,
-  playback: PlaybackSessionService,
+  playback: MpvPlayerService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -74,19 +78,19 @@ export function registerIpcHandlers(
   register(IPC.sessionLogin, async (input) => {
     const value = loginSchema.strict().parse(input);
     artwork.clear();
-    playback.clear();
+    await playback.clear();
     return api.login(value.connectionId, value.username, value.password, value.remember);
   });
   register(IPC.sessionRestore, async () => {
     const session = await api.restore();
     artwork.clear();
-    playback.clear();
+    await playback.clear();
     return session;
   });
   register(IPC.sessionGetState, () => api.getSafeSession());
   register(IPC.sessionLogout, async () => {
     artwork.clear();
-    playback.clear();
+    await playback.clear();
     return api.logout();
   });
   register(IPC.homeGet, () => api.getHome());
@@ -108,6 +112,26 @@ export function registerIpcHandlers(
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
     return playback.start(value.itemId, value.resumeMode);
+  });
+  register(IPC.playbackSetPaused, (input) => {
+    const value = playbackPauseSchema.strict().parse(input);
+    return playback.setPaused(value.playbackId, value.paused);
+  });
+  register(IPC.playbackSeek, (input) => {
+    const value = playbackSeekSchema.strict().parse(input);
+    return playback.seek(value.playbackId, value.positionTicks);
+  });
+  register(IPC.playbackSelectAudio, (input) => {
+    const value = playbackTrackSchema.strict().parse(input);
+    return playback.selectAudio(value.playbackId, value.trackId);
+  });
+  register(IPC.playbackSelectSubtitle, (input) => {
+    const value = playbackTrackSchema.strict().parse(input);
+    return playback.selectSubtitle(value.playbackId, value.trackId);
+  });
+  register(IPC.playbackSetFullscreen, (input) => {
+    const value = playbackFullscreenSchema.strict().parse(input);
+    return playback.setFullscreen(value.playbackId, value.fullscreen);
   });
   register(IPC.playbackStop, (input) => playback.stop(playbackIdSchema.strict().parse(input).playbackId));
   register(IPC.playbackGetState, () => playback.getState());

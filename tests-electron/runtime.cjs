@@ -189,10 +189,6 @@ async function runElectronChild() {
     rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
       try { return await artwork.handle(request); } catch { return new Response(null, { status: 502 }); }
     });
-    rendererSession.protocol.handle("jellyfin-media", async (request) => {
-      try { return await playback.handle(request); } catch { return new Response(null, { status: 502 }); }
-    });
-
     await test("registered app protocol serves strict production security headers", async () => {
       assert.equal(rendererSession.protocol.isProtocolHandled("app"), true);
       const response = await rendererSession.fetch(security.APP_URL, { cache: "no-store" });
@@ -265,7 +261,8 @@ async function runElectronChild() {
       assert.equal(artworkFetchCount, 1);
     });
 
-    await test("playback protocol authorizes exactly one opaque active session URL", async () => {
+    await test("renderer has no media protocol while playback resolution stays main-only", async () => {
+      assert.equal(rendererSession.protocol.isProtocolHandled("jellyfin-media"), false);
       const firstItem = "first-secret-item";
       const first = await playback.start(firstItem, "resume");
       assert.match(first.mediaUrl, /^jellyfin-media:\/\/stream\/[0-9a-f-]{36}$/);
@@ -273,31 +270,17 @@ async function runElectronChild() {
       assert.equal(first.mediaUrl.includes("runtime-source-id"), false);
       assert.equal(first.resumePositionTicks, 12345);
 
-      const firstResponse = await rendererSession.fetch(first.mediaUrl, {
-        cache: "no-store",
-        headers: { Range: "bytes=0-3" },
-      });
-      assert.equal(firstResponse.status, 206);
-      assert.equal(firstResponse.headers.get("cache-control"), "no-store");
-      assert.equal(firstResponse.headers.get("content-range"), "bytes 0-3/4");
-      assert.equal(streamRequests.length, 1);
-      assert.equal(streamRequests[0].itemId, firstItem);
-      assert.equal(streamRequests[0].mediaSourceId, "runtime-source-id");
-      assert.equal(streamRequests[0].range, "bytes=0-3");
-      assert.ok(streamRequests[0].signal instanceof AbortSignal);
-      assert.equal(streamRequests[0].signal.aborted, false);
-      assert.deepEqual([...new Uint8Array(await firstResponse.arrayBuffer())], [1, 2, 3, 4]);
+      await assert.rejects(rendererSession.fetch(first.mediaUrl, { cache: "no-store" }));
+      assert.equal(streamRequests.length, 0);
 
       const second = await playback.start("second-secret-item", "start-over");
       assert.notEqual(second.mediaUrl, first.mediaUrl);
       assert.equal(second.resumePositionTicks, 0);
-      assert.equal((await rendererSession.fetch(first.mediaUrl, { cache: "no-store" })).status, 404);
-      const secondResponse = await rendererSession.fetch(second.mediaUrl, { cache: "no-store" });
-      assert.equal(secondResponse.status, 200);
-      await secondResponse.arrayBuffer();
+      await assert.rejects(rendererSession.fetch(first.mediaUrl, { cache: "no-store" }));
+      await assert.rejects(rendererSession.fetch(second.mediaUrl, { cache: "no-store" }));
 
       playback.stop(second.playbackId);
-      assert.equal((await rendererSession.fetch(second.mediaUrl, { cache: "no-store" })).status, 404);
+      await assert.rejects(rendererSession.fetch(second.mediaUrl, { cache: "no-store" }));
     });
 
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
@@ -408,7 +391,7 @@ async function runElectronChild() {
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
-        playback: ["getState", "start", "stop"],
+        playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -660,7 +643,7 @@ async function runElectronChild() {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     for (const channel of ipcChannels) ipcMain.removeHandler(channel);
     if (rendererSession) {
-      for (const scheme of ["app", "jellyfin-artwork", "jellyfin-media"]) {
+      for (const scheme of ["app", "jellyfin-artwork"]) {
         if (rendererSession.protocol.isProtocolHandled(scheme)) rendererSession.protocol.unhandle(scheme);
       }
       await rendererSession.closeAllConnections().catch(() => undefined);

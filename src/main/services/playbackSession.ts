@@ -16,19 +16,43 @@ interface PlaybackRecord {
   requests: Set<AbortController>;
 }
 
-const BROWSER_CONTAINERS = new Set(["mp4", "m4v", "mov", "webm", "ogg", "ogv"]);
+export interface ResolvedPlaybackSource extends PlaybackStartResult {
+  itemId: string;
+  mediaSourceId: string;
+  mediaUrl: string;
+  delivery: "direct" | "transcode";
+}
+
+function state(overrides: Partial<PlaybackState> = {}): PlaybackState {
+  return {
+    playbackId: null,
+    itemId: null,
+    phase: "idle",
+    source: null,
+    positionTicks: 0,
+    durationTicks: 0,
+    paused: false,
+    buffering: false,
+    seekable: false,
+    fullscreen: false,
+    audioTracks: [],
+    subtitleTracks: [],
+    error: null,
+    ...overrides,
+  };
+}
 
 export class PlaybackSessionService {
   private current: PlaybackRecord | null = null;
   private revision = 0;
-  private state: PlaybackState = { playbackId: null, itemId: null, phase: "idle", source: null, error: null };
+  private state: PlaybackState = state();
 
   constructor(private readonly api: PlaybackApi) {}
 
-  async start(itemId: string, resumeMode: "resume" | "start-over"): Promise<PlaybackStartResult> {
+  async start(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource> {
     const revision = ++this.revision;
     this.abortCurrent();
-    this.state = { playbackId: null, itemId, phase: "resolving", source: "server", error: null };
+    this.state = state({ itemId, phase: "resolving", source: "server" });
     let details: Awaited<ReturnType<PlaybackApi["getDetails"]>>;
     let capabilities: Awaited<ReturnType<PlaybackApi["getMediaSourceCapabilities"]>>;
     try {
@@ -38,35 +62,36 @@ export class PlaybackSessionService {
       ]);
     } catch (error) {
       if (revision === this.revision) {
-        this.state = { playbackId: null, itemId, phase: "error", source: null, error: "Playback could not be resolved." };
+        this.state = state({ itemId, phase: "error", error: "Playback could not be resolved." });
       }
       throw error;
     }
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
-    const directSource = capabilities.sources.find((entry) =>
-      BROWSER_CONTAINERS.has(entry.container?.toLowerCase() || "")
-      && (entry.supportsDirectStream || entry.supportsDirectPlay),
-    );
+    const directSource = capabilities.sources.find((entry) => entry.supportsDirectStream || entry.supportsDirectPlay);
     const source = directSource
       ?? capabilities.sources.find((entry) => entry.supportsTranscoding)
       ?? capabilities.sources[0];
     if (!source) {
-      this.state = { playbackId: null, itemId, phase: "error", source: null, error: "No playable media source is available." };
+      this.state = state({ itemId, phase: "error", error: "No playable media source is available." });
       throw new AppError("NO_MEDIA_SOURCE", "No playable media source is available.", 422);
     }
     const delivery = source === directSource ? "direct" : "transcode";
     if (delivery === "transcode" && !source.supportsTranscoding) {
-      this.state = { playbackId: null, itemId, phase: "error", source: null, error: "This media requires server transcoding, but transcoding is unavailable." };
+      this.state = state({ itemId, phase: "error", error: "This media requires server transcoding, but transcoding is unavailable." });
       throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
     }
     const playbackId = randomUUID();
     this.current = { id: playbackId, itemId, mediaSourceId: source.id, delivery, requests: new Set() };
-    this.state = { playbackId, itemId, phase: "ready", source: "server", error: null };
+    this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks: details.runTimeTicks });
     return {
       playbackId,
+      itemId,
+      mediaSourceId: source.id,
       mediaUrl: `jellyfin-media://stream/${playbackId}`,
       resumePositionTicks: resumeMode === "resume" ? details.userData.playbackPositionTicks : 0,
+      durationTicks: details.runTimeTicks,
       source: "server",
+      delivery,
     };
   }
 
@@ -75,7 +100,7 @@ export class PlaybackSessionService {
     this.revision += 1;
     this.abortCurrent();
     this.current = null;
-    this.state = { playbackId: null, itemId: null, phase: "stopped", source: null, error: null };
+    this.state = state({ phase: "stopped" });
     return this.state;
   }
 
@@ -87,7 +112,7 @@ export class PlaybackSessionService {
     this.revision += 1;
     this.abortCurrent();
     this.current = null;
-    this.state = { playbackId: null, itemId: null, phase: "idle", source: null, error: null };
+    this.state = state();
   }
 
   async handle(request: Request): Promise<Response> {
@@ -135,6 +160,8 @@ export class PlaybackSessionService {
       headers.set("Content-Type", "video/mp4");
       headers.delete("Content-Range");
       headers.delete("Accept-Ranges");
+    } else {
+      headers.set("Accept-Ranges", "bytes");
     }
     const body = upstream.body
       ? this.trackBody(upstream.body, requestController, playback)

@@ -867,9 +867,6 @@ async function playItem(item: MediaItem): Promise<void> {
   playerMeta.textContent = item.type === "Episode"
     ? [episodeCode(item), item.name].filter(Boolean).join(" - ")
     : metadataParts(item).join(" - ");
-  playerView.classList.remove("is-hidden");
-  document.body.classList.add("is-playing");
-  closePlayerButton.focus();
 
   let resolved;
   try {
@@ -888,25 +885,12 @@ async function playItem(item: MediaItem): Promise<void> {
     return;
   }
   state.playbackId = resolved.playbackId;
-  playerSourceBadge.textContent = "Streaming";
-  videoPlayer.src = resolved.mediaUrl;
-  videoPlayer.onloadedmetadata = () => {
-    const resumeSeconds = resolved.resumePositionTicks / TICKS_PER_SECOND;
-    if (resumeSeconds > 2 && resumeSeconds < videoPlayer.duration - 5) videoPlayer.currentTime = resumeSeconds;
-  };
-  videoPlayer.load();
-  videoPlayer.play().catch(() => {
-    showToast("The stream is ready. Press play in the video controls.");
-  });
+  playerSourceBadge.textContent = "mpv";
 }
 
 async function closePlayer(): Promise<void> {
   state.playbackRequestId += 1;
   const playbackId = state.playbackId;
-  videoPlayer.pause();
-  videoPlayer.removeAttribute("src");
-  videoPlayer.load();
-  videoPlayer.onloadedmetadata = null;
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
   state.playbackItem = null;
@@ -914,6 +898,13 @@ async function closePlayer(): Promise<void> {
   state.lastFocusElement?.focus?.();
   if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
+
+window.jellyfin.playback.subscribe((playback) => {
+  if (playback.playbackId || !state.playbackId) return;
+  state.playbackId = null;
+  state.playbackItem = null;
+  state.lastFocusElement?.focus?.();
+});
 
 function resetSignedInState(): void {
   if (state.searchTimer) clearTimeout(state.searchTimer);

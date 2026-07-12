@@ -19,8 +19,11 @@ import { DeviceIdentityService } from "./services/deviceIdentity";
 import { JellyfinApi } from "./services/jellyfinApi";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
+import { MpvPlayerService } from "./services/mpvPlayer";
+import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
+import { IPC } from "../shared/contracts";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -48,21 +51,23 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
-  const playback = new PlaybackSessionService(api);
-  // This service is intentionally main-only. Milestone 3 will feed it
-  // authoritative mpv events; renderer video events are never accepted.
+  const playbackSource = new PlaybackSessionService(api);
   const playbackReporting = new PlaybackReportingService(api, logger);
-  void playbackReporting;
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
   await rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
     try { return await artwork.handle(request); } catch { return new Response(null, { status: 502 }); }
   });
-  await rendererSession.protocol.handle("jellyfin-media", async (request) => {
-    try { return await playback.handle(request); } catch { return new Response(null, { status: 502 }); }
-  });
-
   mainWindow = createWindow();
+  const runtime = await resolveMpvRuntime({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    moduleDirectory: __dirname,
+  });
+  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, runtime);
+  playback.onState((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
+  });
   registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback);
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {

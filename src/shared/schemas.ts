@@ -37,3 +37,15 @@ export const playbackStartSchema = z.object({
 });
 
 export const playbackIdSchema = z.object({ playbackId: z.string().uuid() });
+
+export const playbackPauseSchema = playbackIdSchema.extend({ paused: z.boolean() });
+
+export const playbackSeekSchema = playbackIdSchema.extend({
+  positionTicks: z.number().int().min(0).max(864000000000),
+});
+
+export const playbackTrackSchema = playbackIdSchema.extend({
+  trackId: z.number().int().min(1).max(65535).nullable(),
+});
+
+export const playbackFullscreenSchema = playbackIdSchema.extend({ fullscreen: z.boolean() });

@@ -1,0 +1,8 @@
+{
+  "version": "v0.41.0-dev-ge5486b96d",
+  "commit": "e5486b96d7d06dd148337899bfdc46bf25101663",
+  "platform": "x86_64-pc-windows-msvc",
+  "archive": "mpv-v0.41.0-dev-ge5486b96d-29054345280-x86_64-pc-windows-msvc.zip",
+  "url": "https://github.com/mpv-player/mpv/releases/download/git-release/mpv-v0.41.0-dev-ge5486b96d-29054345280-x86_64-pc-windows-msvc.zip",
+  "sha256": "356220c841b732d2497acad3385f66dd099744bb0b7ab67bd70382d5509fa358"
+}
