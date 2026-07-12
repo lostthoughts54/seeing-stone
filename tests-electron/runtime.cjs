@@ -428,37 +428,55 @@ async function runElectronChild() {
       assert.equal(bridge.webviewLoadUrl, "undefined");
     });
 
-    await test("rendered poster cards use fixed 2:3 cover geometry", async () => {
+    await test("rendered media cards use fixed cover geometry", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(() => {
         const card = document.createElement("button");
         const art = document.createElement("span");
         const poster = document.createElement("img");
+        const landscapeCard = document.createElement("button");
+        const landscapeArt = document.createElement("span");
+        const landscapeImage = document.createElement("img");
         const episode = document.createElement("span");
         const episodeImage = document.createElement("img");
         card.className = "media-card poster";
         card.style.width = "180px";
         art.className = "media-art";
+        landscapeCard.className = "media-card landscape";
+        landscapeCard.style.width = "320px";
+        landscapeArt.className = "media-art";
         episode.className = "episode-thumb";
         art.append(poster);
+        landscapeArt.append(landscapeImage);
+        landscapeCard.append(landscapeArt);
         episode.append(episodeImage);
         card.append(art);
-        document.body.append(card, episode);
-        const rectangle = art.getBoundingClientRect();
+        document.body.append(card, landscapeCard, episode);
+        const posterRectangle = art.getBoundingClientRect();
+        const landscapeRectangle = landscapeArt.getBoundingClientRect();
         const value = {
-          width: rectangle.width,
-          height: rectangle.height,
+          posterWidth: posterRectangle.width,
+          posterHeight: posterRectangle.height,
           posterFit: getComputedStyle(poster).objectFit,
           posterPosition: getComputedStyle(poster).objectPosition,
+          landscapeWidth: landscapeRectangle.width,
+          landscapeHeight: landscapeRectangle.height,
+          landscapeFit: getComputedStyle(landscapeImage).objectFit,
+          landscapePosition: getComputedStyle(landscapeImage).objectPosition,
           episodeFit: getComputedStyle(episodeImage).objectFit,
         };
         card.remove();
+        landscapeCard.remove();
         episode.remove();
         return value;
       })()`);
-      assert.ok(result.width > 0);
-      assert.ok(Math.abs(result.height - (result.width * 1.5)) < 1);
+      assert.ok(result.posterWidth > 0);
+      assert.ok(Math.abs(result.posterHeight - (result.posterWidth * 1.5)) < 1);
       assert.equal(result.posterFit, "cover");
       assert.equal(result.posterPosition, "50% 50%");
+      assert.ok(result.landscapeWidth > 0);
+      assert.ok(Math.abs(result.landscapeHeight - (result.landscapeWidth * (9 / 16))) < 1);
+      assert.equal(result.landscapeFit, "cover");
+      assert.equal(result.landscapePosition, "50% 50%");
       assert.equal(result.episodeFit, "contain");
     });
 

@@ -682,7 +682,7 @@ select {
   width: 100%;
 }
 
-.media-card.poster .media-art img {
+.media-card .media-art img {
   object-fit: cover;
   object-position: center;
 }

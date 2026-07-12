@@ -23,10 +23,11 @@ describe("renderer and preload security boundary", () => {
     expect(renderer).not.toMatch(/window\.open|ipcRenderer|child_process/);
   });
 
-  it("keeps poster cards uniform without changing other artwork fit behavior", async () => {
+  it("keeps poster and landscape cards uniform without changing other artwork fit behavior", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
     expect(styles).toMatch(/\.media-card\.poster\s+\.media-art\s*\{[^}]*aspect-ratio:\s*2\s*\/\s*3/s);
-    expect(styles).toMatch(/\.media-card\.poster\s+\.media-art\s+img\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center;/s);
+    expect(styles).toMatch(/\.media-card\.landscape\s+\.media-art\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
+    expect(styles).toMatch(/\.media-card\s+\.media-art\s+img\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center;/s);
     expect(styles).toMatch(/\.episode-thumb\s+img,[\s\S]*?\.detail-poster\s*\{[^}]*object-fit:\s*contain;/);
   });
 
