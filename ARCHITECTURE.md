@@ -33,25 +33,37 @@ Client starts
 -> authenticate and keep that server as the library source of truth
 ```
 
-## Suggested layers
+## Current layers
 
-- `JellyfinApi`: auth, libraries, metadata, images, streaming URLs, playback reporting.
-- `ServerDiscovery`: native LAN discovery plus manual and remembered-server fallbacks.
-- `LocalIndex`: maps Jellyfin item IDs to downloaded files and health/state.
-- `DownloadQueue`: creates and tracks download jobs.
-- `PlaybackResolver`: picks local or server source.
-- `PlayerShell`: browser/native video UI.
-- `ClientViews`: home, search, library, detail, season, episode list.
+- `JellyfinApi`: main-owned authentication, libraries, metadata, images, streaming, and playback reporting.
+- `ServerDiscovery`: native LAN discovery plus manual server entry.
+- `SecureSessionStore`: OS-protected token persistence with no plaintext fallback.
+- `SqlitePersistenceService`: asynchronous main-side facade over the dedicated SQLite worker.
+- `PersistenceWorker`: migrations and all synchronous SQLite work off Electron's event loop.
+- `PlaybackSessionService`: main-only Jellyfin source authorization.
+- `PlaybackProxy`: private loopback capability consumed only by mpv.
+- `MpvPlayerService`: native player control and authoritative playback events.
+- `ClientViews`: sandboxed Home, Search, Library, Details, Season, and Episode UI.
 
-## Desktop path
+Planned layers build on the SQLite boundary without changing renderer trust:
 
-`server.js` is the first native companion: it owns UDP discovery now and can later own local downloads and filesystem access. Once server playback is proven, package this foundation into a desktop shell:
+- `DownloadManager`: asynchronous transfers and state transitions.
+- `MediaProbe`: utility-process or worker-owned validation.
+- `LocalIndex`: verified Jellyfin-item-to-local-version lookup.
+- `PlaybackResolver`: verified local version first, then Jellyfin fallback.
+- `OfflineSynchronization`: revision coalescing and conflict-safe reporting.
 
-- Tauri or Electron shell.
-- SQLite local index.
-- Native filesystem access.
-- mpv playback for better MKV/HEVC/subtitle support.
-- Secure token storage.
+## Desktop process model
+
+Electron main owns every privileged capability. The renderer is sandboxed, context-isolated, has Node integration disabled, and communicates only through the typed preload bridge.
+
+Potentially blocking work is isolated:
+
+- SQLite uses a dedicated worker thread.
+- mpv is a controlled child process with narrow JSON IPC.
+- Large transfers and media probing will use asynchronous services, workers, or Electron utility processes in later milestones.
+
+See [DATABASE.md](DATABASE.md) for the versioned persistence model.
 
 ## Mobile path
 

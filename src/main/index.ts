@@ -24,15 +24,29 @@ import { MpvPlayerService } from "./services/mpvPlayer";
 import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
+import { SqlitePersistenceService } from "./services/persistence";
 import { IPC } from "../shared/contracts";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
 
 let mainWindow: BrowserWindow | null = null;
+let persistence: SqlitePersistenceService | null = null;
+let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
 if (!ownsSingleInstance) app.quit();
+
+app.on("before-quit", (event) => {
+  if (!persistence || persistenceClosing) return;
+  event.preventDefault();
+  const activePersistence = persistence;
+  persistence = null;
+  void activePersistence.close().finally(() => {
+    persistenceClosing = true;
+    app.quit();
+  });
+});
 
 app.on("second-instance", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -42,6 +56,8 @@ app.on("second-instance", () => {
 });
 
 if (ownsSingleInstance) app.whenReady().then(async () => {
+  persistence = new SqlitePersistenceService(app.getPath("userData"));
+  await persistence.open();
   const rendererSession = hardenSession();
   const identity = await new DeviceIdentityService(
     app.getPath("userData"),

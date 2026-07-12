@@ -1,34 +1,43 @@
-# LocalFirst Jellyfin Client Foundation
+# LocalFirst Jellyfin
 
-Current interface milestone: `0.3.0`.
+Current application version: `0.4.0`.
 
-This is the first Jellyfin-first milestone. It is separate from the earlier local-file prototype.
+This repository contains the Windows Electron client built from the accepted `0.3.0` interface baseline.
 
 ## What this milestone does
 
 - Signs into a Jellyfin server with username/password.
 - Finds Jellyfin servers on the local network using Jellyfin's UDP discovery protocol.
-- Saves the Jellyfin session token locally for quick reloads.
+- Remembers Jellyfin sessions only through OS-protected storage; unavailable protection means signing in again.
 - Loads the signed-in user's libraries.
 - Builds a Plex-style home from Continue Watching, Next Up, and recently added library rows.
 - Opens dedicated movie, show, and episode detail views.
 - Loads show seasons and episode rows.
 - Displays Jellyfin poster/backdrop images when available.
 - Preserves primary artwork aspect ratios instead of cropping posters to fill cards.
-- Streams playable Jellyfin video items through the browser video player.
-- Opens playback in a full-window player that returns to the prior browsing position.
-- Sends best-effort playback start/progress/stop events back to Jellyfin.
+- Streams playable Jellyfin items through a main-controlled native mpv window.
+- Returns to the prior route and scroll position after playback.
+- Sends authoritative playback reports from main-side mpv events.
+- Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
+- Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
 - Keeps source resolution behind the Play action so the future local-first choice does not clutter browsing.
 
 ## Try it
 
-Run the local client host, then open the address it prints:
+Install dependencies and the bundled mpv runtime once:
 
 ```powershell
-node server.js
+pnpm install
+pnpm setup:mpv
 ```
 
-The client searches the LAN automatically. Select a discovered server, then enter a username and password. A server URL can still be entered manually when discovery is disabled or the server is remote.
+Start the development application:
+
+```powershell
+pnpm start
+```
+
+If `pnpm` is not installed globally, the same commands can be run as `npx pnpm install`, `npx pnpm setup:mpv`, and `npx pnpm start`.
 
 Example server URLs:
 
@@ -36,20 +45,18 @@ Example server URLs:
 - `http://localhost:8096`
 - `https://your-domain.example`
 
-## Important prototype notes
+## Verification
 
-- Browser playback depends on browser codec support. Some MKV, HEVC, subtitle, and audio combinations may not play until this becomes a desktop app with mpv/native playback.
-- LAN discovery uses UDP port `7359`, the same discovery path used by Jellyfin clients. A plain web page cannot send UDP, so `server.js` is the first small native companion for the client.
-- Multi-adapter machines can advertise a VPN address first. The companion also checks the standard Jellyfin public-info endpoint on the active physical LAN and prefers that matching server address.
-- Jellyfin can disable automatic discovery. Manual server entry remains available for that case and for remote servers.
-- The session token is stored in `localStorage` for prototype convenience. A desktop app should store it in a safer native credential store.
+```powershell
+pnpm test
+pnpm test:mpv-runtime
+pnpm test:mpv-visual
+pnpm test:mpv-completion
+pnpm test:authenticated
+```
 
-## Next milestone
+The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Add the local-first layer:
+## Milestone boundary
 
-1. Create a local download index keyed by Jellyfin item ID.
-2. Add a download queue with states: queued, downloading, ready, failed, missing.
-3. Download a single movie or episode into an app-controlled folder.
-4. Change playback resolution to: local file first, then Jellyfin stream fallback.
-5. Keep watch progress synced to Jellyfin in both cases.
+Completed foundations are committed one milestone at a time. SQLite persistence does not itself start downloads or expose local paths to the renderer. The next accepted milestone will add manual downloads using this database boundary.

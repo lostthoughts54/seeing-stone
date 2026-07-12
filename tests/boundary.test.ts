@@ -48,10 +48,29 @@ describe("renderer and preload security boundary", () => {
       "src/main/services/playbackProxy.ts",
       "src/main/services/playbackSession.ts",
       "src/main/services/playerPreferences.ts",
+      "src/main/services/persistence.ts",
+      "src/main/services/persistenceTypes.ts",
       "src/main/services/serverDiscovery.ts",
     ];
     const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/readFileSync|writeFileSync|execSync|spawnSync|sendSync/);
+  });
+
+  it("keeps synchronous SQLite isolated in a main-owned worker with no renderer database API", async () => {
+    const service = await readFile("src/main/services/persistence.ts", "utf8");
+    const types = await readFile("src/main/services/persistenceTypes.ts", "utf8");
+    const worker = await readFile("src/main/services/persistenceWorker.ts", "utf8");
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    const preload = await readFile("src/preload/index.ts", "utf8");
+    const contracts = await readFile("src/shared/contracts.ts", "utf8");
+    expect(service).toContain('new Worker(join(__dirname, "persistenceWorker.js")');
+    expect(service).not.toMatch(/DatabaseSync|node:sqlite|readFileSync|writeFileSync/);
+    expect(worker).toContain('from "node:sqlite"');
+    expect(worker).toContain("new DatabaseSync");
+    expect(worker).toContain("PRAGMA journal_mode = WAL");
+    expect(worker).toContain("PRAGMA quick_check");
+    expect(`${service}\n${types}\n${worker}`).not.toMatch(/accessToken|password|authorization|api[_-]?key/i);
+    expect(`${renderer}\n${preload}\n${contracts}`).not.toMatch(/sqlite|localPath|storageRoot|download_jobs|playback_revisions/i);
   });
 
   it("keeps mpv executable, arguments, capabilities, and paths out of renderer IPC", async () => {
