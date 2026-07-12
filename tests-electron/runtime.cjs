@@ -108,6 +108,7 @@ async function runElectronChild() {
 
     let artworkFetchCount = 0;
     let connectionCount = 0;
+    let downloadStartCount = 0;
     let expireHome = false;
     const streamRequests = [];
     const safeSession = {
@@ -184,6 +185,18 @@ async function runElectronChild() {
     };
     const artwork = new ArtworkService(api);
     const playback = new PlaybackSessionService(api);
+    const downloads = {
+      async activate() {},
+      async deactivate() {},
+      async list() { return []; },
+      async start() { downloadStartCount += 1; throw new Error("not used"); },
+      async pause() { throw new Error("not used"); },
+      async resume() { throw new Error("not used"); },
+      async retry() { throw new Error("not used"); },
+      async cancel() { throw new Error("not used"); },
+      async delete() { throw new Error("not used"); },
+      async setKeep() { throw new Error("not used"); },
+    };
 
     rendererSession.protocol.handle("app", security.serveRendererAsset);
     rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
@@ -284,7 +297,7 @@ async function runElectronChild() {
     });
 
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback);
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloads);
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });
@@ -391,6 +404,7 @@ async function runElectronChild() {
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
+        downloads: ["cancel", "delete", "list", "pause", "resume", "retry", "setKeep", "start", "subscribe"],
         playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
@@ -619,6 +633,21 @@ async function runElectronChild() {
       assert.equal(rejected.retryable, false);
       assert.equal(connectionCount, 1);
       assert.doesNotMatch(rejected.message, /Authorization|must-not-cross/);
+
+      const rejectedDownload = await mainWindow.webContents.executeJavaScript(`window.jellyfin.downloads.start({
+        itemId: "movie-1",
+        mediaSourceId: "private-source",
+        url: "https://ipc-runtime.invalid/video?api_key=must-not-cross",
+        path: "D:\\\\Sensitive\\\\movie.mkv"
+      }).then(
+        () => ({ accepted: true }),
+        (error) => ({ accepted: false, code: error.code, message: error.message, retryable: error.retryable }),
+      )`);
+      assert.equal(rejectedDownload.accepted, false);
+      assert.equal(rejectedDownload.code, "INVALID_INPUT");
+      assert.equal(rejectedDownload.retryable, false);
+      assert.equal(downloadStartCount, 0);
+      assert.doesNotMatch(rejectedDownload.message, /private-source|ipc-runtime|Sensitive|must-not-cross/);
     });
 
     await test("real IPC rejects a foreign window even at the trusted app origin", async () => {

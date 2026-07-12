@@ -1095,6 +1095,148 @@ select {
   width: 100%;
 }
 
+/* Download manager */
+
+.downloads-scrim {
+  background: rgba(0, 0, 0, 0.62);
+  inset: 0;
+  position: fixed;
+  z-index: 80;
+}
+
+.downloads-panel {
+  background: #111114;
+  border-left: 1px solid var(--line-strong);
+  bottom: 0;
+  box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  padding: 22px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 430px;
+  z-index: 90;
+}
+
+.downloads-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.downloads-header h2 {
+  font-size: 1.7rem;
+  margin: 0;
+}
+
+.downloads-header .eyebrow {
+  margin-bottom: 3px;
+}
+
+.downloads-header > button {
+  border-radius: 999px;
+  font-size: 1.7rem;
+  height: 42px;
+  padding: 0;
+  width: 42px;
+}
+
+.downloads-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 14px 0 18px;
+}
+
+.downloads-list {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.download-card {
+  background: #19191d;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.download-card-heading {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.download-card-heading > div {
+  min-width: 0;
+}
+
+.download-card-heading strong,
+.download-card-heading span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-card-heading span,
+.download-size,
+.download-error {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.download-status {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.download-progress {
+  accent-color: var(--accent);
+  height: 5px;
+  width: 100%;
+}
+
+.download-error {
+  color: #ff9b9b;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.download-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.download-controls button {
+  min-height: 34px;
+  padding: 0 11px;
+}
+
+.download-keep {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.download-keep input {
+  accent-color: var(--accent);
+}
+
 /* Player */
 
 .player-view {

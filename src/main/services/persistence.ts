@@ -7,6 +7,7 @@ import { redactText } from "./logger";
 import type {
   CatalogIdentityInput,
   CreateDownloadInput,
+  DownloadBundleRecord,
   DownloadJobRecord,
   LocalVersionRecord,
   MediaItemRecordInput,
@@ -49,6 +50,40 @@ function safeIdentity(input: { serverId: string; userId: string; itemId?: string
     serverId: boundedText(input.serverId, "Server identity", 256),
     userId: boundedText(input.userId, "User identity", 256),
     ...(input.itemId === undefined ? {} : { itemId: boundedText(input.itemId, "Item identity", 256) }),
+  };
+}
+
+function normalizeLocalVersion(
+  input: RegisterLocalVersionInput,
+  overrides: { localVersionId?: string; downloadId?: string | null } = {},
+): RegisterLocalVersionInput & { localVersionId: string; pathKey: string } {
+  const identity = safeIdentity(input);
+  const storageRoot = resolve(boundedText(input.storageRoot, "Storage root", 32767));
+  const localPath = resolve(boundedText(input.localPath, "Local path", 32767));
+  if (!isAbsolute(input.storageRoot) || !isAbsolute(input.localPath)) {
+    throw new AppError("INVALID_LOCAL_PATH", "The local media path must be absolute.", 400);
+  }
+  const child = relative(storageRoot, localPath);
+  if (!child || child.startsWith("..") || isAbsolute(child)) {
+    throw new AppError("INVALID_LOCAL_PATH", "The local media path is outside the authorized storage root.", 400);
+  }
+  const expectedSize = optionalNonnegativeInteger(input.expectedSize, "Expected size");
+  const actualSize = optionalNonnegativeInteger(input.actualSize, "Actual size");
+  if (input.fileState === "finalized" && (input.probeState !== "valid" || actualSize === null || (expectedSize !== null && actualSize !== expectedSize))) {
+    throw new AppError("LOCAL_VERSION_NOT_VERIFIED", "A local version cannot be finalized until size and media probing succeed.", 422);
+  }
+  return {
+    ...input,
+    ...identity,
+    localVersionId: boundedText(overrides.localVersionId ?? input.localVersionId ?? randomUUID(), "Local version identity", 256),
+    mediaSourceId: optionalText(input.mediaSourceId, "Media source identity", 256),
+    downloadId: optionalText(overrides.downloadId === undefined ? input.downloadId : overrides.downloadId, "Download identity", 256),
+    storageRoot,
+    localPath,
+    pathKey: localPath.toLocaleLowerCase("en-US"),
+    expectedSize,
+    actualSize,
+    container: optionalText(input.container, "Container", 64),
   };
 }
 
@@ -144,6 +179,39 @@ export class SqlitePersistenceService {
     }) as Promise<DownloadJobRecord>;
   }
 
+  async createDownloadBundle(
+    download: CreateDownloadInput,
+    localVersion: RegisterLocalVersionInput,
+  ): Promise<DownloadBundleRecord> {
+    const identity = safeIdentity(download);
+    const downloadId = download.downloadId
+      ? boundedText(download.downloadId, "Download identity", 256)
+      : randomUUID();
+    const normalizedDownload: CreateDownloadInput & { downloadId: string } = {
+      ...download,
+      ...identity,
+      downloadId,
+      mediaSourceId: optionalText(download.mediaSourceId, "Media source identity", 256),
+      qualityProfile: optionalText(download.qualityProfile, "Quality profile", 128),
+      expectedSize: optionalNonnegativeInteger(download.expectedSize, "Expected size"),
+    };
+    const normalizedLocalVersion = normalizeLocalVersion(localVersion, { downloadId });
+    if (normalizedLocalVersion.serverId !== normalizedDownload.serverId
+      || normalizedLocalVersion.userId !== normalizedDownload.userId
+      || normalizedLocalVersion.itemId !== normalizedDownload.itemId
+      || normalizedLocalVersion.mediaSourceId !== normalizedDownload.mediaSourceId) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Download and local-version identities do not match.", 400);
+    }
+    return this.invoke({
+      kind: "createDownloadBundle",
+      download: normalizedDownload,
+      localVersion: {
+        ...normalizedLocalVersion,
+        downloadId,
+      },
+    }) as Promise<DownloadBundleRecord>;
+  }
+
   async transitionDownload(input: TransitionDownloadInput): Promise<DownloadJobRecord> {
     return this.invoke({
       kind: "transitionDownload",
@@ -163,37 +231,35 @@ export class SqlitePersistenceService {
     return this.invoke({ kind: "getDownload", downloadId: boundedText(downloadId, "Download identity", 256) }) as Promise<DownloadJobRecord | null>;
   }
 
+  async getDownloadBundle(downloadId: string): Promise<DownloadBundleRecord | null> {
+    return this.invoke({ kind: "getDownloadBundle", downloadId: boundedText(downloadId, "Download identity", 256) }) as Promise<DownloadBundleRecord | null>;
+  }
+
+  async listDownloadBundles(serverId: string, userId: string): Promise<DownloadBundleRecord[]> {
+    const identity = safeIdentity({ serverId, userId });
+    return this.invoke({ kind: "listDownloadBundles", serverId: identity.serverId, userId: identity.userId }) as Promise<DownloadBundleRecord[]>;
+  }
+
+  async setDownloadKeep(downloadId: string, keepDownloaded: boolean): Promise<DownloadBundleRecord> {
+    return this.invoke({
+      kind: "setDownloadKeep",
+      downloadId: boundedText(downloadId, "Download identity", 256),
+      keepDownloaded,
+    }) as Promise<DownloadBundleRecord>;
+  }
+
+  async setDownloadExpectedSize(downloadId: string, expectedSize: number): Promise<DownloadBundleRecord> {
+    return this.invoke({
+      kind: "setDownloadExpectedSize",
+      downloadId: boundedText(downloadId, "Download identity", 256),
+      expectedSize: nonnegativeInteger(expectedSize, "Expected size"),
+    }) as Promise<DownloadBundleRecord>;
+  }
+
   async registerLocalVersion(input: RegisterLocalVersionInput): Promise<LocalVersionRecord> {
-    const identity = safeIdentity(input);
-    const storageRoot = resolve(boundedText(input.storageRoot, "Storage root", 32767));
-    const localPath = resolve(boundedText(input.localPath, "Local path", 32767));
-    if (!isAbsolute(input.storageRoot) || !isAbsolute(input.localPath)) {
-      throw new AppError("INVALID_LOCAL_PATH", "The local media path must be absolute.", 400);
-    }
-    const child = relative(storageRoot, localPath);
-    if (!child || child.startsWith("..") || isAbsolute(child)) {
-      throw new AppError("INVALID_LOCAL_PATH", "The local media path is outside the authorized storage root.", 400);
-    }
-    const expectedSize = optionalNonnegativeInteger(input.expectedSize, "Expected size");
-    const actualSize = optionalNonnegativeInteger(input.actualSize, "Actual size");
-    if (input.fileState === "finalized" && (input.probeState !== "valid" || actualSize === null || (expectedSize !== null && actualSize !== expectedSize))) {
-      throw new AppError("LOCAL_VERSION_NOT_VERIFIED", "A local version cannot be finalized until size and media probing succeed.", 422);
-    }
     return this.invoke({
       kind: "registerLocalVersion",
-      input: {
-        ...input,
-        ...identity,
-        localVersionId: input.localVersionId ? boundedText(input.localVersionId, "Local version identity", 256) : randomUUID(),
-        mediaSourceId: optionalText(input.mediaSourceId, "Media source identity", 256),
-        downloadId: optionalText(input.downloadId, "Download identity", 256),
-        storageRoot,
-        localPath,
-        pathKey: localPath.toLocaleLowerCase("en-US"),
-        expectedSize,
-        actualSize,
-        container: optionalText(input.container, "Container", 64),
-      },
+      input: normalizeLocalVersion(input),
     }) as Promise<LocalVersionRecord>;
   }
 

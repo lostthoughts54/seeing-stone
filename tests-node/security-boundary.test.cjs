@@ -11,7 +11,7 @@ const { redactText, sanitizeLogValue } = require("../dist/main/services/logger.j
 const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
 const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 const { connectionScore } = require("../dist/main/services/serverDiscovery.js");
-const { loginSchema, playbackStartSchema, searchSchema } = require("../dist/shared/schemas.js");
+const { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema } = require("../dist/shared/schemas.js");
 
 const secretSession = {
   serverUrl: "http://127.0.0.1:8096",
@@ -209,6 +209,11 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   assert.doesNotMatch(renderer, /from\s+["'](?:node:|electron|.*\/main\/)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^,]+,\s*ipcRenderer/);
   assert.doesNotMatch(contracts, /reportStart|reportProgress|reportStop|Sessions\/Playing/);
+  const downloadContract = contracts.slice(
+    contracts.indexOf("export interface DownloadSummary"),
+    contracts.indexOf("export type RpcResult"),
+  );
+  assert.doesNotMatch(downloadContract, /localPath|storageRoot|mediaSourceId|authenticatedUrl|headers|command|args/);
   for (const setting of [
     "contextIsolation: true",
     "sandbox: true",
@@ -238,6 +243,13 @@ test("IPC schemas reject extra headers, paths, commands, and arguments", () => {
   }));
   assert.throws(() => searchSchema.strict().parse({ query: "Movie", path: "D:\\Sensitive" }));
   assert.throws(() => playbackStartSchema.strict().parse({ itemId: "movie-1", resumeMode: "resume", command: "mpv", args: ["--script"] }));
+  assert.throws(() => downloadStartSchema.strict().parse({
+    itemId: "movie-1",
+    mediaSourceId: "private-source",
+    url: "http://127.0.0.1:8096/video?api_key=token",
+    path: "D:\\Sensitive\\movie.mkv",
+  }));
+  assert.throws(() => downloadIdSchema.strict().parse({ downloadId: "D:\\Sensitive\\movie.mkv" }));
 });
 
 test("physical LAN discovery outranks VPN and virtual adapters", () => {

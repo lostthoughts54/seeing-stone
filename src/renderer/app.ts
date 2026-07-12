@@ -1,4 +1,4 @@
-import type { DiscoveredServer, ImageKind, LibrarySummary, MediaItem, SafeSession } from "../shared/contracts";
+import type { DiscoveredServer, DownloadSummary, ImageKind, LibrarySummary, MediaItem, SafeSession } from "../shared/contracts";
 
 const TICKS_PER_SECOND = 10000000;
 type Route = "home" | "library" | "search" | "details";
@@ -33,6 +33,7 @@ const profileInitial = byId<HTMLElement>("profileInitial");
 const profileMenu = byId<HTMLElement>("profileMenu");
 const userLabel = byId<HTMLElement>("userLabel");
 const serverLabel = byId<HTMLElement>("serverLabel");
+const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
 
@@ -72,6 +73,7 @@ const detailGenres = byId<HTMLElement>("detailGenres");
 const detailPlayButton = byId<HTMLButtonElement>("detailPlayButton");
 const detailPlayLabel = byId<HTMLElement>("detailPlayLabel");
 const detailDownloadButton = byId<HTMLButtonElement>("detailDownloadButton");
+const detailDownloadLabel = byId<HTMLElement>("detailDownloadLabel");
 const detailTrailerButton = byId<HTMLButtonElement>("detailTrailerButton");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
@@ -86,6 +88,10 @@ const playerTitle = byId<HTMLElement>("playerTitle");
 const playerMeta = byId<HTMLElement>("playerMeta");
 const playerSourceBadge = byId<HTMLElement>("playerSourceBadge");
 const closePlayerButton = byId<HTMLButtonElement>("closePlayerButton");
+const downloadsScrim = byId<HTMLElement>("downloadsScrim");
+const downloadsPanel = byId<HTMLElement>("downloadsPanel");
+const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
+const downloadsList = byId<HTMLElement>("downloadsList");
 const toast = byId<HTMLElement>("toast");
 
 interface RendererState {
@@ -111,6 +117,7 @@ interface RendererState {
   playbackItem: MediaItem | null;
   playbackId: string | null;
   playbackRequestId: number;
+  downloads: DownloadSummary[];
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
   searchRequestId: number;
@@ -140,6 +147,7 @@ const state: RendererState = {
   playbackItem: null,
   playbackId: null,
   playbackRequestId: 0,
+  downloads: [],
   lastFocusElement: null,
   searchTimer: null,
   searchRequestId: 0,
@@ -453,7 +461,10 @@ async function loadInitialData(): Promise<void> {
   showMain();
   renderLoadingRows(homeRows);
   try {
-    await loadHome();
+    await Promise.all([
+      loadHome(),
+      refreshDownloads().catch((error) => showToast(errorMessage(error, "Downloads could not be loaded."))),
+    ]);
     setRoute("home");
   } catch (error) {
     if (errorCode(error) === "SESSION_EXPIRED") {
@@ -627,13 +638,16 @@ function renderDetails(item: MediaItem): void {
   detailPosterFallback.textContent = initials(item.name);
   if (posterSuitable) setImage(detailPoster, detailPosterFallback, item, "Primary", { width: 520, height: 780 });
 
-  detailDownloadButton.disabled = !["Movie", "Series", "Episode"].includes(item.type);
-  detailDownloadButton.onclick = () => noteDownloadIntent(item);
+  const downloadable = item.type === "Movie" || item.type === "Episode";
+  detailDownloadButton.disabled = !downloadable;
+  detailDownloadButton.dataset.downloadItem = downloadable ? item.id : "";
+  detailDownloadButton.onclick = downloadable ? () => startDownload(item) : null;
   detailTrailerButton.disabled = !item.hasTrailer;
   detailTrailerButton.onclick = item.hasTrailer
     ? () => window.jellyfin.items.openTrailer({ itemId: item.id }).catch((error) => showToast(errorMessage(error, "The trailer could not be opened.")))
     : null;
   updateDetailPlayButton();
+  syncVisibleDownloadButtons();
 }
 
 function updateDetailPlayButton(): void {
@@ -771,13 +785,15 @@ function renderEpisodes(): void {
     play.textContent = episode.userData?.playbackPositionTicks ? "Resume" : "Play";
     play.addEventListener("click", () => playItem(episode));
     download.type = "button";
+    download.dataset.downloadItem = episode.id;
     download.textContent = "Download";
-    download.addEventListener("click", () => noteDownloadIntent(episode));
+    download.addEventListener("click", () => startDownload(episode));
     actions.append(play, download);
 
     row.append(thumb, copy, actions);
     episodeList.append(row);
   }
+  syncVisibleDownloadButtons();
 }
 
 async function openLibraryCategory(type: "Movie" | "Series"): Promise<void> {
@@ -854,8 +870,171 @@ async function runSearch(query: string): Promise<void> {
   }
 }
 
-function noteDownloadIntent(item: MediaItem): void {
-  showToast(`${item.name}: downloads are not active in this build yet.`);
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+  const amount = value / (1024 ** index);
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+}
+
+function downloadForItem(itemId: string): DownloadSummary | undefined {
+  return state.downloads.find((download) => download.itemId === itemId && download.state !== "missing");
+}
+
+function downloadButtonLabel(download: DownloadSummary | undefined): string {
+  if (!download) return "Download";
+  if (download.state === "downloading") return download.progressPercent === null ? "Downloading" : `${download.progressPercent}%`;
+  return {
+    queued: "Queued",
+    paused: "Paused",
+    downloaded: "Downloaded",
+    failed: "Failed",
+    missing: "Download",
+  }[download.state];
+}
+
+function syncVisibleDownloadButtons(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-item]")) {
+    const itemId = button.dataset.downloadItem || "";
+    const label = downloadButtonLabel(downloadForItem(itemId));
+    if (button === detailDownloadButton) detailDownloadLabel.textContent = label;
+    else button.textContent = label;
+  }
+}
+
+function openDownloads(): void {
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  downloadsScrim.classList.remove("is-hidden");
+  downloadsPanel.classList.remove("is-hidden");
+  closeDownloadsButton.focus();
+}
+
+function closeDownloads(): void {
+  downloadsScrim.classList.add("is-hidden");
+  downloadsPanel.classList.add("is-hidden");
+}
+
+async function refreshDownloads(): Promise<void> {
+  state.downloads = await window.jellyfin.downloads.list();
+  renderDownloads();
+  syncVisibleDownloadButtons();
+}
+
+async function startDownload(item: MediaItem): Promise<void> {
+  const existing = downloadForItem(item.id);
+  if (existing) {
+    openDownloads();
+    return;
+  }
+  try {
+    const download = await window.jellyfin.downloads.start({ itemId: item.id });
+    state.downloads = [download, ...state.downloads.filter((entry) => entry.downloadId !== download.downloadId)];
+    renderDownloads();
+    syncVisibleDownloadButtons();
+    openDownloads();
+  } catch (error) {
+    showToast(errorMessage(error, "The download could not be started."));
+  }
+}
+
+async function performDownloadAction(download: DownloadSummary, action: "pause" | "resume" | "retry" | "cancel" | "delete"): Promise<void> {
+  try {
+    if (action === "pause") await window.jellyfin.downloads.pause({ downloadId: download.downloadId });
+    else if (action === "resume") await window.jellyfin.downloads.resume({ downloadId: download.downloadId });
+    else if (action === "retry") await window.jellyfin.downloads.retry({ downloadId: download.downloadId });
+    else if (action === "cancel") await window.jellyfin.downloads.cancel({ downloadId: download.downloadId });
+    else await window.jellyfin.downloads.delete({ downloadId: download.downloadId });
+    await refreshDownloads();
+  } catch (error) {
+    showToast(errorMessage(error, `The download could not ${action}.`));
+  }
+}
+
+function renderDownloads(): void {
+  downloadsList.replaceChildren();
+  if (!state.downloads.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No downloads yet. Choose Download on a movie or episode.";
+    downloadsList.append(empty);
+    return;
+  }
+  for (const download of state.downloads) {
+    const card = document.createElement("article");
+    const heading = document.createElement("div");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    const type = document.createElement("span");
+    const status = document.createElement("span");
+    const size = document.createElement("span");
+    const controls = document.createElement("div");
+    card.className = "download-card";
+    heading.className = "download-card-heading";
+    title.textContent = download.name;
+    type.textContent = download.itemType;
+    status.className = "download-status";
+    status.textContent = download.state;
+    copy.append(title, type);
+    heading.append(copy, status);
+    card.append(heading);
+
+    if (download.expectedSize !== null) {
+      const progress = document.createElement("progress");
+      progress.className = "download-progress";
+      progress.max = download.expectedSize;
+      progress.value = Math.min(download.expectedSize, download.bytesDownloaded);
+      progress.setAttribute("aria-label", `${download.progressPercent ?? 0} percent downloaded`);
+      card.append(progress);
+    }
+    size.className = "download-size";
+    size.textContent = download.expectedSize === null
+      ? formatBytes(download.bytesDownloaded)
+      : `${formatBytes(download.bytesDownloaded)} of ${formatBytes(download.expectedSize)}`;
+    card.append(size);
+    if (download.error) {
+      const error = document.createElement("p");
+      error.className = "download-error";
+      error.textContent = download.error.message;
+      card.append(error);
+    }
+
+    controls.className = "download-controls";
+    const action = (label: string, kind: "pause" | "resume" | "retry" | "cancel" | "delete"): void => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => { void performDownloadAction(download, kind); });
+      controls.append(button);
+    };
+    if (download.canPause) action("Pause", "pause");
+    if (download.canResume) action("Resume", "resume");
+    if (download.canRetry) action("Retry", "retry");
+    if (download.canCancel) action("Cancel", "cancel");
+    if (download.canDelete) action("Delete copy", "delete");
+
+    const keep = document.createElement("label");
+    const checkbox = document.createElement("input");
+    keep.className = "download-keep";
+    checkbox.type = "checkbox";
+    checkbox.checked = download.keepDownloaded;
+    checkbox.addEventListener("change", async () => {
+      checkbox.disabled = true;
+      try {
+        await window.jellyfin.downloads.setKeep({ downloadId: download.downloadId, keepDownloaded: checkbox.checked });
+        await refreshDownloads();
+      } catch (error) {
+        checkbox.checked = !checkbox.checked;
+        checkbox.disabled = false;
+        showToast(errorMessage(error, "Keep Downloaded could not be changed."));
+      }
+    });
+    keep.append(checkbox, document.createTextNode("Keep downloaded"));
+    controls.append(keep);
+    card.append(controls);
+    downloadsList.append(card);
+  }
 }
 
 async function playItem(item: MediaItem): Promise<void> {
@@ -895,6 +1074,7 @@ async function closePlayer(): Promise<void> {
   document.body.classList.remove("is-playing");
   state.playbackItem = null;
   state.playbackId = null;
+  state.downloads = [];
   state.lastFocusElement?.focus?.();
   if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
@@ -960,7 +1140,9 @@ function resetSignedInState(): void {
   detailPlayButton.onclick = null;
   detailPlayLabel.textContent = "Play";
   detailDownloadButton.disabled = true;
+  detailDownloadButton.dataset.downloadItem = "";
   detailDownloadButton.onclick = null;
+  detailDownloadLabel.textContent = "Download";
   detailTrailerButton.disabled = true;
   detailTrailerButton.onclick = null;
 
@@ -982,6 +1164,8 @@ function resetSignedInState(): void {
   profileButton.setAttribute("aria-expanded", "false");
   toast.textContent = "";
   toast.classList.add("is-hidden");
+  downloadsList.replaceChildren();
+  closeDownloads();
   setButtonActive(libraryMoviesButton, true);
   setButtonActive(libraryShowsButton, false);
   setRoute("home");
@@ -1077,6 +1261,10 @@ refreshButton.addEventListener("click", async () => {
   await loadInitialData();
 });
 
+downloadsButton.addEventListener("click", () => openDownloads());
+closeDownloadsButton.addEventListener("click", closeDownloads);
+downloadsScrim.addEventListener("click", closeDownloads);
+
 logoutButton.addEventListener("click", async () => {
   await closePlayer();
   try {
@@ -1100,9 +1288,17 @@ document.addEventListener("keydown", (event) => {
   } else if (!profileMenu.classList.contains("is-hidden")) {
     profileMenu.classList.add("is-hidden");
     profileButton.setAttribute("aria-expanded", "false");
+  } else if (!downloadsPanel.classList.contains("is-hidden")) {
+    closeDownloads();
   } else if (state.currentRoute === "details") {
     returnFromDetails();
   }
+});
+
+window.jellyfin.downloads.subscribe((downloads) => {
+  state.downloads = downloads;
+  renderDownloads();
+  syncVisibleDownloadButtons();
 });
 
 void bootstrap();

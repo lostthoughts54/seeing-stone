@@ -92,6 +92,7 @@
           <div id="profileMenu" class="profile-menu is-hidden">
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
+            <button id="downloadsButton" type="button">Downloads</button>
             <button id="refreshButton" type="button">Refresh Home</button>
             <button id="logoutButton" type="button">Sign Out</button>
           </div>
@@ -168,7 +169,7 @@
                     </button>
                     <button id="detailDownloadButton" type="button" disabled>
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
-                      Download
+                      <span id="detailDownloadLabel">Download</span>
                     </button>
                     <button id="detailTrailerButton" type="button" disabled>
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"></rect><path d="m10 9 5 3-5 3z"></path></svg>
@@ -217,6 +218,19 @@
         <button id="closePlayerButton" class="player-close" type="button" aria-label="Close player" title="Close player">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg>
         </button>
+      </section>
+
+      <div id="downloadsScrim" class="downloads-scrim is-hidden"></div>
+      <section id="downloadsPanel" class="downloads-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="downloadsTitle">
+        <header class="downloads-header">
+          <div>
+            <p class="eyebrow">Offline media</p>
+            <h2 id="downloadsTitle">Downloads</h2>
+          </div>
+          <button id="closeDownloadsButton" type="button" aria-label="Close downloads" title="Close downloads">×</button>
+        </header>
+        <p class="downloads-note">Downloads are kept until you delete them. If storage fills up, transfers pause for manual cleanup.</p>
+        <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
       </section>
 
       <div id="toast" class="toast is-hidden" role="status"></div>

@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { join } from "node:path";
 import {
   app,
   type BrowserWindow,
@@ -16,6 +17,7 @@ import {
 import { registerIpcHandlers } from "./ipc";
 import { ArtworkService } from "./services/artwork";
 import { DeviceIdentityService } from "./services/deviceIdentity";
+import { DownloadManager } from "./services/downloadManager";
 import { JellyfinApi } from "./services/jellyfinApi";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
@@ -25,6 +27,7 @@ import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
 import { SqlitePersistenceService } from "./services/persistence";
+import { MediaProbeService } from "./services/mediaProbe";
 import { IPC } from "../shared/contracts";
 
 registerPrivilegedSchemes();
@@ -32,6 +35,7 @@ app.enableSandbox();
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
+let downloadManager: DownloadManager | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -41,8 +45,11 @@ app.on("before-quit", (event) => {
   if (!persistence || persistenceClosing) return;
   event.preventDefault();
   const activePersistence = persistence;
+  const activeDownloads = downloadManager;
   persistence = null;
-  void activePersistence.close().finally(() => {
+  downloadManager = null;
+  const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
+  void stopDownloads.then(() => activePersistence.close()).finally(() => {
     persistenceClosing = true;
     app.quit();
   });
@@ -82,11 +89,22 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     resourcesPath: process.resourcesPath,
     moduleDirectory: __dirname,
   });
+  const mediaProbe = new MediaProbeService(runtime);
+  downloadManager = new DownloadManager(
+    api,
+    persistence,
+    mediaProbe,
+    join(app.getPath("videos"), "LocalFirst Jellyfin Downloads"),
+    logger,
+  );
+  downloadManager.onChanged((downloads) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
+  });
   const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
-  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback);
+  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager);
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {
   logger.error("Application startup failed.", error);

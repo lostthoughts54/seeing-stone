@@ -126,6 +126,13 @@ function sanitizeLibrary(value: unknown): LibrarySummary {
 }
 
 interface AuthenticatedState extends StoredSession {}
+export interface AuthenticatedContext {
+  serverId: string;
+  serverAddress: string;
+  serverName: string;
+  userId: string;
+  userName: string;
+}
 interface PendingConnection {
   server: PublicServerInfo;
   expiresAt: number;
@@ -245,6 +252,17 @@ export class JellyfinApi {
 
   getSafeSession(): SafeSession {
     return this.safeSession();
+  }
+
+  getAuthenticatedContext(): AuthenticatedContext {
+    const session = this.requireSession();
+    return {
+      serverId: session.serverId,
+      serverAddress: session.serverUrl,
+      serverName: session.serverName,
+      userId: session.userId,
+      userName: session.userName,
+    };
   }
 
   async logout(): Promise<SafeSession> {

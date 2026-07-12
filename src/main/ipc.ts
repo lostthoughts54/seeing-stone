@@ -5,6 +5,9 @@ import {
 } from "../shared/contracts";
 import {
   artworkSchema,
+  downloadIdSchema,
+  downloadKeepSchema,
+  downloadStartSchema,
   episodesSchema,
   itemIdSchema,
   libraryItemsSchema,
@@ -19,6 +22,7 @@ import {
   serverUrlSchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
+import type { DownloadManager } from "./services/downloadManager";
 import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
 import type { MpvPlayerService } from "./services/mpvPlayer";
@@ -60,6 +64,7 @@ export function registerIpcHandlers(
   api: JellyfinApi,
   artwork: ArtworkService,
   playback: MpvPlayerService,
+  downloads: DownloadManager,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -79,18 +84,24 @@ export function registerIpcHandlers(
     const value = loginSchema.strict().parse(input);
     artwork.clear();
     await playback.clear();
-    return api.login(value.connectionId, value.username, value.password, value.remember);
+    await downloads.deactivate();
+    const session = await api.login(value.connectionId, value.username, value.password, value.remember);
+    await downloads.activate();
+    return session;
   });
   register(IPC.sessionRestore, async () => {
+    await downloads.deactivate();
     const session = await api.restore();
     artwork.clear();
     await playback.clear();
+    if (session.authenticated) await downloads.activate();
     return session;
   });
   register(IPC.sessionGetState, () => api.getSafeSession());
   register(IPC.sessionLogout, async () => {
     artwork.clear();
     await playback.clear();
+    await downloads.deactivate();
     return api.logout();
   });
   register(IPC.homeGet, () => api.getHome());
@@ -109,6 +120,17 @@ export function registerIpcHandlers(
   });
   register(IPC.artworkGetUrl, (input) => artwork.getUrl(artworkSchema.strict().parse(input)));
   register(IPC.mediaSourcesGetCapabilities, (input) => api.getMediaSourceCapabilities(itemIdSchema.strict().parse(input).itemId));
+  register(IPC.downloadsList, () => downloads.list());
+  register(IPC.downloadsStart, (input) => downloads.start(downloadStartSchema.strict().parse(input).itemId));
+  register(IPC.downloadsPause, (input) => downloads.pause(downloadIdSchema.strict().parse(input).downloadId));
+  register(IPC.downloadsResume, (input) => downloads.resume(downloadIdSchema.strict().parse(input).downloadId));
+  register(IPC.downloadsRetry, (input) => downloads.retry(downloadIdSchema.strict().parse(input).downloadId));
+  register(IPC.downloadsCancel, (input) => downloads.cancel(downloadIdSchema.strict().parse(input).downloadId));
+  register(IPC.downloadsDelete, (input) => downloads.delete(downloadIdSchema.strict().parse(input).downloadId));
+  register(IPC.downloadsSetKeep, (input) => {
+    const value = downloadKeepSchema.strict().parse(input);
+    return downloads.setKeep(value.downloadId, value.keepDownloaded);
+  });
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
     return playback.start(value.itemId, value.resumeMode);

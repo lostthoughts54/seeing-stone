@@ -49,3 +49,9 @@ export const playbackTrackSchema = playbackIdSchema.extend({
 });
 
 export const playbackFullscreenSchema = playbackIdSchema.extend({ fullscreen: z.boolean() });
+
+export const downloadStartSchema = z.object({ itemId: z.string().min(1).max(128) });
+
+export const downloadIdSchema = z.object({ downloadId: z.string().uuid() });
+
+export const downloadKeepSchema = downloadIdSchema.extend({ keepDownloaded: z.boolean() });

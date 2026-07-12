@@ -1,6 +1,6 @@
 # SQLite persistence model
 
-Milestone 4 establishes the local data boundary. It does not download, probe, delete, or select media yet.
+Milestone 4 established the local data boundary. Milestone 5 uses that boundary for manual downloads, probing, and explicit deletion without changing schema version 1. Local-first playback selection remains a later milestone.
 
 ## Process boundary
 
@@ -30,7 +30,7 @@ Every download, local version, and progress revision is scoped by server, user, 
 - A job left `downloading` by a process exit is changed to `paused` with the `INTERRUPTED` reason on the next startup.
 - Terminal completed jobs are retained as history; later manual deletion can mark the associated local version missing and permit a deliberate replacement download.
 
-Milestone 4 does not automatically remove any row or media file. Storage-limit behavior and cleanup remain manual in V1.
+Milestone 5 never automatically removes media. Insufficient storage pauses a job with an actionable error; cleanup remains manual in V1.
 
 ### Local versions
 

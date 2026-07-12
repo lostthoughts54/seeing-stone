@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loginSchema, playbackStartSchema, searchSchema } from "../src/shared/schemas";
+import { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema } from "../src/shared/schemas";
 
 describe("IPC input schemas", () => {
   it("rejects extra privileged-looking properties", () => {
@@ -19,5 +19,7 @@ describe("IPC input schemas", () => {
     })).toThrow();
     expect(() => searchSchema.strict().parse({ query: "movie", path: "D:\\Sensitive" })).toThrow();
     expect(() => playbackStartSchema.strict().parse({ itemId: "item", resumeMode: "resume", args: ["--script"] })).toThrow();
+    expect(() => downloadStartSchema.strict().parse({ itemId: "item", url: "http://server/media", path: "D:\\Sensitive" })).toThrow();
+    expect(() => downloadIdSchema.strict().parse({ downloadId: "not-an-opaque-id" })).toThrow();
   });
 });

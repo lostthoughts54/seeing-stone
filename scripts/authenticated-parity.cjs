@@ -103,7 +103,7 @@ async function runElectronChild() {
     const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
     const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 
-    ipcChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged);
+    ipcChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged && channel !== IPC.downloadsChanged);
     rendererSession = security.hardenSession();
     const identity = await new DeviceIdentityService(
       productionUserData,
@@ -135,7 +135,19 @@ async function runElectronChild() {
     player.onState((state) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
     });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, player);
+    const downloads = {
+      async activate() {},
+      async deactivate() {},
+      async list() { return []; },
+      async start() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async pause() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async resume() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async retry() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async cancel() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async delete() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+      async setKeep() { throw coded("DOWNLOAD_TEST_DISABLED"); },
+    };
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, player, downloads);
     await mainWindow.loadURL(security.APP_URL);
     await waitForAuthenticated(mainWindow);
 

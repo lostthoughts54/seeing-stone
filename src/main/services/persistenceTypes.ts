@@ -110,6 +110,13 @@ export interface LocalVersionRecord extends Omit<RegisterLocalVersionInput, "loc
   updatedAt: number;
 }
 
+export interface DownloadBundleRecord {
+  job: DownloadJobRecord;
+  localVersion: LocalVersionRecord | null;
+  itemName: string;
+  itemType: "Movie" | "Episode" | "Video";
+}
+
 export type PlaybackActionKind = "progress" | "completed" | "start_over" | "replay" | "mark_watched" | "mark_unwatched";
 export type ProgressSyncState = "pending" | "succeeded" | "failed" | "superseded";
 
@@ -154,8 +161,17 @@ export type PersistenceOperation =
   | { kind: "upsertMediaItem"; input: MediaItemRecordInput }
   | { kind: "upsertMediaSource"; input: MediaSourceRecordInput }
   | { kind: "createDownload"; input: CreateDownloadInput & { downloadId: string } }
+  | {
+    kind: "createDownloadBundle";
+    download: CreateDownloadInput & { downloadId: string };
+    localVersion: RegisterLocalVersionInput & { localVersionId: string; downloadId: string; pathKey: string };
+  }
   | { kind: "transitionDownload"; input: TransitionDownloadInput }
   | { kind: "getDownload"; downloadId: string }
+  | { kind: "getDownloadBundle"; downloadId: string }
+  | { kind: "listDownloadBundles"; serverId: string; userId: string }
+  | { kind: "setDownloadKeep"; downloadId: string; keepDownloaded: boolean }
+  | { kind: "setDownloadExpectedSize"; downloadId: string; expectedSize: number }
   | { kind: "registerLocalVersion"; input: RegisterLocalVersionInput & { localVersionId: string; pathKey: string } }
   | { kind: "updateLocalVersion"; input: UpdateLocalVersionInput }
   | { kind: "listLocalVersions"; serverId: string; userId: string; itemId: string }

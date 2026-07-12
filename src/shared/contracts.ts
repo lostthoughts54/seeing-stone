@@ -114,6 +114,26 @@ export interface PlaybackState {
   error: string | null;
 }
 
+export type DownloadState = "queued" | "downloading" | "paused" | "downloaded" | "failed" | "missing";
+
+export interface DownloadSummary {
+  downloadId: string;
+  itemId: string;
+  name: string;
+  itemType: "Movie" | "Episode" | "Video";
+  state: DownloadState;
+  bytesDownloaded: number;
+  expectedSize: number | null;
+  progressPercent: number | null;
+  keepDownloaded: boolean;
+  error: { code: string; message: string } | null;
+  canPause: boolean;
+  canResume: boolean;
+  canRetry: boolean;
+  canCancel: boolean;
+  canDelete: boolean;
+}
+
 export type RpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
@@ -131,6 +151,9 @@ export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
 export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
 export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
+export interface DownloadStartInput { itemId: string }
+export interface DownloadIdInput { downloadId: string }
+export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
 
 export interface JellyfinBridge {
   server: {
@@ -163,6 +186,17 @@ export interface JellyfinBridge {
   mediaSources: {
     getCapabilities(input: ItemIdInput): Promise<MediaSourceCapabilities>;
   };
+  downloads: {
+    list(): Promise<DownloadSummary[]>;
+    start(input: DownloadStartInput): Promise<DownloadSummary>;
+    pause(input: DownloadIdInput): Promise<DownloadSummary>;
+    resume(input: DownloadIdInput): Promise<DownloadSummary>;
+    retry(input: DownloadIdInput): Promise<DownloadSummary>;
+    cancel(input: DownloadIdInput): Promise<DownloadSummary>;
+    delete(input: DownloadIdInput): Promise<DownloadSummary>;
+    setKeep(input: DownloadKeepInput): Promise<DownloadSummary>;
+    subscribe(listener: (downloads: DownloadSummary[]) => void): () => void;
+  };
   playback: {
     start(input: PlaybackStartInput): Promise<PlaybackStartResult>;
     setPaused(input: PlaybackPauseInput): Promise<PlaybackState>;
@@ -193,6 +227,15 @@ export const IPC = {
   showsGetEpisodes: "shows:get-episodes",
   artworkGetUrl: "artwork:get-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
+  downloadsList: "downloads:list",
+  downloadsStart: "downloads:start",
+  downloadsPause: "downloads:pause",
+  downloadsResume: "downloads:resume",
+  downloadsRetry: "downloads:retry",
+  downloadsCancel: "downloads:cancel",
+  downloadsDelete: "downloads:delete",
+  downloadsSetKeep: "downloads:set-keep",
+  downloadsChanged: "downloads:changed",
   playbackStart: "playback:start",
   playbackSetPaused: "playback:set-paused",
   playbackSeek: "playback:seek",

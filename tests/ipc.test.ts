@@ -41,15 +41,19 @@ function createHarness() {
     clear: vi.fn(), start: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), selectAudio: vi.fn(),
     selectSubtitle: vi.fn(), setFullscreen: vi.fn(), stop: vi.fn(), getState: vi.fn(),
   };
-  registerIpcHandlers(ipcMain as never, window as never, api as never, artwork as never, playback as never);
+  const downloads = {
+    activate: vi.fn(), deactivate: vi.fn(), list: vi.fn(), start: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    retry: vi.fn(), cancel: vi.fn(), delete: vi.fn(), setKeep: vi.fn(),
+  };
+  registerIpcHandlers(ipcMain as never, window as never, api as never, artwork as never, playback as never, downloads as never);
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
   it("registers exactly the declared narrow channels and no reporting transport", () => {
     const { handlers } = createHarness();
-    const invokeChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged);
+    const invokeChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged && channel !== IPC.downloadsChanged);
     expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
     expect([...handlers.keys()].join(" ")).not.toMatch(/report|sessions\/playing|request|fetch|filesystem|shell|command/i);
   });
@@ -93,5 +97,20 @@ describe("IPC authorization and allowlist", () => {
       expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED_IPC", retryable: false } });
     }
     expect(getSafeSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects renderer-supplied download URLs, paths, source IDs, and transfer arguments", async () => {
+    const { handlers, validEvent, downloads } = createHarness();
+    const result = await handlers.get(IPC.downloadsStart)?.(validEvent, {
+      itemId: "episode-1",
+      mediaSourceId: "server-source",
+      url: "http://127.0.0.1:8096/Videos/episode-1/stream?api_key=SECRET_TOKEN_SENTINEL",
+      path: "D:\\Sensitive Folder\\episode.mkv",
+      headers: { Authorization: "SECRET_TOKEN_SENTINEL" },
+    }) as { ok: boolean; error?: { message: string } };
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("SECRET_TOKEN_SENTINEL");
+    expect(JSON.stringify(result)).not.toContain("Sensitive Folder");
+    expect(downloads.start).not.toHaveBeenCalled();
   });
 });

@@ -40,15 +40,15 @@ Client starts
 - `SecureSessionStore`: OS-protected token persistence with no plaintext fallback.
 - `SqlitePersistenceService`: asynchronous main-side facade over the dedicated SQLite worker.
 - `PersistenceWorker`: migrations and all synchronous SQLite work off Electron's event loop.
+- `DownloadManager`: main-owned queue, authenticated ranged transfers, lifecycle authorization, and sanitized state events.
+- `MediaProbeService`: controlled hidden mpv process that validates finalized media without blocking Electron's event loop.
 - `PlaybackSessionService`: main-only Jellyfin source authorization.
 - `PlaybackProxy`: private loopback capability consumed only by mpv.
 - `MpvPlayerService`: native player control and authoritative playback events.
 - `ClientViews`: sandboxed Home, Search, Library, Details, Season, and Episode UI.
 
-Planned layers build on the SQLite boundary without changing renderer trust:
+Planned layers build on the SQLite and download boundaries without changing renderer trust:
 
-- `DownloadManager`: asynchronous transfers and state transitions.
-- `MediaProbe`: utility-process or worker-owned validation.
 - `LocalIndex`: verified Jellyfin-item-to-local-version lookup.
 - `PlaybackResolver`: verified local version first, then Jellyfin fallback.
 - `OfflineSynchronization`: revision coalescing and conflict-safe reporting.
@@ -61,7 +61,7 @@ Potentially blocking work is isolated:
 
 - SQLite uses a dedicated worker thread.
 - mpv is a controlled child process with narrow JSON IPC.
-- Large transfers and media probing will use asynchronous services, workers, or Electron utility processes in later milestones.
+- Large transfers use asynchronous network and filesystem APIs; media probing uses a controlled child process. Neither performs synchronous transfer or probe work on Electron's event loop.
 
 See [DATABASE.md](DATABASE.md) for the versioned persistence model.
 

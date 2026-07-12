@@ -20,6 +20,10 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Sends authoritative playback reports from main-side mpv events.
 - Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
 - Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
+- Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.
+- Shows transfer progress with pause, resume, retry, cancel, explicit delete, and Keep Downloaded controls.
+- Verifies path containment, expected size when available, finalized-file state, existence, and mpv media probing before marking a copy downloaded.
+- Pauses for manual cleanup when storage is insufficient and never auto-deletes media.
 - Keeps source resolution behind the Play action so the future local-first choice does not clutter browsing.
 
 ## Try it
@@ -55,8 +59,8 @@ pnpm test:mpv-completion
 pnpm test:authenticated
 ```
 
-The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 
-Completed foundations are committed one milestone at a time. SQLite persistence does not itself start downloads or expose local paths to the renderer. The next accepted milestone will add manual downloads using this database boundary.
+Completed foundations are committed one milestone at a time. Manual downloads do not yet alter playback source selection: local-first playback through the normal Play action belongs to the next milestone and must not be inferred from a Downloaded label alone.

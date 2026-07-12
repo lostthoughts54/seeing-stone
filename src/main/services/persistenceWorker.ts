@@ -2,6 +2,7 @@ import { parentPort, threadId, workerData } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
 import {
   DATABASE_SCHEMA_VERSION,
+  type DownloadBundleRecord,
   type DownloadJobRecord,
   type DownloadJobState,
   type LocalVersionRecord,
@@ -310,6 +311,35 @@ function getDownload(downloadId: string): DownloadJobRecord | null {
   return downloadRow(db().prepare("SELECT * FROM download_jobs WHERE download_id = ?").get(downloadId) as Record<string, unknown> | undefined);
 }
 
+function getLocalVersionByDownload(downloadId: string): LocalVersionRecord | null {
+  const row = db().prepare("SELECT * FROM local_versions WHERE download_id = ?").get(downloadId) as Record<string, unknown> | undefined;
+  return row ? localVersionRow(row) : null;
+}
+
+function getDownloadBundle(downloadId: string): DownloadBundleRecord | null {
+  const job = getDownload(downloadId);
+  if (!job) return null;
+  const item = db().prepare(`
+    SELECT name, item_type FROM media_items WHERE server_id = ? AND user_id = ? AND item_id = ?
+  `).get(job.serverId, job.userId, job.itemId) as Record<string, unknown> | undefined;
+  if (!item) throw new PersistenceWorkerError("MEDIA_ITEM_NOT_FOUND", "The download media item no longer exists.");
+  return {
+    job,
+    localVersion: getLocalVersionByDownload(downloadId),
+    itemName: String(item.name),
+    itemType: item.item_type as DownloadBundleRecord["itemType"],
+  };
+}
+
+function listDownloadBundles(serverId: string, userId: string): DownloadBundleRecord[] {
+  const rows = db().prepare(`
+    SELECT download_id FROM download_jobs
+    WHERE server_id = ? AND user_id = ?
+    ORDER BY created_at DESC, download_id DESC
+  `).all(serverId, userId) as Array<{ download_id: string }>;
+  return rows.map((row) => getDownloadBundle(String(row.download_id))).filter((value): value is DownloadBundleRecord => value !== null);
+}
+
 function createDownload(input: Extract<PersistenceOperation, { kind: "createDownload" }>["input"]): DownloadJobRecord {
   const now = Date.now();
   db().prepare(`
@@ -331,7 +361,10 @@ function transitionDownload(input: Extract<PersistenceOperation, { kind: "transi
     throw new PersistenceWorkerError("INVALID_DOWNLOAD_TRANSITION", "That download state transition is not allowed.");
   }
   const bytes = input.bytesDownloaded ?? current.bytesDownloaded;
-  if (bytes < current.bytesDownloaded) throw new PersistenceWorkerError("INVALID_DOWNLOAD_PROGRESS", "Download progress cannot move backward.");
+  const recoveringQueuedTransfer = current.state === "queued" && input.state === "downloading";
+  if (bytes < current.bytesDownloaded && !recoveringQueuedTransfer) {
+    throw new PersistenceWorkerError("INVALID_DOWNLOAD_PROGRESS", "Download progress cannot move backward.");
+  }
   if (current.expectedSize !== null && bytes > current.expectedSize) throw new PersistenceWorkerError("INVALID_DOWNLOAD_PROGRESS", "Download progress exceeds the expected size.");
   if (input.state === "completed" && current.expectedSize !== null && bytes !== current.expectedSize) {
     throw new PersistenceWorkerError("DOWNLOAD_SIZE_MISMATCH", "The download cannot complete because its size does not match.");
@@ -397,6 +430,44 @@ function registerLocalVersion(input: Extract<PersistenceOperation, { kind: "regi
     input.fileState, input.probeState, input.expectedSize, input.actualSize, input.container, now, now,
   );
   return getLocalVersion(input.localVersionId)!;
+}
+
+function createDownloadBundle(operation: Extract<PersistenceOperation, { kind: "createDownloadBundle" }>): DownloadBundleRecord {
+  return transaction(() => {
+    createDownload(operation.download);
+    registerLocalVersion(operation.localVersion);
+    return getDownloadBundle(operation.download.downloadId)!;
+  });
+}
+
+function setDownloadKeep(downloadId: string, keepDownloaded: boolean): DownloadBundleRecord {
+  return transaction(() => {
+    const current = getDownloadBundle(downloadId);
+    if (!current) throw new PersistenceWorkerError("DOWNLOAD_NOT_FOUND", "The download no longer exists.");
+    const keep = keepDownloaded ? 1 : 0;
+    const now = Date.now();
+    db().prepare("UPDATE download_jobs SET keep_downloaded = ?, updated_at = ? WHERE download_id = ?")
+      .run(keep, now, downloadId);
+    db().prepare("UPDATE local_versions SET keep_downloaded = ?, updated_at = ? WHERE download_id = ?")
+      .run(keep, now, downloadId);
+    return getDownloadBundle(downloadId)!;
+  });
+}
+
+function setDownloadExpectedSize(downloadId: string, expectedSize: number): DownloadBundleRecord {
+  return transaction(() => {
+    const current = getDownloadBundle(downloadId);
+    if (!current) throw new PersistenceWorkerError("DOWNLOAD_NOT_FOUND", "The download no longer exists.");
+    if (current.job.bytesDownloaded > expectedSize) {
+      throw new PersistenceWorkerError("INVALID_DOWNLOAD_PROGRESS", "The expected size is smaller than downloaded progress.");
+    }
+    const now = Date.now();
+    db().prepare("UPDATE download_jobs SET expected_size = ?, updated_at = ? WHERE download_id = ?")
+      .run(expectedSize, now, downloadId);
+    db().prepare("UPDATE local_versions SET expected_size = ?, updated_at = ? WHERE download_id = ?")
+      .run(expectedSize, now, downloadId);
+    return getDownloadBundle(downloadId)!;
+  });
 }
 
 function updateLocalVersion(input: Extract<PersistenceOperation, { kind: "updateLocalVersion" }>["input"]): LocalVersionRecord {
@@ -541,8 +612,13 @@ function execute(operation: PersistenceOperation): unknown {
     case "upsertMediaItem": return upsertMediaItem(operation.input);
     case "upsertMediaSource": return upsertMediaSource(operation.input);
     case "createDownload": return createDownload(operation.input);
+    case "createDownloadBundle": return createDownloadBundle(operation);
     case "transitionDownload": return transitionDownload(operation.input);
     case "getDownload": return getDownload(operation.downloadId);
+    case "getDownloadBundle": return getDownloadBundle(operation.downloadId);
+    case "listDownloadBundles": return listDownloadBundles(operation.serverId, operation.userId);
+    case "setDownloadKeep": return setDownloadKeep(operation.downloadId, operation.keepDownloaded);
+    case "setDownloadExpectedSize": return setDownloadExpectedSize(operation.downloadId, operation.expectedSize);
     case "registerLocalVersion": return registerLocalVersion(operation.input);
     case "updateLocalVersion": return updateLocalVersion(operation.input);
     case "listLocalVersions": return listLocalVersions(operation.serverId, operation.userId, operation.itemId);

@@ -3,6 +3,10 @@ import {
   IPC,
   type ArtworkInput,
   type DiscoveredServer,
+  type DownloadIdInput,
+  type DownloadKeepInput,
+  type DownloadStartInput,
+  type DownloadSummary,
   type EpisodesInput,
   type HomePayload,
   type ItemIdInput,
@@ -70,6 +74,21 @@ const bridge: JellyfinBridge = {
   artwork: { getUrl: (input: ArtworkInput) => invoke<string>(IPC.artworkGetUrl, input) },
   mediaSources: {
     getCapabilities: (input: ItemIdInput) => invoke<MediaSourceCapabilities>(IPC.mediaSourcesGetCapabilities, input),
+  },
+  downloads: {
+    list: () => invoke<DownloadSummary[]>(IPC.downloadsList),
+    start: (input: DownloadStartInput) => invoke<DownloadSummary>(IPC.downloadsStart, input),
+    pause: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsPause, input),
+    resume: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsResume, input),
+    retry: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsRetry, input),
+    cancel: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsCancel, input),
+    delete: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsDelete, input),
+    setKeep: (input: DownloadKeepInput) => invoke<DownloadSummary>(IPC.downloadsSetKeep, input),
+    subscribe: (listener: (downloads: DownloadSummary[]) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, downloads: DownloadSummary[]) => listener(downloads);
+      ipcRenderer.on(IPC.downloadsChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.downloadsChanged, receive);
+    },
   },
   playback: {
     start: (input: PlaybackStartInput) => invoke<PlaybackStartResult>(IPC.playbackStart, input),
