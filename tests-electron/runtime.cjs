@@ -430,51 +430,63 @@ async function runElectronChild() {
 
     await test("rendered media cards use fixed cover geometry", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(() => {
+        const posterRail = document.createElement("div");
         const card = document.createElement("button");
         const art = document.createElement("span");
         const poster = document.createElement("img");
+        const landscapeRail = document.createElement("div");
         const landscapeCard = document.createElement("button");
         const landscapeArt = document.createElement("span");
         const landscapeImage = document.createElement("img");
         const episode = document.createElement("span");
         const episodeImage = document.createElement("img");
+        posterRail.className = "media-rail poster";
         card.className = "media-card poster";
-        card.style.width = "180px";
         art.className = "media-art";
+        landscapeRail.className = "media-rail landscape";
         landscapeCard.className = "media-card landscape";
-        landscapeCard.style.width = "320px";
         landscapeArt.className = "media-art";
         episode.className = "episode-thumb";
         art.append(poster);
         landscapeArt.append(landscapeImage);
         landscapeCard.append(landscapeArt);
+        landscapeRail.append(landscapeCard);
         episode.append(episodeImage);
         card.append(art);
-        document.body.append(card, landscapeCard, episode);
+        posterRail.append(card);
+        document.body.append(posterRail, landscapeRail, episode);
         const posterRectangle = art.getBoundingClientRect();
         const landscapeRectangle = landscapeArt.getBoundingClientRect();
         const value = {
+          posterTrack: getComputedStyle(posterRail).gridAutoColumns,
+          posterCardWidth: card.getBoundingClientRect().width,
           posterWidth: posterRectangle.width,
           posterHeight: posterRectangle.height,
           posterFit: getComputedStyle(poster).objectFit,
           posterPosition: getComputedStyle(poster).objectPosition,
+          landscapeTrack: getComputedStyle(landscapeRail).gridAutoColumns,
+          landscapeCardWidth: landscapeCard.getBoundingClientRect().width,
           landscapeWidth: landscapeRectangle.width,
           landscapeHeight: landscapeRectangle.height,
           landscapeFit: getComputedStyle(landscapeImage).objectFit,
           landscapePosition: getComputedStyle(landscapeImage).objectPosition,
           episodeFit: getComputedStyle(episodeImage).objectFit,
         };
-        card.remove();
-        landscapeCard.remove();
+        posterRail.remove();
+        landscapeRail.remove();
         episode.remove();
         return value;
       })()`);
-      assert.ok(result.posterWidth > 0);
-      assert.ok(Math.abs(result.posterHeight - (result.posterWidth * 1.5)) < 1);
+      assert.equal(result.posterTrack, "174px");
+      assert.ok(Math.abs(result.posterCardWidth - 174) < 1);
+      assert.ok(Math.abs(result.posterWidth - 174) < 1, JSON.stringify(result));
+      assert.ok(Math.abs(result.posterHeight - 261) < 1);
       assert.equal(result.posterFit, "cover");
       assert.equal(result.posterPosition, "50% 50%");
-      assert.ok(result.landscapeWidth > 0);
-      assert.ok(Math.abs(result.landscapeHeight - (result.landscapeWidth * (9 / 16))) < 1);
+      assert.equal(result.landscapeTrack, "310px");
+      assert.ok(Math.abs(result.landscapeCardWidth - 310) < 1);
+      assert.ok(Math.abs(result.landscapeWidth - 310) < 1, JSON.stringify(result));
+      assert.ok(Math.abs(result.landscapeHeight - 174.375) < 1);
       assert.equal(result.landscapeFit, "cover");
       assert.equal(result.landscapePosition, "50% 50%");
       assert.equal(result.episodeFit, "contain");

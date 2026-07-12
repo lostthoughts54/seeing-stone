@@ -25,6 +25,7 @@ describe("renderer and preload security boundary", () => {
 
   it("keeps poster and landscape cards uniform without changing other artwork fit behavior", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
+    expect(styles).toMatch(/\.media-card\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*justify-content:\s*stretch;/s);
     expect(styles).toMatch(/\.media-card\.poster\s+\.media-art\s*\{[^}]*aspect-ratio:\s*2\s*\/\s*3/s);
     expect(styles).toMatch(/\.media-card\.landscape\s+\.media-art\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
     expect(styles).toMatch(/\.media-card\s+\.media-art\s+img\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center;/s);

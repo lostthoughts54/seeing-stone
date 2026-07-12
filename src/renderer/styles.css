@@ -629,7 +629,9 @@ select {
   border-radius: 7px;
   display: grid;
   gap: 9px;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
+  justify-content: stretch;
   min-height: 0;
   min-width: 0;
   padding: 0;
