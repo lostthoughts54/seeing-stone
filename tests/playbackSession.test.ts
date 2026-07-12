@@ -43,6 +43,8 @@ describe("PlaybackSessionService", () => {
     const started = await service.start(item.id, "resume");
     expect(started.mediaUrl).toBe(`jellyfin-media://stream/${started.playbackId}`);
     expect(started.mediaSourceId).toBe("source-1");
+    expect(started.itemType).toBe("Movie");
+    expect(started.seriesId).toBeNull();
     expect(JSON.stringify(started)).not.toContain("http");
     expect(started.resumePositionTicks).toBe(50000000);
     expect(started.durationTicks).toBe(100000000);
@@ -58,6 +60,26 @@ describe("PlaybackSessionService", () => {
     const replacement = await service.start("movie-2", "start-over");
     expect((await service.handle(new Request(started.mediaUrl))).status).toBe(404);
     expect((await service.handle(new Request(replacement.mediaUrl))).status).toBe(200);
+  });
+
+  it("carries episode identity main-side and delegates cross-season Next Up to Jellyfin", async () => {
+    const episode = { ...item, id: "episode-1", name: "Episode 1", type: "Episode" as const, seriesId: "series-1", seasonId: "season-1" };
+    const nextEpisode = { ...episode, id: "episode-2", name: "Episode 2", seasonId: "season-2" };
+    const getNextUpForSeries = vi.fn(async () => nextEpisode);
+    const service = new PlaybackSessionService({
+      async getDetails() { return episode; },
+      getNextUpForSeries,
+      async getMediaSourceCapabilities() {
+        return { itemId: episode.id, sources: [{ id: "source-1", container: "mkv", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }] };
+      },
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    });
+
+    const started = await service.start(episode.id, "start-over");
+    expect(started).toMatchObject({ itemType: "Episode", seriesId: "series-1" });
+    expect(await service.getNextUpForSeries("series-1")).toMatchObject({ id: "episode-2", seasonId: "season-2" });
+    expect(getNextUpForSeries).toHaveBeenCalledWith("series-1");
   });
 
   it("does not release a media response that finishes after playback is stopped", async () => {

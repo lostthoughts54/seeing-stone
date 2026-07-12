@@ -86,7 +86,11 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "SECRET_TOKEN_SENTINEL", User: { Id: "user-1", Name: "Viewer" } });
       if (url.pathname.endsWith("/Views")) return Response.json({ Items: [{ Id: "library-1", Name: "Movies", CollectionType: "movies", Path: "D:\\Sensitive" }] });
       if (url.pathname.endsWith("/Items/Resume")) return Response.json({ Items: [unsafeItem] });
-      if (url.pathname === "/Shows/NextUp") return Response.json({ Items: [] });
+      if (url.pathname === "/Shows/NextUp") return Response.json({
+        Items: url.searchParams.get("SeriesId") === "series-1"
+          ? [{ ...unsafeItem, Id: "episode-2", Name: "Episode 2", Type: "Episode", SeriesId: "series-1", SeasonId: "season-2" }]
+          : [],
+      });
       if (url.pathname === "/Users/user-1/Items/movie-1") return Response.json(unsafeItem);
       if (url.pathname === "/Shows/series-1/Seasons") return Response.json({ Items: [{ ...unsafeItem, Id: "season-1", Name: "Season 1", Type: "Season" }] });
       if (url.pathname === "/Shows/series-1/Episodes") return Response.json({ Items: [{ ...unsafeItem, Id: "episode-1", Name: "Episode 1", Type: "Episode", SeriesId: "series-1", SeasonId: "season-1" }] });
@@ -121,6 +125,7 @@ describe("JellyfinApi main-side boundary", () => {
     const details = await api.getDetails("movie-1");
     const seasons = await api.getSeasons("series-1");
     const episodes = await api.getEpisodes("series-1", "season-1");
+    const nextUp = await api.getNextUpForSeries("series-1");
     const capabilities = await api.getMediaSourceCapabilities("movie-1");
     const artwork = await api.fetchArtwork("movie-1", "Primary", { maxWidth: "500" });
     expect(await artwork.text()).toBe("image");
@@ -142,6 +147,7 @@ describe("JellyfinApi main-side boundary", () => {
       details,
       seasons,
       episodes,
+      nextUp,
       capabilities,
     });
     expect(rendererPayload).not.toContain("SECRET_TOKEN_SENTINEL");
@@ -164,6 +170,7 @@ describe("JellyfinApi main-side boundary", () => {
     expect(details.id).toBe("movie-1");
     expect(seasons[0]).toMatchObject({ id: "season-1", type: "Season" });
     expect(episodes[0]).toMatchObject({ id: "episode-1", type: "Episode", seriesId: "series-1", seasonId: "season-1" });
+    expect(nextUp).toMatchObject({ id: "episode-2", type: "Episode", seriesId: "series-1", seasonId: "season-2" });
     expect(capabilities.sources[0]).toEqual({
       id: "source-1",
       container: "mkv",
@@ -192,6 +199,9 @@ describe("JellyfinApi main-side boundary", () => {
     ]) expect(requestedPaths).toContain(expected);
     const resumeRequest = observedRequests.find(({ url }) => url.pathname.endsWith("/Items/Resume"));
     expect(resumeRequest?.url.searchParams.get("MediaTypes")).toBe("Video");
+    const seriesNextUpRequest = observedRequests.find(({ url }) => url.pathname === "/Shows/NextUp" && url.searchParams.has("SeriesId"));
+    expect(seriesNextUpRequest?.url.searchParams.get("SeriesId")).toBe("series-1");
+    expect(seriesNextUpRequest?.url.searchParams.get("Limit")).toBe("1");
 
     vi.useFakeTimers();
     await api.fetchStaticStream("movie-1", "source-1");

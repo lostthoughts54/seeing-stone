@@ -35,7 +35,7 @@ function runParent() {
 
 async function runChild() {
   assert.equal(process.argv.includes(CHILD_FLAG) && process.env[PARENT_ENV] === "1", true);
-  const { app, BaseWindow, desktopCapturer, screen } = require("electron");
+  const { app, nativeImage } = require("electron");
   const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
   const root = resolve(__dirname, "..");
   const runtime = join(root, ".runtime", "mpv");
@@ -45,25 +45,18 @@ async function runChild() {
   if (!existsSync(fixture)) createFixture(root, runtime, fixture);
 
   await app.whenReady();
-  const title = `LocalFirst mpv visual acceptance ${randomUUID()}`;
-  const host = new BaseWindow({
-    title,
-    width: 960,
-    height: 640,
-    show: false,
-    backgroundColor: "#000000",
-  });
-  host.setMenu(null);
   const pipe = `\\\\.\\pipe\\localfirst-mpv-visual-${randomUUID()}`;
   const child = spawn(executable, [
     "--no-config",
     "--terminal=no",
-    "--force-window=yes",
+    "--force-window=immediate",
     "--keep-open=yes",
     "--hwdec=no",
     "--osc=no",
+    "--title=LocalFirst mpv visual acceptance",
+    "--geometry=960x540",
+    "--window-maximized=yes",
     `--input-ipc-server=${pipe}`,
-    `--wid=${nativeHandle(host)}`,
     "--loop-file=inf",
     "--",
     fixture,
@@ -72,45 +65,94 @@ async function runChild() {
   try {
     await ipc.connect(pipe, 10000);
     await waitForNumber(ipc, "time-pos");
-    host.show();
-    host.focus();
+    assert.equal(await waitForBoolean(ipc, "window-maximized", true), true, "The first native player window did not open maximized.");
+    await ipc.command(["set_property", "fullscreen", true]);
+    await waitForBoolean(ipc, "fullscreen", true);
+    await ipc.command(["set_property", "fullscreen", false]);
+    await waitForBoolean(ipc, "fullscreen", false);
+    assert.equal(await waitForBoolean(ipc, "window-maximized", true), true, "Fullscreen changed the maximized window state.");
+    await ipc.command(["set_property", "window-maximized", false]);
+    await waitForBoolean(ipc, "window-maximized", false);
+
+    const initialWindowHandle = await waitForProcessWindow(child.pid);
+    const fileLoaded = waitForEvent(ipc, "file-loaded", 10000);
+    await ipc.command(["loadfile", fixture, "replace"]);
+    await fileLoaded;
+    assert.equal(await waitForProcessWindow(child.pid), initialWindowHandle, "mpv replaced its native window during same-window autoplay.");
+    await waitForNumber(ipc, "time-pos");
     await delay(1000);
 
-    const bounds = host.getBounds();
-    const display = screen.getDisplayMatching(bounds);
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: display.size,
-      fetchWindowIcons: false,
-    });
-    const source = sources.find((entry) => entry.display_id === String(display.id)) || sources[0];
-    assert.ok(source, "The desktop containing the native player window was not capturable.");
-    const thumbnailSize = source.thumbnail.getSize();
-    const scaleX = thumbnailSize.width / display.bounds.width;
-    const scaleY = thumbnailSize.height / display.bounds.height;
-    const windowImage = source.thumbnail.crop({
-      x: Math.max(0, Math.round((bounds.x - display.bounds.x) * scaleX)),
-      y: Math.max(0, Math.round((bounds.y - display.bounds.y) * scaleY)),
-      width: Math.min(thumbnailSize.width, Math.max(1, Math.round(bounds.width * scaleX))),
-      height: Math.min(thumbnailSize.height, Math.max(1, Math.round(bounds.height * scaleY))),
-    });
+    const capturePath = join(root, ".runtime", "mpv-visual-capture.png");
+    const windowHandle = await waitForProcessWindow(child.pid);
+    capturePhysicalWindow(windowHandle, capturePath);
+    const windowImage = nativeImage.createFromPath(capturePath);
+    assert.equal(windowImage.isEmpty(), false, "The native player window was not capturable.");
     const metrics = pixelMetrics(windowImage);
-    assert.ok(metrics.nonBlackRatio >= 0.15, `Player capture was black (${JSON.stringify(metrics)}).`);
-    assert.ok(metrics.uniqueColors >= 32, `Player capture had no visible video detail (${JSON.stringify(metrics)}).`);
+    const videoOutput = {
+      currentVo: await ipc.command(["get_property", "current-vo"]).catch(() => null),
+      configured: await ipc.command(["get_property", "vo-configured"]).catch(() => null),
+      parameters: await ipc.command(["get_property", "video-out-params"]).catch(() => null),
+      hwdec: await ipc.command(["get_property", "hwdec-current"]).catch(() => null),
+    };
+    assert.ok(metrics.nonBlackRatio >= 0.15, `Player capture was black (${JSON.stringify({ metrics, videoOutput })}).`);
+    assert.ok(metrics.uniqueColors >= 32, `Player capture had no visible video detail (${JSON.stringify({ metrics, videoOutput })}).`);
     process.stdout.write(`mpv visual acceptance passed (${metrics.nonBlackRatio.toFixed(3)} non-black, ${metrics.uniqueColors} colors).\n`);
   } finally {
     await ipc.command(["quit"]).catch(() => undefined);
     ipc.close();
     if (!child.killed) child.kill();
-    if (!host.isDestroyed()) host.destroy();
   }
   app.exit(0);
 }
 
-function nativeHandle(window) {
-  const value = window.getNativeWindowHandle();
-  const handle = value.length >= 8 ? value.readBigUInt64LE() : BigInt(value.readUInt32LE());
-  return Number(handle & 0xffffffffn);
+async function waitForProcessWindow(processId) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const result = spawnSync(powershellPath(), [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$process=Get-Process -Id ([int]$env:JELLYFIN_CAPTURE_PID) -ErrorAction SilentlyContinue; if($process){$process.Refresh(); [Console]::Write($process.MainWindowHandle)}",
+    ], {
+      env: { ...process.env, JELLYFIN_CAPTURE_PID: String(processId) },
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const handle = Number(String(result.stdout || "").trim());
+    if (Number.isSafeInteger(handle) && handle > 0) return handle;
+    await delay(50);
+  }
+  throw new Error("The native mpv window did not appear.");
+}
+
+function capturePhysicalWindow(handle, outputPath) {
+  const script = [
+    "Add-Type -AssemblyName System.Drawing",
+    "$definition='using System; using System.Runtime.InteropServices; public static class LocalFirstCapture { [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; } [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect); }'",
+    "Add-Type -TypeDefinition $definition",
+    "$rect=New-Object LocalFirstCapture+RECT",
+    "$ok=[LocalFirstCapture]::GetWindowRect([IntPtr]::new([int64]$env:JELLYFIN_CAPTURE_HANDLE),[ref]$rect)",
+    "if(-not $ok){exit 2}",
+    "$width=$rect.Right-$rect.Left; $height=$rect.Bottom-$rect.Top",
+    "if($width -le 0 -or $height -le 0){exit 3}",
+    "$bitmap=New-Object System.Drawing.Bitmap($width,$height)",
+    "$graphics=[System.Drawing.Graphics]::FromImage($bitmap)",
+    "$graphics.CopyFromScreen($rect.Left,$rect.Top,0,0,$bitmap.Size)",
+    "$bitmap.Save($env:JELLYFIN_CAPTURE_PATH,[System.Drawing.Imaging.ImageFormat]::Png)",
+    "$graphics.Dispose(); $bitmap.Dispose()",
+  ].join("; ");
+  const result = spawnSync(powershellPath(), ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: { ...process.env, JELLYFIN_CAPTURE_HANDLE: String(handle), JELLYFIN_CAPTURE_PATH: outputPath },
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0 || !existsSync(outputPath)) throw new Error(`Physical player capture failed (${result.status ?? "launch"}).`);
+}
+
+function powershellPath() {
+  return process.env.SystemRoot
+    ? join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    : "powershell.exe";
 }
 
 function pixelMetrics(image) {
@@ -158,6 +200,32 @@ async function waitForNumber(ipc, property) {
     await delay(50);
   }
   throw new Error(`Timed out reading mpv property ${property}.`);
+}
+
+async function waitForBoolean(ipc, property, expected) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const value = await ipc.command(["get_property", property]).catch(() => null);
+    if (value === expected) return value;
+    await delay(50);
+  }
+  throw new Error(`Timed out waiting for mpv property ${property}=${expected}.`);
+}
+
+function waitForEvent(ipc, eventName, timeoutMilliseconds) {
+  return new Promise((resolveEvent, rejectEvent) => {
+    let unsubscribe = () => undefined;
+    const timer = setTimeout(() => {
+      unsubscribe();
+      rejectEvent(new Error(`Timed out waiting for mpv ${eventName}.`));
+    }, timeoutMilliseconds);
+    unsubscribe = ipc.onMessage((message) => {
+      if (message.event !== eventName) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolveEvent();
+    });
+  });
 }
 
 function delay(milliseconds) {

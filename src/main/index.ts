@@ -19,6 +19,7 @@ import { DeviceIdentityService } from "./services/deviceIdentity";
 import { JellyfinApi } from "./services/jellyfinApi";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
+import { PlayerPreferencesService } from "./services/playerPreferences";
 import { MpvPlayerService } from "./services/mpvPlayer";
 import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
@@ -53,6 +54,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const artwork = new ArtworkService(api);
   const playbackSource = new PlaybackSessionService(api);
   const playbackReporting = new PlaybackReportingService(api, logger);
+  const playerPreferences = new PlayerPreferencesService(app.getPath("userData"));
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
   await rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
@@ -64,7 +66,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     resourcesPath: process.resourcesPath,
     moduleDirectory: __dirname,
   });
-  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, runtime);
+  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });

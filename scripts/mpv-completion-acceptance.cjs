@@ -1,0 +1,201 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const { existsSync, readFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const { join, resolve } = require("node:path");
+const { MpvPlayerService } = require("../dist/main/services/mpvPlayer.js");
+
+const TICKS_PER_SECOND = 10_000_000;
+const root = resolve(__dirname, "..");
+const runtimeDirectory = join(root, ".runtime", "mpv");
+const runtime = {
+  executable: join(runtimeDirectory, "mpv.exe"),
+  inputConfig: join(root, "assets", "mpv", "input.conf"),
+};
+const fixtures = {
+  movie: join(root, ".runtime", "mpv-completion-movie.mp4"),
+  episode: join(root, ".runtime", "mpv-completion-episode.mkv"),
+};
+
+async function run() {
+  assert.equal(existsSync(runtime.executable), true, "Run pnpm setup:mpv first.");
+  createFixture(fixtures.movie);
+  createFixture(fixtures.episode);
+
+  await verifyMovieCompletion();
+  await verifyEpisodeAutoplay();
+  await verifyCountdownCancellation();
+  process.stdout.write("mpv completion acceptance passed (MP4 movie close, MKV 10-second autoplay, cancellation).\n");
+}
+
+async function verifyMovieCompletion() {
+  const harness = createHarness({ movie: fixtures.movie, episode: fixtures.episode });
+  const playback = await harness.player.start("movie-1", "start-over");
+  try {
+    await waitFor(() => harness.player.getState().phase === "ended" && harness.window.showCount === 1, 15000);
+  } catch (error) {
+    const state = harness.player.getState();
+    if (state.playbackId) await harness.player.stop(state.playbackId).catch(() => undefined);
+    throw new Error(`Movie completion timed out: ${JSON.stringify({ state, reports: harness.reports, current: harness.playback.current })}`, { cause: error });
+  }
+  const lifecycle = harness.reports.filter(({ kind }) => kind !== "progress");
+  assert.deepEqual(lifecycle.map(({ kind, itemId }) => ({ kind, itemId })), [
+    { kind: "start", itemId: "movie-1" },
+    { kind: "stop", itemId: "movie-1" },
+  ]);
+  assert.equal(harness.reports.filter(({ kind }) => kind === "stop").length, 1);
+  assert.equal(harness.player.getState().playbackId, null);
+  assert.equal(playback.playbackId.startsWith("playback-"), true);
+}
+
+async function verifyEpisodeAutoplay() {
+  const harness = createHarness({ movie: fixtures.movie, episode: fixtures.episode });
+  const startedAt = Date.now();
+  await harness.player.start("episode-1", "start-over");
+  await waitFor(() => {
+    const state = harness.player.getState();
+    return state.itemId === "episode-2" && state.phase === "playing";
+  }, 25000);
+
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed >= 11500, `Episode transition skipped the 10-second countdown (${elapsed}ms).`);
+  const lifecycle = harness.reports.filter(({ kind }) => kind !== "progress");
+  assert.deepEqual(lifecycle.slice(0, 3).map(({ kind, itemId }) => ({ kind, itemId })), [
+    { kind: "start", itemId: "episode-1" },
+    { kind: "stop", itemId: "episode-1" },
+    { kind: "start", itemId: "episode-2" },
+  ]);
+  assert.equal(harness.playback.nextUpQueries, 1);
+  await harness.player.stop(harness.player.getState().playbackId);
+}
+
+async function verifyCountdownCancellation() {
+  const harness = createHarness({ movie: fixtures.movie, episode: fixtures.episode });
+  const playback = await harness.player.start("episode-1", "start-over");
+  await waitFor(() => harness.playback.nextUpQueries === 1, 15000);
+  await harness.player.stop(playback.playbackId);
+  await delay(1500);
+  assert.equal(harness.player.getState().playbackId, null);
+  assert.equal(harness.reports.some((event) => event.kind === "start" && event.itemId === "episode-2"), false);
+}
+
+function createHarness(paths) {
+  const reports = [];
+  const window = {
+    hidden: false,
+    showCount: 0,
+    isDestroyed: () => false,
+    hide() { this.hidden = true; },
+    show() { this.hidden = false; this.showCount += 1; },
+    focus() {},
+  };
+  const playback = new FixturePlayback(paths);
+  const player = new MpvPlayerService(
+    window,
+    playback,
+    { acceptAuthoritativeEvent: async (event) => { reports.push({ ...event, at: Date.now() }); } },
+    { get: async () => ({ windowMaximized: true }), setWindowMaximized: async () => undefined },
+    runtime,
+  );
+  return { player, playback, reports, window };
+}
+
+class FixturePlayback {
+  constructor(paths) {
+    this.paths = paths;
+    this.sequence = 0;
+    this.current = null;
+    this.nextUpQueries = 0;
+  }
+
+  async start(itemId) {
+    const itemType = itemId.startsWith("movie") ? "Movie" : "Episode";
+    const playbackId = `playback-${++this.sequence}`;
+    this.current = { playbackId, itemId, itemType };
+    return {
+      playbackId,
+      itemId,
+      itemType,
+      seriesId: itemType === "Episode" ? "series-1" : null,
+      mediaSourceId: `source-${itemId}`,
+      mediaUrl: `jellyfin-media://stream/${playbackId}`,
+      delivery: "direct",
+      resumePositionTicks: 0,
+      durationTicks: 3 * TICKS_PER_SECOND,
+      source: "server",
+    };
+  }
+
+  stop(playbackId) {
+    if (!this.current || this.current.playbackId !== playbackId) throw new Error("Playback is no longer active.");
+    this.current = null;
+    return {};
+  }
+
+  clear() { this.current = null; }
+
+  async getNextUpForSeries() {
+    this.nextUpQueries += 1;
+    return { id: "episode-2", type: "Episode", playable: true, seriesId: "series-1" };
+  }
+
+  async handle(request) {
+    if (!this.current) return new Response(null, { status: 404 });
+    const path = this.current.itemType === "Movie" ? this.paths.movie : this.paths.episode;
+    const contentType = this.current.itemType === "Movie" ? "video/mp4" : "video/x-matroska";
+    const bytes = readFileSync(path);
+    const range = request.headers.get("range");
+    if (!range) {
+      return new Response(bytes, {
+        status: 200,
+        headers: { "Content-Type": contentType, "Content-Length": String(bytes.length), "Accept-Ranges": "bytes" },
+      });
+    }
+    const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+    if (!match) return new Response(null, { status: 416 });
+    const start = Number(match[1]);
+    const end = match[2] ? Math.min(Number(match[2]), bytes.length - 1) : bytes.length - 1;
+    if (start > end || start >= bytes.length) return new Response(null, { status: 416 });
+    const body = bytes.subarray(start, end + 1);
+    return new Response(body, {
+      status: 206,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Length": String(body.length),
+        "Content-Range": `bytes ${start}-${end}/${bytes.length}`,
+        "Accept-Ranges": "bytes",
+      },
+    });
+  }
+}
+
+function createFixture(outputPath) {
+  if (existsSync(outputPath)) return;
+  const result = spawnSync(join(runtimeDirectory, "mpv.com"), [
+    "--no-config",
+    "--no-audio",
+    "--ovc=mpeg4",
+    `--o=${outputPath}`,
+    "av://lavfi:testsrc2=duration=3:size=640x360:rate=24",
+  ], { cwd: root, encoding: "utf8", windowsHide: true });
+  if (result.status !== 0 || !existsSync(outputPath)) throw new Error(`Could not generate ${outputPath}.`);
+}
+
+async function waitFor(predicate, timeoutMilliseconds) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await delay(50);
+  }
+  throw new Error("Timed out waiting for real mpv completion behavior.");
+}
+
+function delay(milliseconds) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+void run().catch((error) => {
+  process.stderr.write(`${error?.stack || String(error)}\n`);
+  process.exitCode = 1;
+});

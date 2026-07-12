@@ -128,6 +128,9 @@ async function runElectronChild() {
         playbackReports.push({ kind: event.kind, positionTicks: event.positionTicks, paused: event.paused });
         await reporting.acceptAuthoritativeEvent(event);
       },
+    }, {
+      get: async () => ({ windowMaximized: true }),
+      setWindowMaximized: async () => undefined,
     }, runtime);
     player.onState((state) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
@@ -150,17 +153,16 @@ async function runElectronChild() {
     await test("UI Play launches main-owned mpv without exposing a source", () => requireScenario(live, "mpvStart"));
     await test("typed mpv pause and seek controls use authoritative state", () => requireScenario(live, "mpvTransport"));
     await test("typed mpv track selection remains allowlisted", () => requireScenario(live, "mpvTracks"));
-    await test("Electron-owned mpv fullscreen toggles through typed IPC", () => requireScenario(live, "mpvFullscreen"));
-    await test("embedded mpv output follows Electron player-window resize", async () => {
-      let bounds;
-      try { bounds = player.setWindowSize(960, 640); }
-      catch { throw coded("MPV_HOST_UNAVAILABLE_FOR_RESIZE"); }
-      if (bounds.width !== 960 || bounds.height !== 640) throw coded("MPV_HOST_RESIZE_FAILED");
-      await delay(250);
-      let output;
-      try { output = await player.getOutputDimensions(); }
-      catch { throw coded("MPV_OUTPUT_DIMENSIONS_UNAVAILABLE"); }
-      if (output.width < 900 || output.height < 540) throw coded("MPV_OUTPUT_RESIZE_FAILED");
+    await test("main-controlled native mpv fullscreen toggles through typed IPC", () => requireScenario(live, "mpvFullscreen"));
+    await test("native mpv output follows a main-controlled window scale change", async () => {
+      let before;
+      let after;
+      try {
+        before = await player.getOutputDimensions();
+        after = await player.setWindowScale(0.5);
+      } catch { throw coded("MPV_OUTPUT_DIMENSIONS_UNAVAILABLE"); }
+      if (after.width >= before.width * 0.9 && after.height >= before.height * 0.9) throw coded("MPV_OUTPUT_RESIZE_FAILED");
+      if (after.width < 240 || after.height < 135) throw coded("MPV_OUTPUT_RESIZE_INVALID");
     });
     await test("closing mpv restores the prior route and scroll position", async () => {
       if (!live.playback?.playbackId) throw coded("MPV_START_DEPENDENCY");

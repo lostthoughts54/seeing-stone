@@ -6,6 +6,7 @@ export interface MpvMessage {
   data?: unknown;
   id?: number;
   args?: unknown[];
+  reason?: string;
   request_id?: number;
   error?: string;
 }

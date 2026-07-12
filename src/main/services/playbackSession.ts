@@ -3,6 +3,7 @@ import type { PlaybackStartResult, PlaybackState } from "../../shared/contracts"
 import { AppError } from "./errors";
 interface PlaybackApi {
   getDetails(itemId: string): Promise<import("../../shared/contracts").MediaItem>;
+  getNextUpForSeries?(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null>;
   getMediaSourceCapabilities(itemId: string): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
   fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response>;
   fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response>;
@@ -18,6 +19,8 @@ interface PlaybackRecord {
 
 export interface ResolvedPlaybackSource extends PlaybackStartResult {
   itemId: string;
+  itemType: "Movie" | "Episode" | "Video";
+  seriesId: string | null;
   mediaSourceId: string;
   mediaUrl: string;
   delivery: "direct" | "transcode";
@@ -86,6 +89,8 @@ export class PlaybackSessionService {
     return {
       playbackId,
       itemId,
+      itemType: details.type === "Episode" ? "Episode" : details.type === "Movie" ? "Movie" : "Video",
+      seriesId: details.seriesId,
       mediaSourceId: source.id,
       mediaUrl: `jellyfin-media://stream/${playbackId}`,
       resumePositionTicks: resumeMode === "resume" ? details.userData.playbackPositionTicks : 0,
@@ -93,6 +98,10 @@ export class PlaybackSessionService {
       source: "server",
       delivery,
     };
+  }
+
+  async getNextUpForSeries(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null> {
+    return this.api.getNextUpForSeries?.(seriesId) ?? null;
   }
 
   stop(playbackId: string): PlaybackState {

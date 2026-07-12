@@ -292,6 +292,20 @@ export class JellyfinApi {
     };
   }
 
+  async getNextUpForSeries(seriesId: string): Promise<MediaItem | null> {
+    const session = this.requireSession();
+    const result = asRecord(await this.request("/Shows/NextUp", {
+      UserId: session.userId,
+      SeriesId: seriesId,
+      Limit: "1",
+      Fields: ITEM_FIELDS,
+      EnableResumable: "true",
+    }));
+    const item = this.items(result).map(sanitizeMediaItem)
+      .find((entry) => entry.type === "Episode" && entry.playable && entry.seriesId === seriesId);
+    return item ?? null;
+  }
+
   async getLibraryItems(type: "Movie" | "Series", limit: number): Promise<MediaItem[]> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {

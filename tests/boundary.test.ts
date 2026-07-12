@@ -44,8 +44,10 @@ describe("renderer and preload security boundary", () => {
       "src/main/services/mpvIpc.ts",
       "src/main/services/mpvPlayer.ts",
       "src/main/services/mpvRuntime.ts",
+      "src/main/services/playbackCompletion.ts",
       "src/main/services/playbackProxy.ts",
       "src/main/services/playbackSession.ts",
+      "src/main/services/playerPreferences.ts",
       "src/main/services/serverDiscovery.ts",
     ];
     const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
@@ -63,12 +65,14 @@ describe("renderer and preload security boundary", () => {
     expect(preload).toContain("ipcRenderer.removeListener(IPC.playbackStateChanged, receive)");
   });
 
-  it("uses a native BaseWindow host without a Chromium surface covering mpv", async () => {
+  it("uses a main-controlled native mpv window without failed Electron HWND embedding", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
-    expect(player).toContain('import { BaseWindow, BrowserWindow } from "electron"');
-    expect(player).toContain("private host: BaseWindow | null");
-    expect(player).toContain("const host = new BaseWindow({");
-    expect(player).not.toMatch(/const host = new BrowserWindow\s*\(/);
+    expect(player).toContain('"--force-window=immediate"');
+    expect(player).toContain('"--title=LocalFirst Jellyfin Player"');
+    expect(player).toContain('"--geometry=1280x720"');
+    expect(player).toContain("this.mainWindow.hide()");
+    expect(player).toContain("this.mainWindow.show()");
+    expect(player).not.toMatch(/--wid|new BaseWindow\s*\(|const host = new BrowserWindow\s*\(/);
   });
 
   it("pins hardened BrowserWindow settings and renderer network denial", async () => {
