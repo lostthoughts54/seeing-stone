@@ -1,4 +1,5 @@
-import type { MediaItem } from "../../shared/contracts";
+import type { MediaItem, WatchedStateResult } from "../../shared/contracts";
+import { AppError } from "./errors";
 import type { AuthenticatedContext } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { SqlitePersistenceService } from "./persistence";
@@ -21,6 +22,8 @@ interface OfflineSyncApi {
 
 type OfflineSyncPersistence = Pick<SqlitePersistenceService,
   | "recordPlaybackRevision"
+  | "getMediaItem"
+  | "upsertMediaItem"
   | "getPlaybackHead"
   | "listPendingProgress"
   | "markProgressSucceeded"
@@ -108,6 +111,57 @@ export class OfflineSynchronizationService {
       userId: identity.userId,
       occurredAt: Date.now(),
     });
+  }
+
+  async setWatched(itemId: string, watched: boolean): Promise<WatchedStateResult> {
+    const identity = this.api.getAuthenticatedContext();
+    const existing = await this.persistence.getMediaItem(identity.serverId, identity.userId, itemId);
+    if (!existing) {
+      const item = await this.api.getDetails(itemId);
+      if (item.id !== itemId) {
+        throw new AppError("MEDIA_IDENTITY_MISMATCH", "Jellyfin returned a different media item.", 502);
+      }
+      const itemType = item.type === "Movie" || item.type === "Episode" || item.type === "Video"
+        ? item.type
+        : null;
+      if (!itemType) {
+        throw new AppError("WATCHED_STATE_UNSUPPORTED", "Watched state can only be changed for playable movies and episodes.", 422);
+      }
+      await this.persistence.upsertMediaItem({
+        serverId: identity.serverId,
+        userId: identity.userId,
+        itemId: item.id,
+        itemType,
+        name: item.name,
+        seriesId: item.seriesId,
+        seasonId: item.seasonId,
+        runTimeTicks: Math.max(0, Math.floor(item.runTimeTicks)),
+      });
+    }
+    const revision = await this.capture({
+      itemId,
+      actionKind: watched ? "mark_watched" : "mark_unwatched",
+      positionTicks: 0,
+      watched,
+    });
+    const cycleWasAlreadyRunning = this.running !== null;
+    await this.syncNow();
+    // If another cycle was already in flight when the action was captured, a
+    // second pass includes this newer revision immediately instead of waiting
+    // for the periodic retry.
+    if (cycleWasAlreadyRunning) await this.syncNow();
+    const head = await this.persistence.getPlaybackHead(
+      revision.serverId,
+      revision.userId,
+      revision.itemId,
+    );
+    return {
+      itemId,
+      watched,
+      synchronization: head && head.lastSucceededRevision >= revision.localRevision
+        ? "synchronized"
+        : "queued",
+    };
   }
 
   setActive(revision: PlaybackRevisionRecord, active: boolean): void {

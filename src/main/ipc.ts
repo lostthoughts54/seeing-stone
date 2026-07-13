@@ -20,6 +20,7 @@ import {
   playbackTrackSchema,
   searchSchema,
   serverUrlSchema,
+  watchedStateSchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
 import type { DownloadManager } from "./services/downloadManager";
@@ -66,7 +67,7 @@ export function registerIpcHandlers(
   artwork: ArtworkService,
   playback: MpvPlayerService,
   downloads: DownloadManager,
-  synchronization?: Pick<OfflineSynchronizationService, "activate" | "deactivate">,
+  synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched">,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -87,21 +88,21 @@ export function registerIpcHandlers(
     artwork.clear();
     await playback.clear();
     await downloads.deactivate();
-    synchronization?.deactivate();
+    synchronization.deactivate();
     const session = await api.login(value.connectionId, value.username, value.password, value.remember);
     await downloads.activate();
-    synchronization?.activate();
+    synchronization.activate();
     return session;
   });
   register(IPC.sessionRestore, async () => {
     await downloads.deactivate();
-    synchronization?.deactivate();
+    synchronization.deactivate();
     const session = await api.restore();
     artwork.clear();
     await playback.clear();
     if (session.authenticated) {
       await downloads.activate();
-      synchronization?.activate();
+      synchronization.activate();
     }
     return session;
   });
@@ -110,7 +111,7 @@ export function registerIpcHandlers(
     artwork.clear();
     await playback.clear();
     await downloads.deactivate();
-    synchronization?.deactivate();
+    synchronization.deactivate();
     return api.logout();
   });
   register(IPC.homeGet, () => api.getHome());
@@ -122,6 +123,10 @@ export function registerIpcHandlers(
   register(IPC.searchQuery, (input) => api.search(searchSchema.strict().parse(input).query));
   register(IPC.itemsGetDetails, (input) => api.getDetails(itemIdSchema.strict().parse(input).itemId));
   register(IPC.itemsOpenTrailer, async (input) => ({ opened: await api.openTrailer(itemIdSchema.strict().parse(input).itemId) }));
+  register(IPC.itemsSetWatched, (input) => {
+    const value = watchedStateSchema.strict().parse(input);
+    return synchronization.setWatched(value.itemId, value.watched);
+  });
   register(IPC.showsGetSeasons, (input) => api.getSeasons(itemIdSchema.strict().parse(input).itemId));
   register(IPC.showsGetEpisodes, (input) => {
     const value = episodesSchema.strict().parse(input);

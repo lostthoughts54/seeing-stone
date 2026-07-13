@@ -154,6 +154,12 @@ export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: b
 export interface DownloadStartInput { itemId: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
+export interface WatchedStateInput { itemId: string; watched: boolean }
+export interface WatchedStateResult {
+  itemId: string;
+  watched: boolean;
+  synchronization: "synchronized" | "queued";
+}
 
 export interface JellyfinBridge {
   server: {
@@ -175,6 +181,7 @@ export interface JellyfinBridge {
   items: {
     getDetails(input: ItemIdInput): Promise<MediaItem>;
     openTrailer(input: ItemIdInput): Promise<{ opened: boolean }>;
+    setWatched(input: WatchedStateInput): Promise<WatchedStateResult>;
   };
   shows: {
     getSeasons(input: ItemIdInput): Promise<MediaItem[]>;
@@ -223,6 +230,7 @@ export const IPC = {
   searchQuery: "search:query",
   itemsGetDetails: "items:get-details",
   itemsOpenTrailer: "items:open-trailer",
+  itemsSetWatched: "items:set-watched",
   showsGetSeasons: "shows:get-seasons",
   showsGetEpisodes: "shows:get-episodes",
   artworkGetUrl: "artwork:get-url",

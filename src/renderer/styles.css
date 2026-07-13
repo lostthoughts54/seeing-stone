@@ -1103,7 +1103,7 @@ select {
   display: grid;
   gap: 8px;
   grid-template-columns: 1fr;
-  width: 112px;
+  width: 140px;
 }
 
 .episode-actions button {

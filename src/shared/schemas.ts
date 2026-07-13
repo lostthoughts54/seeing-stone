@@ -11,6 +11,8 @@ export const loginSchema = z.object({
 
 export const itemIdSchema = z.object({ itemId: z.string().min(1).max(128) });
 
+export const watchedStateSchema = itemIdSchema.extend({ watched: z.boolean() });
+
 export const libraryItemsSchema = z.object({
   type: z.enum(["Movie", "Series"]),
   limit: z.number().int().min(1).max(500),

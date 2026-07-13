@@ -75,6 +75,8 @@ const detailPlayLabel = byId<HTMLElement>("detailPlayLabel");
 const detailDownloadButton = byId<HTMLButtonElement>("detailDownloadButton");
 const detailDownloadLabel = byId<HTMLElement>("detailDownloadLabel");
 const detailTrailerButton = byId<HTMLButtonElement>("detailTrailerButton");
+const detailWatchedButton = byId<HTMLButtonElement>("detailWatchedButton");
+const detailWatchedLabel = byId<HTMLElement>("detailWatchedLabel");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
 const episodeList = byId<HTMLOListElement>("episodeList");
@@ -650,8 +652,73 @@ function renderDetails(item: MediaItem): void {
   detailTrailerButton.onclick = item.hasTrailer
     ? () => window.jellyfin.items.openTrailer({ itemId: item.id }).catch((error) => showToast(errorMessage(error, "The trailer could not be opened.")))
     : null;
+  const watchedCapable = item.type === "Movie" || item.type === "Episode" || item.type === "Video";
+  detailWatchedButton.classList.toggle("is-hidden", !watchedCapable);
+  detailWatchedButton.disabled = !watchedCapable;
+  detailWatchedLabel.textContent = item.userData?.played ? "Mark Unwatched" : "Mark Watched";
+  detailWatchedButton.onclick = watchedCapable
+    ? () => setWatchedState(item, !item.userData.played, detailWatchedButton)
+    : null;
   updateDetailPlayButton();
   syncVisibleDownloadButtons();
+}
+
+function applyKnownWatchedState(itemId: string, watched: boolean): void {
+  const candidates = [
+    ...state.homeRows.flatMap((row) => row.items),
+    ...state.resumeItems,
+    ...state.nextUpItems,
+    ...(state.libraryCache.Movie || []),
+    ...(state.libraryCache.Series || []),
+    ...state.episodes,
+    state.featureItem,
+    state.detailItem,
+    state.detailPlayItem,
+    state.playbackItem,
+  ];
+  const seen = new Set<MediaItem>();
+  for (const candidate of candidates) {
+    if (!candidate || candidate.id !== itemId || seen.has(candidate)) continue;
+    seen.add(candidate);
+    candidate.userData = {
+      ...candidate.userData,
+      played: watched,
+      playbackPositionTicks: 0,
+      playedPercentage: watched ? 100 : 0,
+    };
+  }
+  if (watched) {
+    state.resumeItems = state.resumeItems.filter((item) => item.id !== itemId);
+    for (const row of state.homeRows) {
+      if (row.title === "Continue Watching") row.items = row.items.filter((item) => item.id !== itemId);
+    }
+  }
+}
+
+async function setWatchedState(item: MediaItem, watched: boolean, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    const result = await window.jellyfin.items.setWatched({ itemId: item.id, watched });
+    applyKnownWatchedState(item.id, result.watched);
+    if (state.detailItem?.id === item.id) renderDetails(state.detailItem);
+    if (state.episodes.some((episode) => episode.id === item.id)) {
+      state.detailPlayItem = state.episodes.find((episode) => !episode.userData.played)
+        || state.episodes[0]
+        || null;
+      updateDetailPlayButton();
+      renderEpisodes();
+    }
+    const stateLabel = result.watched ? "watched" : "unwatched";
+    showToast(result.synchronization === "queued"
+      ? `Marked ${stateLabel}. It will sync when Jellyfin is available.`
+      : `Marked ${stateLabel}.`);
+    if (result.synchronization === "synchronized") {
+      void loadHome().catch(() => undefined);
+    }
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "Watched state could not be changed."));
+  }
 }
 
 function updateDetailPlayButton(): void {
@@ -757,6 +824,7 @@ function renderEpisodes(): void {
     const actions = document.createElement("span");
     const play = document.createElement("button");
     const download = document.createElement("button");
+    const watched = document.createElement("button");
 
     row.className = "episode-row";
     thumb.className = "episode-thumb";
@@ -792,7 +860,10 @@ function renderEpisodes(): void {
     download.dataset.downloadItem = episode.id;
     download.textContent = "Download";
     download.addEventListener("click", () => startDownload(episode));
-    actions.append(play, download);
+    watched.type = "button";
+    watched.textContent = episode.userData?.played ? "Mark Unwatched" : "Mark Watched";
+    watched.addEventListener("click", () => setWatchedState(episode, !episode.userData.played, watched));
+    actions.append(play, download, watched);
 
     row.append(thumb, copy, actions);
     episodeList.append(row);
@@ -1193,6 +1264,10 @@ function resetSignedInState(): void {
   detailDownloadLabel.textContent = "Download";
   detailTrailerButton.disabled = true;
   detailTrailerButton.onclick = null;
+  detailWatchedButton.classList.add("is-hidden");
+  detailWatchedButton.disabled = true;
+  detailWatchedButton.onclick = null;
+  detailWatchedLabel.textContent = "Mark Watched";
 
   videoPlayer.pause();
   videoPlayer.onloadedmetadata = null;

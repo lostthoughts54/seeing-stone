@@ -20,6 +20,7 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Sends authoritative playback reports from main-side mpv events.
 - Persists those events as per-server, per-user, per-item revisions and retries them when Jellyfin becomes reachable.
 - Coalesces ordinary offline progress without dropping completion or newer explicit Start Over, replay, watched, or unwatched actions.
+- Lets users explicitly mark movies or episodes watched or unwatched from details and episode rows; offline actions remain queued durably.
 - Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
 - Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
 - Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.

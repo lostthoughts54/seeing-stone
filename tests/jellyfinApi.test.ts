@@ -151,6 +151,18 @@ describe("JellyfinApi main-side boundary", () => {
       positionTicks: 1000,
       watched: false,
     });
+    await api.synchronizeOfflinePlayback({
+      itemId: "movie-1",
+      actionKind: "mark_watched",
+      positionTicks: 0,
+      watched: true,
+    });
+    await api.synchronizeOfflinePlayback({
+      itemId: "movie-1",
+      actionKind: "mark_unwatched",
+      positionTicks: 0,
+      watched: false,
+    });
 
     const rendererPayload = JSON.stringify({
       safeSession,
@@ -176,7 +188,7 @@ describe("JellyfinApi main-side boundary", () => {
       PlayMethod: "DirectPlay",
     });
     const watchedRequests = observedRequests.filter((entry) => entry.url.pathname === "/UserPlayedItems/movie-1");
-    expect(watchedRequests.map((entry) => entry.init?.method)).toEqual(["POST", "DELETE"]);
+    expect(watchedRequests.map((entry) => entry.init?.method)).toEqual(["POST", "DELETE", "POST", "DELETE"]);
     const offlineStops = observedRequests.filter((entry) => entry.url.pathname === "/Sessions/Playing/Stopped");
     expect(offlineStops.map((entry) => JSON.parse(String(entry.init?.body)).PositionTicks)).toEqual([100000000, 1000]);
     expect(rendererPayload).not.toContain("RequiredHttpHeaders");

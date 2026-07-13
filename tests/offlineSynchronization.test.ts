@@ -7,6 +7,8 @@ import {
 import type {
   PlaybackHeadRecord,
   PlaybackRevisionRecord,
+  MediaItemRecord,
+  MediaItemRecordInput,
   RecordPlaybackRevisionInput,
 } from "../src/main/services/persistenceTypes";
 
@@ -40,6 +42,21 @@ function revision(localRevision: number, overrides: Partial<PlaybackRevisionReco
 class MemoryPlaybackPersistence {
   revisions: PlaybackRevisionRecord[] = [];
   heads = new Map<string, PlaybackHeadRecord>();
+  mediaItems = new Map<string, MediaItemRecord>();
+
+  async getMediaItem(_serverId: string, _userId: string, itemId: string): Promise<MediaItemRecord | null> {
+    return structuredClone(this.mediaItems.get(itemId) ?? null);
+  }
+
+  async upsertMediaItem(input: MediaItemRecordInput): Promise<void> {
+    const previous = this.mediaItems.get(input.itemId);
+    const now = Date.now();
+    this.mediaItems.set(input.itemId, {
+      ...input,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+    });
+  }
 
   async recordPlaybackRevision(input: RecordPlaybackRevisionInput): Promise<PlaybackRevisionRecord> {
     const existing = this.revisions.filter((entry) => entry.itemId === input.itemId);
@@ -342,5 +359,86 @@ describe("OfflineSynchronizationService", () => {
 
     expect(persistence.revisions[0]).toMatchObject({ syncState: "pending", attemptCount: 0, syncedAt: null });
     expect(persistence.heads.get("episode-1")?.lastSucceededRevision).toBe(0);
+  });
+
+  it("authorizes explicit watched toggles main-side and persists them as newer durable revisions", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const sent: Array<{ actionKind: string; watched: boolean; positionTicks: number }> = [];
+    const getDetails = vi.fn(async () => remoteItem(0, false));
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getDetails,
+      synchronizeOfflinePlayback: vi.fn(async (input) => { sent.push(input); }),
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    service.activate();
+
+    await expect(service.setWatched("episode-1", true)).resolves.toEqual({
+      itemId: "episode-1",
+      watched: true,
+      synchronization: "synchronized",
+    });
+    await expect(service.setWatched("episode-1", false)).resolves.toEqual({
+      itemId: "episode-1",
+      watched: false,
+      synchronization: "synchronized",
+    });
+    await service.shutdown();
+
+    expect(getDetails).toHaveBeenCalledTimes(1);
+    expect(persistence.mediaItems.get("episode-1")).toMatchObject({
+      itemId: "episode-1",
+      itemType: "Episode",
+      name: "Episode",
+    });
+    expect(sent).toEqual([
+      { itemId: "episode-1", actionKind: "mark_watched", positionTicks: 0, watched: true },
+      { itemId: "episode-1", actionKind: "mark_unwatched", positionTicks: 0, watched: false },
+    ]);
+    expect(persistence.revisions.map((entry) => [entry.localRevision, entry.actionKind, entry.syncState])).toEqual([
+      [1, "mark_watched", "succeeded"],
+      [2, "mark_unwatched", "succeeded"],
+    ]);
+    expect(persistence.heads.get("episode-1")).toMatchObject({
+      lastSucceededRevision: 2,
+      lastSucceededPositionTicks: 0,
+      lastSucceededWatched: false,
+    });
+  });
+
+  it("returns queued for an explicit watched action when Jellyfin is unavailable", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    await persistence.upsertMediaItem({
+      serverId: context.serverId,
+      userId: context.userId,
+      itemId: "episode-1",
+      itemType: "Episode",
+      name: "Episode",
+      seriesId: "series-1",
+      seasonId: "season-1",
+      runTimeTicks: 1000,
+    });
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getDetails: vi.fn(),
+      synchronizeOfflinePlayback: vi.fn(async () => {
+        throw Object.assign(new Error("offline"), { code: "NETWORK_ERROR" });
+      }),
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    service.activate();
+
+    await expect(service.setWatched("episode-1", true)).resolves.toEqual({
+      itemId: "episode-1",
+      watched: true,
+      synchronization: "queued",
+    });
+    await service.shutdown();
+
+    expect(persistence.revisions[0]).toMatchObject({
+      actionKind: "mark_watched",
+      watched: true,
+      syncState: "failed",
+      attemptCount: 1,
+      lastError: "NETWORK_ERROR",
+    });
   });
 });

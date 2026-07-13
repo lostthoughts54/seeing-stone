@@ -45,9 +45,22 @@ function createHarness() {
     activate: vi.fn(), deactivate: vi.fn(), list: vi.fn(), start: vi.fn(), pause: vi.fn(), resume: vi.fn(),
     retry: vi.fn(), cancel: vi.fn(), delete: vi.fn(), setKeep: vi.fn(),
   };
-  registerIpcHandlers(ipcMain as never, window as never, api as never, artwork as never, playback as never, downloads as never);
+  const synchronization = {
+    activate: vi.fn(),
+    deactivate: vi.fn(),
+    setWatched: vi.fn(async (itemId: string, watched: boolean) => ({ itemId, watched, synchronization: "synchronized" })),
+  };
+  registerIpcHandlers(
+    ipcMain as never,
+    window as never,
+    api as never,
+    artwork as never,
+    playback as never,
+    downloads as never,
+    synchronization as never,
+  );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
@@ -112,5 +125,27 @@ describe("IPC authorization and allowlist", () => {
     expect(JSON.stringify(result)).not.toContain("SECRET_TOKEN_SENTINEL");
     expect(JSON.stringify(result)).not.toContain("Sensitive Folder");
     expect(downloads.start).not.toHaveBeenCalled();
+  });
+
+  it("allows only a boolean explicit watched action without renderer-authored playback data", async () => {
+    const { handlers, validEvent, synchronization } = createHarness();
+    await expect(handlers.get(IPC.itemsSetWatched)?.(validEvent, {
+      itemId: "episode-1",
+      watched: true,
+    })).resolves.toEqual({
+      ok: true,
+      data: { itemId: "episode-1", watched: true, synchronization: "synchronized" },
+    });
+    expect(synchronization.setWatched).toHaveBeenCalledWith("episode-1", true);
+
+    const rejected = await handlers.get(IPC.itemsSetWatched)?.(validEvent, {
+      itemId: "episode-1",
+      watched: false,
+      positionTicks: 999,
+      playedPercentage: 50,
+      url: "https://server.invalid/secret",
+    }) as { ok: boolean };
+    expect(rejected.ok).toBe(false);
+    expect(synchronization.setWatched).toHaveBeenCalledTimes(1);
   });
 });

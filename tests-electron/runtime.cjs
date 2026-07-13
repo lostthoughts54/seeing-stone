@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 11;
+const EXPECTED_TESTS = 12;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -109,6 +109,7 @@ async function runElectronChild() {
     let artworkFetchCount = 0;
     let connectionCount = 0;
     let downloadStartCount = 0;
+    const watchedActions = [];
     let expireHome = false;
     const streamRequests = [];
     const safeSession = {
@@ -121,6 +122,31 @@ async function runElectronChild() {
         version: "10.11.11",
       },
       user: { id: "runtime-user-id", name: "Runtime user" },
+    };
+    const runtimeItem = {
+      id: "runtime-movie-id",
+      name: "Runtime movie",
+      type: "Movie",
+      overview: "Runtime watched-state test item.",
+      productionYear: 2026,
+      premiereYear: 2026,
+      officialRating: null,
+      communityRating: null,
+      runTimeTicks: 600000000,
+      genres: [],
+      primaryImageAspectRatio: null,
+      imageTags: {},
+      backdropImageTag: null,
+      parentThumbItemId: null,
+      parentThumbImageTag: null,
+      seriesId: null,
+      seriesName: null,
+      seasonId: null,
+      indexNumber: null,
+      parentIndexNumber: null,
+      userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+      hasTrailer: false,
+      playable: true,
     };
     const api = {
       async connect(url) {
@@ -138,7 +164,15 @@ async function runElectronChild() {
       async getLibraries() { return []; },
       async getHome() {
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
-        return { libraries: [], resumeItems: [], nextUpItems: [], latestRows: [] };
+        return {
+          libraries: [],
+          resumeItems: [],
+          nextUpItems: [],
+          latestRows: [{
+            library: { id: "runtime-library", name: "Runtime library", collectionType: "movies" },
+            items: [runtimeItem],
+          }],
+        };
       },
       async logout() {
         return { authenticated: false, persistence: "none", server: null, user: null };
@@ -151,6 +185,7 @@ async function runElectronChild() {
         });
       },
       async getDetails(itemId) {
+        if (itemId === runtimeItem.id) return runtimeItem;
         return {
           id: itemId,
           name: "Runtime item",
@@ -213,6 +248,15 @@ async function runElectronChild() {
       async cancel() { throw new Error("not used"); },
       async delete() { throw new Error("not used"); },
       async setKeep() { throw new Error("not used"); },
+    };
+    const synchronization = {
+      activate() {},
+      deactivate() {},
+      async setWatched(itemId, watched) {
+        watchedActions.push({ itemId, watched });
+        runtimeItem.userData = { played: watched, playbackPositionTicks: 0, playedPercentage: watched ? 100 : 0 };
+        return { itemId, watched, synchronization: "synchronized" };
+      },
     };
 
     rendererSession.protocol.handle("app", security.serveRendererAsset);
@@ -314,7 +358,7 @@ async function runElectronChild() {
     });
 
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloads);
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloads, synchronization);
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });
@@ -417,7 +461,7 @@ async function runElectronChild() {
         home: ["get"],
         libraries: ["getItems", "list"],
         search: ["query"],
-        items: ["getDetails", "openTrailer"],
+        items: ["getDetails", "openTrailer", "setWatched"],
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
@@ -440,6 +484,50 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("movie details toggle explicit watched state through only the narrow item action", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector('[data-media-item="runtime-movie-id"]')) break;
+          await delay(20);
+        }
+        document.querySelector('[data-media-item="runtime-movie-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime movie") break;
+          await delay(20);
+        }
+        const button = document.getElementById("detailWatchedButton");
+        const initial = button.textContent.trim();
+        button.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (button.textContent.includes("Mark Unwatched") && !button.disabled) break;
+          await delay(20);
+        }
+        const afterWatched = button.textContent.trim();
+        button.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (button.textContent.includes("Mark Watched") && !button.disabled) break;
+          await delay(20);
+        }
+        const afterUnwatched = button.textContent.trim();
+        document.getElementById("detailsBackButton").click();
+        return {
+          initial,
+          afterWatched,
+          afterUnwatched,
+          hidden: button.classList.contains("is-hidden"),
+        };
+      })()`);
+      assert.equal(result.initial, "Mark Watched");
+      assert.equal(result.afterWatched, "Mark Unwatched");
+      assert.equal(result.afterUnwatched, "Mark Watched");
+      assert.equal(result.hidden, false);
+      assert.deepEqual(watchedActions, [
+        { itemId: runtimeItem.id, watched: true },
+        { itemId: runtimeItem.id, watched: false },
+      ]);
     });
 
     await test("downloaded media exposes Play and invokes only the narrow playback action", async () => {

@@ -378,6 +378,25 @@ test("offline playback survives a failed attempt and synchronizes after reconnec
     assert.equal(head.lastSucceededRevision, captured.localRevision);
     assert.equal(head.lastSucceededPositionTicks, 450_000_000);
     assert.equal(head.lastSucceededWatched, false);
+
+    assert.deepEqual(await synchronization.setWatched(media.itemId, true), {
+      itemId: media.itemId,
+      watched: true,
+      synchronization: "synchronized",
+    });
+    assert.deepEqual(await synchronization.setWatched(media.itemId, false), {
+      itemId: media.itemId,
+      watched: false,
+      synchronization: "synchronized",
+    });
+    assert.deepEqual(sent.slice(1), [
+      { itemId: media.itemId, actionKind: "mark_watched", positionTicks: 0, watched: true },
+      { itemId: media.itemId, actionKind: "mark_unwatched", positionTicks: 0, watched: false },
+    ]);
+    const toggledHead = await service.getPlaybackHead(identity.serverId, identity.userId, media.itemId);
+    assert.equal(toggledHead.lastSucceededRevision, captured.localRevision + 2);
+    assert.equal(toggledHead.lastSucceededPositionTicks, 0);
+    assert.equal(toggledHead.lastSucceededWatched, false);
   } finally {
     await synchronization.shutdown();
     await service.close();

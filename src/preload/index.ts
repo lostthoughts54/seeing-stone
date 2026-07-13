@@ -29,6 +29,8 @@ import {
   type SearchInput,
   type ServerConnection,
   type ServerUrlInput,
+  type WatchedStateInput,
+  type WatchedStateResult,
 } from "../shared/contracts";
 
 async function invoke<T>(channel: string, input?: unknown): Promise<T> {
@@ -66,6 +68,7 @@ const bridge: JellyfinBridge = {
   items: {
     getDetails: (input: ItemIdInput) => invoke<MediaItem>(IPC.itemsGetDetails, input),
     openTrailer: (input: ItemIdInput) => invoke<{ opened: boolean }>(IPC.itemsOpenTrailer, input),
+    setWatched: (input: WatchedStateInput) => invoke<WatchedStateResult>(IPC.itemsSetWatched, input),
   },
   shows: {
     getSeasons: (input: ItemIdInput) => invoke<MediaItem[]>(IPC.showsGetSeasons, input),
