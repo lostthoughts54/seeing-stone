@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { IPC } from "../src/shared/contracts";
 
 describe("renderer and preload security boundary", () => {
+  it("builds every Electron target before the documented development launch", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageJson.scripts?.start).toBe("pnpm run build && electron .");
+  });
+
   it("exposes only the explicit bridge and no playback-report channel", async () => {
     expect(Object.keys(IPC)).not.toContain("request");
     expect(Object.values(IPC).join(" ")).not.toMatch(/report-start|report-progress|report-stop|sessions\/playing/i);

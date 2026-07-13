@@ -13,7 +13,7 @@
     "clean": "node scripts/clean.mjs",
     "setup:mpv": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-mpv.ps1",
     "package:mpv-spike": "pnpm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-mpv-package.ps1",
-    "start": "electron .",
+    "start": "pnpm run build && electron .",
     "test": "pnpm run typecheck && pnpm run test:unit && pnpm run test:core && pnpm run test:electron && pnpm run test:persistence-runtime && pnpm run test:media-probe",
     "test:unit": "vitest run",
     "test:core": "pnpm run clean && pnpm run build:main && node --test tests-node/*.test.cjs",
