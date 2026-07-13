@@ -1,6 +1,6 @@
 # Unified local-first playback
 
-Milestone 6 keeps one Play action throughout Home, libraries, search, details, seasons, and episode rows. The renderer submits only a Jellyfin item ID and receives only sanitized playback state.
+Milestone 6 keeps one Play action throughout Home, libraries, search, details, seasons, episode rows, and the Downloads panel. A finalized download remains playable from Downloads when the Jellyfin home screen cannot be reached. The renderer submits only a Jellyfin item ID and receives only sanitized playback state.
 
 ## Resolution order
 

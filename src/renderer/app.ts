@@ -1009,6 +1009,14 @@ function renderDownloads(): void {
     }
 
     controls.className = "download-controls";
+    if (download.state === "downloaded") {
+      const play = document.createElement("button");
+      play.type = "button";
+      play.className = "primary";
+      play.textContent = "Play";
+      play.addEventListener("click", () => { void playDownloadedItem(download); });
+      controls.append(play);
+    }
     const action = (label: string, kind: "pause" | "resume" | "retry" | "cancel" | "delete"): void => {
       const button = document.createElement("button");
       button.type = "button";
@@ -1045,26 +1053,32 @@ function renderDownloads(): void {
   }
 }
 
-async function playItem(item: MediaItem): Promise<void> {
-  if (!canPlay(item)) return;
+interface PlaybackPresentation {
+  item: MediaItem | null;
+  itemId: string;
+  resumeMode: "resume" | "start-over";
+  title: string;
+  meta: string;
+  failureMessage: string;
+}
+
+async function startPresentedPlayback(presentation: PlaybackPresentation): Promise<void> {
   const requestId = ++state.playbackRequestId;
   state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  state.playbackItem = item;
-  playerTitle.textContent = item.type === "Episode" && item.seriesName ? item.seriesName : item.name || "Now Playing";
-  playerMeta.textContent = item.type === "Episode"
-    ? [episodeCode(item), item.name].filter(Boolean).join(" - ")
-    : metadataParts(item).join(" - ");
+  state.playbackItem = presentation.item;
+  playerTitle.textContent = presentation.title;
+  playerMeta.textContent = presentation.meta;
 
   let resolved;
   try {
     resolved = await window.jellyfin.playback.start({
-      itemId: item.id,
-      resumeMode: item.userData.playbackPositionTicks > 0 ? "resume" : "start-over",
+      itemId: presentation.itemId,
+      resumeMode: presentation.resumeMode,
     });
   } catch (error) {
     if (requestId !== state.playbackRequestId) return;
     await closePlayer();
-    showToast(errorMessage(error, "Playback could not be started."));
+    showToast(errorMessage(error, presentation.failureMessage));
     return;
   }
   if (requestId !== state.playbackRequestId) {
@@ -1073,6 +1087,32 @@ async function playItem(item: MediaItem): Promise<void> {
   }
   state.playbackId = resolved.playbackId;
   playerSourceBadge.textContent = resolved.source === "local" ? "Local" : "Jellyfin";
+}
+
+async function playDownloadedItem(download: DownloadSummary): Promise<void> {
+  if (download.state !== "downloaded") return;
+  await startPresentedPlayback({
+    item: null,
+    itemId: download.itemId,
+    resumeMode: "resume",
+    title: download.name,
+    meta: `${download.itemType} - Downloaded`,
+    failureMessage: "The downloaded media could not be played.",
+  });
+}
+
+async function playItem(item: MediaItem): Promise<void> {
+  if (!canPlay(item)) return;
+  await startPresentedPlayback({
+    item,
+    itemId: item.id,
+    resumeMode: item.userData.playbackPositionTicks > 0 ? "resume" : "start-over",
+    title: item.type === "Episode" && item.seriesName ? item.seriesName : item.name || "Now Playing",
+    meta: item.type === "Episode"
+      ? [episodeCode(item), item.name].filter(Boolean).join(" - ")
+      : metadataParts(item).join(" - "),
+    failureMessage: "Playback could not be started.",
+  });
 }
 
 async function closePlayer(): Promise<void> {

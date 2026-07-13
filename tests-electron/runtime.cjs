@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 10;
+const EXPECTED_TESTS = 11;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -185,10 +185,27 @@ async function runElectronChild() {
     };
     const artwork = new ArtworkService(api);
     const playback = new PlaybackSessionService(api);
+    const downloadedItem = {
+      downloadId: "runtime-download-id",
+      itemId: "runtime-offline-episode-id",
+      name: "Runtime offline episode",
+      itemType: "Episode",
+      state: "downloaded",
+      bytesDownloaded: 4,
+      expectedSize: 4,
+      progressPercent: 100,
+      keepDownloaded: true,
+      error: null,
+      canPause: false,
+      canResume: false,
+      canRetry: false,
+      canCancel: false,
+      canDelete: true,
+    };
     const downloads = {
       async activate() {},
       async deactivate() {},
-      async list() { return []; },
+      async list() { return [downloadedItem]; },
       async start() { downloadStartCount += 1; throw new Error("not used"); },
       async pause() { throw new Error("not used"); },
       async resume() { throw new Error("not used"); },
@@ -423,6 +440,42 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("downloaded media exposes Play and invokes only the narrow playback action", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector(".download-card")) break;
+          await delay(20);
+        }
+        document.getElementById("downloadsButton").click();
+        const card = [...document.querySelectorAll(".download-card")]
+          .find((entry) => entry.querySelector("strong")?.textContent === "Runtime offline episode");
+        const buttons = [...(card?.querySelectorAll("button") ?? [])];
+        const play = buttons.find((button) => button.textContent === "Play");
+        play?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("playerSourceBadge").textContent === "Jellyfin") break;
+          await delay(20);
+        }
+        return {
+          foundCard: Boolean(card),
+          buttonLabels: buttons.map((button) => button.textContent),
+          playerTitle: document.getElementById("playerTitle").textContent,
+          playerMeta: document.getElementById("playerMeta").textContent,
+          sourceBadge: document.getElementById("playerSourceBadge").textContent,
+        };
+      })()`);
+      assert.equal(result.foundCard, true);
+      assert.deepEqual(result.buttonLabels, ["Play", "Delete copy"]);
+      assert.equal(result.playerTitle, downloadedItem.name);
+      assert.equal(result.playerMeta, "Episode - Downloaded");
+      assert.equal(result.sourceBadge, "Jellyfin");
+      const playbackState = playback.getState();
+      assert.equal(playbackState.itemId, downloadedItem.itemId);
+      assert.equal(playbackState.source, "server");
+      playback.stop(playbackState.playbackId);
     });
 
     await test("rendered media cards use fixed cover geometry", async () => {

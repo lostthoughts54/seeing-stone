@@ -36,4 +36,4 @@ Startup converts an interrupted Downloading job to Paused. A finalized file left
 - Completed copies can be explicitly deleted.
 - Keep Downloaded is durable metadata for future smart-download policy; Milestone 5 never auto-deletes either kept or ordinary downloads.
 
-Normal Play actions now select an exact verified downloaded copy before falling back to Jellyfin. See [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md).
+Normal Play actions now select an exact verified downloaded copy before falling back to Jellyfin. Completed entries also expose Play directly in the Downloads panel, including while the server is unreachable. See [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md).
