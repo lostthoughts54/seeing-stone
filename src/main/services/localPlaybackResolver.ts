@@ -108,10 +108,12 @@ export class LocalPlaybackResolver {
         ? details.type
         : media.itemType;
       const durationTicks = Math.max(0, Math.floor(details?.runTimeTicks || media.runTimeTicks));
+      const previousPositionTicks = Math.max(0, Math.floor(details?.userData.playbackPositionTicks ?? head?.positionTicks ?? 0));
       const resumePositionTicks = resumeMode === "start-over"
         ? 0
         : Math.max(0, Math.min(durationTicks || Number.MAX_SAFE_INTEGER,
-          Math.floor(details?.userData.playbackPositionTicks ?? head?.positionTicks ?? 0)));
+          previousPositionTicks));
+      const previouslyWatched = details?.userData.played ?? head?.watched ?? false;
       return {
         playbackId: randomUUID(),
         itemId,
@@ -123,6 +125,9 @@ export class LocalPlaybackResolver {
         durationTicks,
         source: "local",
         delivery: "local",
+        initialAction: resumeMode !== "start-over"
+          ? "progress"
+          : previouslyWatched ? "replay" : previousPositionTicks > 0 ? "start_over" : "progress",
       };
     }
     return null;

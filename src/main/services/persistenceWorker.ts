@@ -598,7 +598,8 @@ function markProgressSucceeded(serverId: string, userId: string, itemId: string,
     `).get(serverId, userId, itemId, localRevision) as Record<string, unknown> | undefined;
     if (!revision) throw new PersistenceWorkerError("PROGRESS_REVISION_NOT_FOUND", "The playback revision no longer exists.");
     db().prepare(`
-      UPDATE playback_revisions SET sync_state = 'succeeded', synced_at = ?, last_error = NULL
+      UPDATE playback_revisions SET sync_state = 'succeeded', attempt_count = attempt_count + 1,
+        synced_at = ?, last_error = NULL
       WHERE server_id = ? AND user_id = ? AND item_id = ? AND local_revision = ?
     `).run(syncedAt, serverId, userId, itemId, localRevision);
     db().prepare(`
@@ -616,6 +617,29 @@ function markProgressSucceeded(serverId: string, userId: string, itemId: string,
     );
   });
   return null;
+}
+
+function markProgressFailed(serverId: string, userId: string, itemId: string, localRevision: number, error: string): PlaybackRevisionRecord {
+  const result = db().prepare(`
+    UPDATE playback_revisions SET sync_state = 'failed', attempt_count = attempt_count + 1,
+      last_error = ?, synced_at = NULL
+    WHERE server_id = ? AND user_id = ? AND item_id = ? AND local_revision = ?
+      AND sync_state IN ('pending', 'failed')
+    RETURNING *
+  `).get(error, serverId, userId, itemId, localRevision) as Record<string, unknown> | undefined;
+  if (!result) throw new PersistenceWorkerError("PROGRESS_REVISION_NOT_PENDING", "The playback revision is no longer pending synchronization.");
+  return playbackRevisionRow(result);
+}
+
+function markPlaybackSuperseded(serverId: string, userId: string, itemId: string, localRevision: number): PlaybackRevisionRecord {
+  const result = db().prepare(`
+    UPDATE playback_revisions SET sync_state = 'superseded', last_error = NULL, synced_at = NULL
+    WHERE server_id = ? AND user_id = ? AND item_id = ? AND local_revision = ?
+      AND sync_state IN ('pending', 'failed')
+    RETURNING *
+  `).get(serverId, userId, itemId, localRevision) as Record<string, unknown> | undefined;
+  if (!result) throw new PersistenceWorkerError("PROGRESS_REVISION_NOT_SUPERSEDABLE", "The playback revision is no longer pending synchronization.");
+  return playbackRevisionRow(result);
 }
 
 function execute(operation: PersistenceOperation): unknown {
@@ -648,6 +672,12 @@ function execute(operation: PersistenceOperation): unknown {
     case "listPendingProgress": return listPendingProgress(operation.limit);
     case "markProgressSucceeded": return markProgressSucceeded(
       operation.serverId, operation.userId, operation.itemId, operation.localRevision, operation.syncedAt,
+    );
+    case "markProgressFailed": return markProgressFailed(
+      operation.serverId, operation.userId, operation.itemId, operation.localRevision, operation.error,
+    );
+    case "markPlaybackSuperseded": return markPlaybackSuperseded(
+      operation.serverId, operation.userId, operation.itemId, operation.localRevision,
     );
     case "health": return health;
   }

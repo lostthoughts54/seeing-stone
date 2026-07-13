@@ -7,7 +7,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--authenticated-parity-child";
 const PARENT_ENV = "JELLYFIN_PARITY_PARENT";
-const REQUIRED_TESTS = 17;
+const REQUIRED_TESTS = 18;
 
 if (!process.versions.electron) {
   try {
@@ -72,6 +72,7 @@ async function runElectronChild() {
   let player = null;
   let persistence = null;
   let downloads = null;
+  let synchronization = null;
   let forwardPlaybackReports = true;
   const playbackReports = [];
   let testsRun = 0;
@@ -105,6 +106,7 @@ async function runElectronChild() {
     const { MediaProbeService } = require("../dist/main/services/mediaProbe.js");
     const { MpvPlayerService } = require("../dist/main/services/mpvPlayer.js");
     const { resolveMpvRuntime } = require("../dist/main/services/mpvRuntime.js");
+    const { OfflineSynchronizationService } = require("../dist/main/services/offlineSynchronization.js");
     const { PlaybackReportingService } = require("../dist/main/services/playbackReporting.js");
     const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
     const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
@@ -133,15 +135,24 @@ async function runElectronChild() {
     const mediaProbe = new MediaProbeService(runtime);
     const downloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
     const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, [downloadStorageRoot]);
-    const playbackSource = new PlaybackSessionService(api, localPlayback);
+    const playbackSource = new PlaybackSessionService(api, localPlayback, persistence);
     downloads = new DownloadManager(api, persistence, mediaProbe, downloadStorageRoot, logger);
     downloads.onChanged((state) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, state);
     });
-    const reporting = new PlaybackReportingService(api, logger);
+    synchronization = new OfflineSynchronizationService(api, persistence, logger);
+    synchronization.activate();
+    const reporting = new PlaybackReportingService(api, synchronization, logger);
     player = new MpvPlayerService(mainWindow, playbackSource, {
       acceptAuthoritativeEvent: async (event) => {
-        playbackReports.push({ kind: event.kind, positionTicks: event.positionTicks, paused: event.paused, playMethod: event.playMethod });
+        playbackReports.push({
+          kind: event.kind,
+          itemId: event.itemId,
+          actionKind: event.actionKind,
+          positionTicks: event.positionTicks,
+          paused: event.paused,
+          playMethod: event.playMethod,
+        });
         if (forwardPlaybackReports) await reporting.acceptAuthoritativeEvent(event);
       },
     }, {
@@ -151,7 +162,7 @@ async function runElectronChild() {
     player.onState((state) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
     });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, player, downloads);
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, player, downloads, synchronization);
     await mainWindow.loadURL(security.APP_URL);
     await waitForAuthenticated(mainWindow);
 
@@ -304,6 +315,19 @@ async function runElectronChild() {
         throw coded("LOCAL_DIRECT_PLAY_REPORT_MISSING");
       }
     });
+    await test("durable playback progress synchronizes and advances its SQLite head", async () => {
+      const report = playbackReports.find((entry) => entry.kind === "stop" && entry.itemId);
+      if (!report) throw coded("DURABLE_PROGRESS_REPORT_MISSING");
+      const context = api.getAuthenticatedContext();
+      let head = null;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        head = await persistence.getPlaybackHead(context.serverId, context.userId, report.itemId);
+        if (head?.lastSucceededRevision > 0) break;
+        await delay(100);
+      }
+      if (!head || head.lastSucceededRevision <= 0) throw coded("DURABLE_PROGRESS_NOT_SYNCHRONIZED");
+      if (head.lastSucceededRevision > head.latestRevision) throw coded("DURABLE_PROGRESS_REVISION_INVALID");
+    });
   } finally {
     if (mainWindow && playbackToStop?.playbackId && !mainWindow.isDestroyed()) {
       const playbackId = JSON.stringify(playbackToStop.playbackId);
@@ -313,6 +337,7 @@ async function runElectronChild() {
     }
     await player?.clear().catch(() => undefined);
     await downloads?.shutdown().catch(() => undefined);
+    await synchronization?.shutdown().catch(() => undefined);
     await persistence?.close().catch(() => undefined);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     for (const channel of ipcChannels) ipcMain.removeHandler(channel);

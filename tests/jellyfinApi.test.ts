@@ -108,6 +108,7 @@ describe("JellyfinApi main-side boundary", () => {
         return new Response("transcoded-video", { headers: { "Content-Type": "video/mp4" } });
       }
       if (url.pathname.startsWith("/Sessions/Playing")) return new Response(null, { status: 204 });
+      if (url.pathname === "/UserPlayedItems/movie-1") return Response.json({ Played: init?.method === "POST" });
       throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -138,6 +139,18 @@ describe("JellyfinApi main-side boundary", () => {
       positionTicks: 1234,
       paused: false,
     });
+    await api.synchronizeOfflinePlayback({
+      itemId: "movie-1",
+      actionKind: "completed",
+      positionTicks: 100000000,
+      watched: true,
+    });
+    await api.synchronizeOfflinePlayback({
+      itemId: "movie-1",
+      actionKind: "replay",
+      positionTicks: 1000,
+      watched: false,
+    });
 
     const rendererPayload = JSON.stringify({
       safeSession,
@@ -162,6 +175,10 @@ describe("JellyfinApi main-side boundary", () => {
       PositionTicks: 1234,
       PlayMethod: "DirectPlay",
     });
+    const watchedRequests = observedRequests.filter((entry) => entry.url.pathname === "/UserPlayedItems/movie-1");
+    expect(watchedRequests.map((entry) => entry.init?.method)).toEqual(["POST", "DELETE"]);
+    const offlineStops = observedRequests.filter((entry) => entry.url.pathname === "/Sessions/Playing/Stopped");
+    expect(offlineStops.map((entry) => JSON.parse(String(entry.init?.body)).PositionTicks)).toEqual([100000000, 1000]);
     expect(rendererPayload).not.toContain("RequiredHttpHeaders");
     expect(home.resumeItems[0]).toMatchObject({
       id: "movie-1",

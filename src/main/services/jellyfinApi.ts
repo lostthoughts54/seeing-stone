@@ -8,6 +8,7 @@ import type {
   SafeSession,
   ServerConnection,
 } from "../../shared/contracts";
+import type { PlaybackActionKind } from "./persistenceTypes";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
 import type { SecureSessionStore, StoredSession } from "./secureSession";
@@ -510,6 +511,41 @@ export class JellyfinApi {
         PlayMethod: event.playMethod,
       }),
     });
+  }
+
+  async synchronizeOfflinePlayback(input: {
+    itemId: string;
+    actionKind: PlaybackActionKind;
+    positionTicks: number;
+    watched: boolean;
+  }): Promise<void> {
+    const itemPath = `/UserPlayedItems/${encodeURIComponent(input.itemId)}`;
+    const reportStopped = async (): Promise<void> => {
+      await this.request("/Sessions/Playing/Stopped", {}, {
+        method: "POST",
+        body: JSON.stringify({
+          ItemId: input.itemId,
+          PositionTicks: Math.max(0, Math.floor(input.positionTicks)),
+        }),
+      });
+    };
+    if (input.actionKind === "completed") {
+      await reportStopped();
+      await this.request(itemPath, {}, { method: "POST" });
+      return;
+    }
+    if (input.actionKind === "mark_watched") {
+      await this.request(itemPath, {}, { method: "POST" });
+      return;
+    }
+    if (input.actionKind === "start_over"
+      || input.actionKind === "replay"
+      || input.actionKind === "mark_unwatched") {
+      await this.request(itemPath, {}, { method: "DELETE" });
+      if (input.actionKind !== "mark_unwatched" && input.positionTicks > 0) await reportStopped();
+      return;
+    }
+    await reportStopped();
   }
 
   private async request(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<unknown> {

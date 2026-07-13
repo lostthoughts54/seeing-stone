@@ -23,6 +23,7 @@ import {
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
 import type { DownloadManager } from "./services/downloadManager";
+import type { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
 import type { MpvPlayerService } from "./services/mpvPlayer";
@@ -65,6 +66,7 @@ export function registerIpcHandlers(
   artwork: ArtworkService,
   playback: MpvPlayerService,
   downloads: DownloadManager,
+  synchronization?: Pick<OfflineSynchronizationService, "activate" | "deactivate">,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -85,16 +87,22 @@ export function registerIpcHandlers(
     artwork.clear();
     await playback.clear();
     await downloads.deactivate();
+    synchronization?.deactivate();
     const session = await api.login(value.connectionId, value.username, value.password, value.remember);
     await downloads.activate();
+    synchronization?.activate();
     return session;
   });
   register(IPC.sessionRestore, async () => {
     await downloads.deactivate();
+    synchronization?.deactivate();
     const session = await api.restore();
     artwork.clear();
     await playback.clear();
-    if (session.authenticated) await downloads.activate();
+    if (session.authenticated) {
+      await downloads.activate();
+      synchronization?.activate();
+    }
     return session;
   });
   register(IPC.sessionGetState, () => api.getSafeSession());
@@ -102,6 +110,7 @@ export function registerIpcHandlers(
     artwork.clear();
     await playback.clear();
     await downloads.deactivate();
+    synchronization?.deactivate();
     return api.logout();
   });
   register(IPC.homeGet, () => api.getHome());

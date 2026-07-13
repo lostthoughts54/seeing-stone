@@ -11,6 +11,7 @@ const source: ResolvedPlaybackSource = {
   durationTicks: 100000000,
   source: "server",
   delivery: "direct",
+  initialAction: "progress",
 };
 
 describe("PlaybackProxy", () => {

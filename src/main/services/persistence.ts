@@ -326,6 +326,29 @@ export class SqlitePersistenceService {
     });
   }
 
+  async markProgressFailed(serverId: string, userId: string, itemId: string, localRevision: number, error: string): Promise<PlaybackRevisionRecord> {
+    const identity = safeIdentity({ serverId, userId, itemId });
+    return this.invoke({
+      kind: "markProgressFailed",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: identity.itemId!,
+      localRevision: nonnegativeInteger(localRevision, "Local revision"),
+      error: boundedText(error, "Progress synchronization error", 512),
+    }) as Promise<PlaybackRevisionRecord>;
+  }
+
+  async markPlaybackSuperseded(serverId: string, userId: string, itemId: string, localRevision: number): Promise<PlaybackRevisionRecord> {
+    const identity = safeIdentity({ serverId, userId, itemId });
+    return this.invoke({
+      kind: "markPlaybackSuperseded",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: identity.itemId!,
+      localRevision: nonnegativeInteger(localRevision, "Local revision"),
+    }) as Promise<PlaybackRevisionRecord>;
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;

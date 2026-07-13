@@ -46,11 +46,9 @@ Client starts
 - `PlaybackSessionService`: main-only Jellyfin source authorization.
 - `PlaybackProxy`: private loopback capability consumed only by mpv.
 - `MpvPlayerService`: native player control and authoritative playback events.
+- `PlaybackReportingService`: records authoritative mpv events before attempting live Jellyfin session reporting.
+- `OfflineSynchronizationService`: main-only revision coalescing, remote conflict checks, retry, and synchronization lifecycle.
 - `ClientViews`: sandboxed Home, Search, Library, Details, Season, and Episode UI.
-
-Planned layers build on the SQLite and download boundaries without changing renderer trust:
-
-- `OfflineSynchronization`: revision coalescing and conflict-safe reporting.
 
 ## Desktop process model
 
@@ -61,8 +59,9 @@ Potentially blocking work is isolated:
 - SQLite uses a dedicated worker thread.
 - mpv is a controlled child process with narrow JSON IPC.
 - Large transfers use asynchronous network and filesystem APIs; media probing uses a controlled child process. Neither performs synchronous transfer or probe work on Electron's event loop.
+- Offline synchronization uses asynchronous Jellyfin requests and the existing SQLite worker; no network or database work is performed synchronously on Electron's event loop.
 
-See [DATABASE.md](DATABASE.md) for the versioned persistence model.
+See [DATABASE.md](DATABASE.md) for the versioned persistence model and [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md) for the synchronization policy.
 
 ## Mobile path
 

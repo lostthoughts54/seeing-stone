@@ -21,6 +21,7 @@ function source(
     resumePositionTicks: 0,
     durationTicks: 60 * ticks,
     source: "server",
+    initialAction: "progress",
   };
 }
 
@@ -156,7 +157,11 @@ describe("MpvPlayerService natural completion", () => {
     await waitFor(() => h.player.getState().phase === "ended" && h.window.show.mock.calls.length === 1);
 
     expect(h.reports).toEqual([{ kind: "stop", itemId: "movie-1" }]);
-    expect(h.reportedEvents[0]).toMatchObject({ playMethod: "DirectStream" });
+    expect(h.reportedEvents[0]).toMatchObject({
+      playMethod: "DirectStream",
+      actionKind: "completed",
+      watched: true,
+    });
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
   });
 
@@ -172,6 +177,10 @@ describe("MpvPlayerService natural completion", () => {
     ]);
     expect(h.commands.filter((command) => command[0] === "show-text")).toHaveLength(10);
     expect(h.commands.filter((command) => command[0] === "loadfile")).toHaveLength(1);
+    expect(h.reportedEvents).toMatchObject([
+      { actionKind: "completed", watched: true },
+      { actionKind: "progress", watched: false },
+    ]);
   });
 
   it("autoplay resolves a downloaded Next Up episode locally without opening the Jellyfin proxy", async () => {

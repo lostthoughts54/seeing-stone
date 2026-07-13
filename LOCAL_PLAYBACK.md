@@ -23,4 +23,4 @@ Titles and filenames are never used to substitute a different item. Missing, cha
 
 When Jellyfin is reachable, its current authoritative resume metadata is used. If a verified local file is available while Jellyfin is unreachable, the newest local playback head is used, falling back to the beginning when no position has been recorded.
 
-Authoritative mpv events report local playback to Jellyfin as `DirectPlay`. Server direct delivery reports `DirectStream`, and transcoding reports `Transcode`. Durable queuing and conflict-safe synchronization of reports while offline are intentionally deferred to the offline-synchronization milestone.
+Authoritative mpv events report local playback to Jellyfin as `DirectPlay`. Server direct delivery reports `DirectStream`, and transcoding reports `Transcode`. Every authoritative event is also written to the durable main-side journal before the live report is attempted. See [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md) for retry and conflict behavior.

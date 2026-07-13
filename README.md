@@ -18,6 +18,8 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Streams playable Jellyfin items through a main-controlled native mpv window.
 - Returns to the prior route and scroll position after playback.
 - Sends authoritative playback reports from main-side mpv events.
+- Persists those events as per-server, per-user, per-item revisions and retries them when Jellyfin becomes reachable.
+- Coalesces ordinary offline progress without dropping completion or newer explicit Start Over, replay, watched, or unwatched actions.
 - Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
 - Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
 - Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.
@@ -61,8 +63,8 @@ pnpm test:mpv-completion
 pnpm test:authenticated
 ```
 
-The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), and unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 
-Completed foundations are committed one milestone at a time. Local playback still reports directly to Jellyfin when reachable; durable offline progress queuing and conflict-safe synchronization belong to the next milestone.
+Completed foundations are committed one milestone at a time. Milestone 7 stops at durable offline playback synchronization; Windows packaging remains a separate acceptance milestone.

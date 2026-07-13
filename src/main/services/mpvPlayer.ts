@@ -335,7 +335,7 @@ export class MpvPlayerService {
         buffering: false,
         positionTicks: Math.max(this.state.positionTicks, this.state.durationTicks),
       });
-      await this.report("stop");
+      await this.report("stop", "completed");
       this.stopReportingTimer();
       if (!this.isCurrent(revision, completedSource)) return;
 
@@ -546,7 +546,10 @@ export class MpvPlayerService {
     if (!this.source || this.source.playbackId !== playbackId) throw new AppError("INVALID_PLAYBACK", "That playback session is no longer active.", 409);
   }
 
-  private async report(kind: "start" | "progress" | "stop"): Promise<void> {
+  private async report(
+    kind: "start" | "progress" | "stop",
+    actionKind?: "progress" | "completed" | "start_over" | "replay" | "mark_watched" | "mark_unwatched",
+  ): Promise<void> {
     if (!this.source) return;
     if (kind !== "start" && !this.reportingActive) return;
     if (kind === "stop") this.reportingActive = false;
@@ -559,6 +562,8 @@ export class MpvPlayerService {
         : this.source.delivery === "transcode" ? "Transcode" : "DirectStream",
       positionTicks: this.state.positionTicks,
       paused: this.state.paused,
+      actionKind: actionKind ?? (kind === "start" ? this.source.initialAction : "progress"),
+      watched: actionKind === "completed" || actionKind === "mark_watched",
     });
     if (kind === "start") this.reportingActive = true;
   }

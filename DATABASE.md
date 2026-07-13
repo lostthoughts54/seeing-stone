@@ -1,6 +1,6 @@
 # SQLite persistence model
 
-Milestone 4 established the local data boundary. Milestone 5 uses that boundary for manual downloads, probing, and explicit deletion without changing schema version 1. Local-first playback selection remains a later milestone.
+Milestone 4 established the local data boundary. Milestones 5 through 7 use it for manual downloads, local-first playback, and durable progress synchronization without changing schema version 1.
 
 ## Process boundary
 
@@ -50,7 +50,7 @@ Milestone 6 playback resolution additionally confirms the configured authorized 
 - A newer explicit action may intentionally lower position or change watched state.
 - A late success for an older revision cannot move the stored successful head backward.
 
-Offline coalescing and Jellyfin synchronization policy are implemented in the later offline-synchronization milestone. The persistence model supplies the revisions needed to do it safely.
+Milestone 7 coalesces redundant automatic progress while retaining completion and explicit actions. Failed attempts stay retryable with a bounded safe error code; superseded revisions remain in the journal for ordering evidence. Successful revisions advance the stored head transactionally, and older late results cannot move it backward.
 
 ## Migrations and failure behavior
 

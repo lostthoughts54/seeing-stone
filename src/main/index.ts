@@ -29,6 +29,7 @@ import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
 import { SqlitePersistenceService } from "./services/persistence";
 import { MediaProbeService } from "./services/mediaProbe";
+import { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { IPC } from "../shared/contracts";
 
 registerPrivilegedSchemes();
@@ -37,6 +38,7 @@ app.enableSandbox();
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
 let downloadManager: DownloadManager | null = null;
+let offlineSynchronization: OfflineSynchronizationService | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -47,10 +49,13 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   const activePersistence = persistence;
   const activeDownloads = downloadManager;
+  const activeSynchronization = offlineSynchronization;
   persistence = null;
   downloadManager = null;
+  offlineSynchronization = null;
   const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
-  void stopDownloads.then(() => activePersistence.close()).finally(() => {
+  const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
+  void Promise.all([stopDownloads, stopSynchronization]).then(() => activePersistence.close()).finally(() => {
     persistenceClosing = true;
     app.quit();
   });
@@ -76,7 +81,6 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
-  const playbackReporting = new PlaybackReportingService(api, logger);
   const playerPreferences = new PlayerPreferencesService(app.getPath("userData"));
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
@@ -92,7 +96,10 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const mediaProbe = new MediaProbeService(runtime);
   const downloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
   const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, [downloadStorageRoot]);
-  const playbackSource = new PlaybackSessionService(api, localPlayback);
+  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence);
+  offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
+  offlineSynchronization.activate();
+  const playbackReporting = new PlaybackReportingService(api, offlineSynchronization, logger);
   downloadManager = new DownloadManager(
     api,
     persistence,
@@ -107,7 +114,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
-  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager);
+  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager, offlineSynchronization);
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {
   logger.error("Application startup failed.", error);

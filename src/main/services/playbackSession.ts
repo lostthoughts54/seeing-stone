@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { PlaybackStartResult, PlaybackState } from "../../shared/contracts";
 import { AppError } from "./errors";
+import type { SqlitePersistenceService } from "./persistence";
 interface PlaybackApi {
+  getAuthenticatedContext?(): { serverId: string; userId: string };
   getDetails(itemId: string): Promise<import("../../shared/contracts").MediaItem>;
   getNextUpForSeries?(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null>;
   getMediaSourceCapabilities(itemId: string): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
@@ -24,10 +26,23 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   mediaSourceId: string;
   mediaUrl: string;
   delivery: "direct" | "transcode" | "local";
+  initialAction: "progress" | "start_over" | "replay";
 }
 
 export interface LocalSourceResolver {
   resolve(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource | null>;
+}
+
+type PlaybackCatalogPersistence = Pick<SqlitePersistenceService, "upsertMediaItem" | "upsertMediaSource">;
+
+function initialAction(
+  resumeMode: "resume" | "start-over",
+  played: boolean,
+  previousPositionTicks: number,
+): ResolvedPlaybackSource["initialAction"] {
+  if (resumeMode !== "start-over") return "progress";
+  if (played) return "replay";
+  return previousPositionTicks > 0 ? "start_over" : "progress";
 }
 
 function state(overrides: Partial<PlaybackState> = {}): PlaybackState {
@@ -57,6 +72,7 @@ export class PlaybackSessionService {
   constructor(
     private readonly api: PlaybackApi,
     private readonly localResolver?: LocalSourceResolver,
+    private readonly persistence?: PlaybackCatalogPersistence,
   ) {}
 
   async start(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource> {
@@ -109,13 +125,36 @@ export class PlaybackSessionService {
       this.state = state({ itemId, phase: "error", error: "This media requires server transcoding, but transcoding is unavailable." });
       throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
     }
+    const itemType = details.type === "Episode" ? "Episode" : details.type === "Movie" ? "Movie" : "Video";
+    if (this.persistence) {
+      const identity = this.api.getAuthenticatedContext?.();
+      if (!identity) throw new AppError("PLAYBACK_IDENTITY_UNAVAILABLE", "Playback identity is unavailable.", 409);
+      await this.persistence.upsertMediaItem({
+        serverId: identity.serverId,
+        userId: identity.userId,
+        itemId: details.id,
+        itemType,
+        name: details.name,
+        seriesId: details.seriesId,
+        seasonId: details.seasonId,
+        runTimeTicks: Math.max(0, Math.floor(details.runTimeTicks)),
+      });
+      await this.persistence.upsertMediaSource({
+        serverId: identity.serverId,
+        userId: identity.userId,
+        itemId: details.id,
+        mediaSourceId: source.id,
+        container: source.container,
+        expectedSize: source.size,
+      });
+    }
     const playbackId = randomUUID();
     this.current = { id: playbackId, itemId, mediaSourceId: source.id, delivery, requests: new Set() };
     this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks: details.runTimeTicks });
     return {
       playbackId,
       itemId,
-      itemType: details.type === "Episode" ? "Episode" : details.type === "Movie" ? "Movie" : "Video",
+      itemType,
       seriesId: details.seriesId,
       mediaSourceId: source.id,
       mediaUrl: `jellyfin-media://stream/${playbackId}`,
@@ -123,6 +162,7 @@ export class PlaybackSessionService {
       durationTicks: details.runTimeTicks,
       source: "server",
       delivery,
+      initialAction: initialAction(resumeMode, details.userData.played, details.userData.playbackPositionTicks),
     };
   }
 

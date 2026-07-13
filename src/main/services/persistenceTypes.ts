@@ -185,6 +185,8 @@ export type PersistenceOperation =
   | { kind: "getPlaybackHead"; serverId: string; userId: string; itemId: string }
   | { kind: "listPendingProgress"; limit: number }
   | { kind: "markProgressSucceeded"; serverId: string; userId: string; itemId: string; localRevision: number; syncedAt: number }
+  | { kind: "markProgressFailed"; serverId: string; userId: string; itemId: string; localRevision: number; error: string }
+  | { kind: "markPlaybackSuperseded"; serverId: string; userId: string; itemId: string; localRevision: number }
   | { kind: "health" }
   | { kind: "close" };
 

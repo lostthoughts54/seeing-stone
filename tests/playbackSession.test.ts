@@ -48,12 +48,14 @@ describe("PlaybackSessionService", () => {
         durationTicks: 100000000,
         source: "local" as const,
         delivery: "local" as const,
+        initialAction: "progress" as const,
       })),
     };
     const service = new PlaybackSessionService(api, local);
     const started = await service.start("movie-1", "resume");
     expect(started.source).toBe("local");
     expect(started.delivery).toBe("local");
+    expect(started.initialAction).toBe("progress");
     expect(local.resolve).toHaveBeenCalledWith("movie-1", "resume");
     expect(api.getDetails).not.toHaveBeenCalled();
     expect(api.getMediaSourceCapabilities).not.toHaveBeenCalled();
@@ -75,6 +77,7 @@ describe("PlaybackSessionService", () => {
     }, local);
     const started = await service.start(item.id, "resume");
     expect(started.source).toBe("server");
+    expect(started.initialAction).toBe("progress");
     expect(getDetails).toHaveBeenCalledOnce();
     expect(getMediaSourceCapabilities).toHaveBeenCalledOnce();
   });
@@ -108,8 +111,43 @@ describe("PlaybackSessionService", () => {
     expect(firstSignal.aborted).toBe(true);
 
     const replacement = await service.start("movie-2", "start-over");
+    expect(replacement.initialAction).toBe("start_over");
     expect((await service.handle(new Request(started.mediaUrl))).status).toBe(404);
     expect((await service.handle(new Request(replacement.mediaUrl))).status).toBe(200);
+  });
+
+  it("persists played catalog identity and represents replay as a newer explicit action", async () => {
+    const played = {
+      ...item,
+      userData: { played: true, playbackPositionTicks: 0, playedPercentage: 100 },
+    };
+    const upsertMediaItem = vi.fn(async () => undefined);
+    const upsertMediaSource = vi.fn(async () => undefined);
+    const service = new PlaybackSessionService({
+      getAuthenticatedContext: () => ({ serverId: "server-1", userId: "user-1" }),
+      async getDetails() { return played; },
+      async getMediaSourceCapabilities() {
+        return { itemId: played.id, sources: [{ id: "source-1", container: "mkv", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }] };
+      },
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    }, undefined, { upsertMediaItem, upsertMediaSource } as never);
+
+    const started = await service.start(played.id, "start-over");
+    expect(started.initialAction).toBe("replay");
+    expect(upsertMediaItem).toHaveBeenCalledWith(expect.objectContaining({
+      serverId: "server-1",
+      userId: "user-1",
+      itemId: played.id,
+      itemType: "Movie",
+      name: played.name,
+    }));
+    expect(upsertMediaSource).toHaveBeenCalledWith(expect.objectContaining({
+      serverId: "server-1",
+      userId: "user-1",
+      itemId: played.id,
+      mediaSourceId: "source-1",
+    }));
   });
 
   it("carries episode identity main-side and delegates cross-season Next Up to Jellyfin", async () => {

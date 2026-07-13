@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { DatabaseSync } = require("node:sqlite");
+const { OfflineSynchronizationService } = require("../dist/main/services/offlineSynchronization.js");
 const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
 
 const identity = {
@@ -269,6 +270,13 @@ test("playback revisions preserve completion and allow newer explicit lower posi
     assert.equal(head.lastSucceededPositionTicks, media.runTimeTicks);
     assert.equal(head.lastSucceededWatched, true);
 
+    const failedStartOver = await service.markProgressFailed(
+      identity.serverId, identity.userId, media.itemId, startOver.localRevision, "NETWORK_ERROR",
+    );
+    assert.equal(failedStartOver.syncState, "failed");
+    assert.equal(failedStartOver.attemptCount, 1);
+    assert.equal(failedStartOver.lastError, "NETWORK_ERROR");
+
     const concurrent = await Promise.all(Array.from({ length: 20 }, (_, index) => service.recordPlaybackRevision({
       serverId: identity.serverId,
       userId: identity.userId,
@@ -280,9 +288,14 @@ test("playback revisions preserve completion and allow newer explicit lower posi
     })));
     assert.equal(new Set(concurrent.map((entry) => entry.localRevision)).size, 20);
     assert.equal((await service.getPlaybackHead(identity.serverId, identity.userId, media.itemId)).latestRevision, 23);
+    const superseded = await service.markPlaybackSuperseded(
+      identity.serverId, identity.userId, media.itemId, concurrent[0].localRevision,
+    );
+    assert.equal(superseded.syncState, "superseded");
     const pending = await service.listPendingProgress();
     assert.ok(pending.some((entry) => entry.localRevision === startOver.localRevision));
     assert.equal(pending.some((entry) => entry.localRevision === completed.localRevision), false);
+    assert.equal(pending.some((entry) => entry.localRevision === concurrent[0].localRevision), false);
   } finally {
     await service.close();
   }
@@ -317,4 +330,56 @@ test("corrupt or newer databases are preserved and refused rather than silently 
   assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 99);
   verify.close();
   await newer.close();
+});
+
+test("offline playback survives a failed attempt and synchronizes after reconnect through the SQLite worker", async () => {
+  const { service } = await createSeededService("lf-offline-sync-");
+  let online = false;
+  const sent = [];
+  const synchronization = new OfflineSynchronizationService({
+    getAuthenticatedContext: () => identity,
+    getDetails: async () => ({
+      userData: { played: false, playbackPositionTicks: 0 },
+    }),
+    synchronizeOfflinePlayback: async (input) => {
+      if (!online) throw Object.assign(new Error("offline"), { code: "NETWORK_ERROR" });
+      sent.push(input);
+    },
+  }, service, { info() {}, warn() {}, error() {} }, 1_000_000);
+  try {
+    const captured = await synchronization.capture({
+      itemId: media.itemId,
+      actionKind: "progress",
+      positionTicks: 450_000_000,
+      watched: false,
+    });
+    synchronization.activate();
+    await synchronization.syncNow();
+    let pending = await service.listPendingProgress();
+    assert.deepEqual(pending.find((entry) => entry.localRevision === captured.localRevision), {
+      ...captured,
+      syncState: "failed",
+      attemptCount: 1,
+      lastError: "NETWORK_ERROR",
+      syncedAt: null,
+    });
+
+    online = true;
+    await synchronization.syncNow();
+    pending = await service.listPendingProgress();
+    assert.equal(pending.some((entry) => entry.localRevision === captured.localRevision), false);
+    assert.deepEqual(sent, [{
+      itemId: media.itemId,
+      actionKind: "progress",
+      positionTicks: 450_000_000,
+      watched: false,
+    }]);
+    const head = await service.getPlaybackHead(identity.serverId, identity.userId, media.itemId);
+    assert.equal(head.lastSucceededRevision, captured.localRevision);
+    assert.equal(head.lastSucceededPositionTicks, 450_000_000);
+    assert.equal(head.lastSucceededWatched, false);
+  } finally {
+    await synchronization.shutdown();
+    await service.close();
+  }
 });

@@ -124,6 +124,7 @@ class FixturePlayback {
       resumePositionTicks: 0,
       durationTicks: 3 * TICKS_PER_SECOND,
       source: "server",
+      initialAction: "progress",
     };
   }
 
