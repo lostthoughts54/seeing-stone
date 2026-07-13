@@ -32,6 +32,7 @@ import { resolveVerifiedPersistenceWorkerPath } from "./services/persistenceWork
 import { MediaProbeService } from "./services/mediaProbe";
 import { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { IPC } from "../shared/contracts";
+import { SyncPlayService } from "./services/syncPlay";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -41,6 +42,7 @@ let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
 let downloadManager: DownloadManager | null = null;
 let offlineSynchronization: OfflineSynchronizationService | null = null;
+let activeSyncPlay: SyncPlayService | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -52,12 +54,15 @@ app.on("before-quit", (event) => {
   const activePersistence = persistence;
   const activeDownloads = downloadManager;
   const activeSynchronization = offlineSynchronization;
+  const syncPlay = activeSyncPlay;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
+  activeSyncPlay = null;
   const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
-  void Promise.all([stopDownloads, stopSynchronization]).then(() => activePersistence.close()).finally(() => {
+  const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
+  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay]).then(() => activePersistence.close()).finally(() => {
     persistenceClosing = true;
     app.quit();
   });
@@ -119,7 +124,11 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
-  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager, offlineSynchronization);
+  activeSyncPlay = new SyncPlayService(api, playback, logger);
+  activeSyncPlay.onState((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
+  });
+  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager, offlineSynchronization, activeSyncPlay);
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {
   logger.error("Application startup failed.", error);

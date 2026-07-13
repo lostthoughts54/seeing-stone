@@ -11,7 +11,7 @@ const { redactText, sanitizeLogValue } = require("../dist/main/services/logger.j
 const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
 const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 const { connectionScore } = require("../dist/main/services/serverDiscovery.js");
-const { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema } = require("../dist/shared/schemas.js");
+const { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema, watchPartyCreateSchema, watchPartyGroupSchema } = require("../dist/shared/schemas.js");
 
 const secretSession = {
   serverUrl: "http://127.0.0.1:8096",
@@ -215,6 +215,11 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
     contracts.indexOf("export type RpcResult"),
   );
   assert.doesNotMatch(downloadContract, /localPath|storageRoot|mediaSourceId|authenticatedUrl|headers|command|args/);
+  const watchPartyContract = contracts.slice(
+    contracts.indexOf("export type WatchPartyPlaybackState"),
+    contracts.indexOf("export interface JellyfinBridge"),
+  );
+  assert.doesNotMatch(watchPartyContract, /accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket|mediaUrl|api[_-]?key/i);
   for (const setting of [
     "contextIsolation: true",
     "sandbox: true",
@@ -251,6 +256,9 @@ test("IPC schemas reject extra headers, paths, commands, and arguments", () => {
     path: "D:\\Sensitive\\movie.mkv",
   }));
   assert.throws(() => downloadIdSchema.strict().parse({ downloadId: "D:\\Sensitive\\movie.mkv" }));
+  assert.throws(() => watchPartyCreateSchema.strict().parse({ name: "Movie night", headers: { Authorization: "token" } }));
+  assert.throws(() => watchPartyGroupSchema.strict().parse({ groupId: "11111111111141118111111111111111", url: "ws://server/socket?api_key=token" }));
+  assert.throws(() => watchPartyGroupSchema.strict().parse({ groupId: "11111111-1111-not-a-guid-111111111111" }));
 });
 
 test("physical LAN discovery outranks VPN and virtual adapters", () => {

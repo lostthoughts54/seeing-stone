@@ -66,6 +66,8 @@ describe("JellyfinApi main-side boundary", () => {
     expect(() => normalizeServerUrl("http://server.example?api_key=secret")).toThrow();
     expect(() => normalizeServerUrl("http://server.example/#fragment")).toThrow();
     expect(normalizeServerUrl("https://server.example/jellyfin/")).toBe("https://server.example/jellyfin");
+    const api = new JellyfinApi(identity, {} as SecureSessionStore, async () => undefined);
+    expect(() => api.syncPlayRequest("/SyncPlay/../Users" as never)).toThrow("The SyncPlay endpoint is invalid.");
   });
 
   it("owns authentication, uses stable identity, and returns only allowlisted DTOs", async () => {

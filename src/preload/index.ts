@@ -31,6 +31,9 @@ import {
   type ServerUrlInput,
   type WatchedStateInput,
   type WatchedStateResult,
+  type WatchPartyCreateInput,
+  type WatchPartyGroupInput,
+  type WatchPartyViewState,
 } from "../shared/contracts";
 
 async function invoke<T>(channel: string, input?: unknown): Promise<T> {
@@ -106,6 +109,18 @@ const bridge: JellyfinBridge = {
       const receive = (_event: Electron.IpcRendererEvent, state: PlaybackState) => listener(state);
       ipcRenderer.on(IPC.playbackStateChanged, receive);
       return () => ipcRenderer.removeListener(IPC.playbackStateChanged, receive);
+    },
+  },
+  watchParties: {
+    getState: () => invoke<WatchPartyViewState>(IPC.watchPartiesGetState),
+    list: () => invoke<WatchPartyViewState>(IPC.watchPartiesList),
+    create: (input: WatchPartyCreateInput) => invoke<WatchPartyViewState>(IPC.watchPartiesCreate, input),
+    join: (input: WatchPartyGroupInput) => invoke<WatchPartyViewState>(IPC.watchPartiesJoin, input),
+    leave: () => invoke<WatchPartyViewState>(IPC.watchPartiesLeave),
+    subscribe: (listener: (state: WatchPartyViewState) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: WatchPartyViewState) => listener(state);
+      ipcRenderer.on(IPC.watchPartiesChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.watchPartiesChanged, receive);
     },
   },
 };

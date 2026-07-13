@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 17;
+const EXPECTED_TESTS = 18;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -484,7 +484,43 @@ async function runElectronChild() {
       selectSubtitle: async () => { throw new Error("not used"); },
       setFullscreen: async () => { throw new Error("not used"); },
     };
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization);
+    let watchPartyState = {
+      availability: "available",
+      connection: "connected",
+      groups: [{
+        groupId: "11111111111141118111111111111111",
+        name: "Runtime movie night",
+        playbackState: "Paused",
+        participants: ["Runtime Viewer"],
+        participantCount: 1,
+        lastUpdatedAt: "2026-07-13T20:00:00.000Z",
+      }],
+      joinedGroup: null,
+      sharedControls: true,
+      error: null,
+    };
+    const syncPlay = {
+      async activate() { return watchPartyState; },
+      async deactivate() {},
+      isJoined() { return watchPartyState.joinedGroup !== null; },
+      getState() { return structuredClone(watchPartyState); },
+      async list() { return structuredClone(watchPartyState); },
+      async create(name) {
+        const group = { ...watchPartyState.groups[0], name };
+        watchPartyState = { ...watchPartyState, groups: [group], joinedGroup: { ...group, currentItemId: null, playlistItemId: null } };
+        return structuredClone(watchPartyState);
+      },
+      async join(groupId) {
+        const group = watchPartyState.groups.find((entry) => entry.groupId === groupId);
+        watchPartyState = { ...watchPartyState, joinedGroup: { ...group, currentItemId: null, playlistItemId: null } };
+        return structuredClone(watchPartyState);
+      },
+      async leave() {
+        watchPartyState = { ...watchPartyState, joinedGroup: null };
+        return structuredClone(watchPartyState);
+      },
+    };
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization, syncPlay);
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });
@@ -593,6 +629,7 @@ async function runElectronChild() {
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "delete", "list", "pause", "resume", "retry", "setKeep", "start", "subscribe"],
         playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
+        watchParties: ["create", "getState", "join", "leave", "list", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -610,6 +647,65 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("watch-party UI lists, joins, leaves, and creates through the narrow bridge", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        const waitFor = async (predicate) => {
+          for (let attempt = 0; attempt < 150; attempt += 1) {
+            if (predicate()) return;
+            await delay(20);
+          }
+          throw new Error("Timed out waiting for watch-party UI state.");
+        };
+
+        document.getElementById("navWatchPartiesButton").click();
+        await waitFor(() => document.querySelector(".watch-party-card h2")?.textContent === "Runtime movie night");
+        const listed = {
+          title: document.querySelector("#watchPartiesView h1")?.textContent,
+          copy: document.querySelector("#watchPartiesView .page-heading > p:last-of-type")?.textContent,
+          group: document.querySelector(".watch-party-card h2")?.textContent,
+          status: document.getElementById("watchPartyStatus").textContent,
+        };
+
+        document.querySelector(".watch-party-card button").click();
+        await waitFor(() => !document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
+        const joined = {
+          name: document.querySelector("#joinedWatchParty strong")?.textContent,
+          participants: document.querySelectorAll("#joinedWatchParty p")[1]?.textContent,
+          shared: document.querySelector("#joinedWatchParty .shared-control-note")?.textContent,
+        };
+
+        document.querySelector("#joinedWatchParty button").click();
+        await waitFor(() => document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
+        const independentToast = document.getElementById("toast").textContent;
+
+        const nameInput = document.getElementById("watchPartyNameInput");
+        nameInput.value = "Runtime created party";
+        document.getElementById("createWatchPartyButton").click();
+        await waitFor(() => document.querySelector("#joinedWatchParty strong")?.textContent === "Runtime created party");
+        const createdName = document.querySelector("#joinedWatchParty strong")?.textContent;
+
+        document.querySelector("#joinedWatchParty button").click();
+        await waitFor(() => document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
+        document.getElementById("navHomeButton").click();
+        return { listed, joined, independentToast, createdName };
+      })()`);
+
+      assert.deepEqual(result.listed, {
+        title: "Active Watch Parties",
+        copy: "Everyone in a party shares playback controls. Each computer still chooses its own local download or Jellyfin stream.",
+        group: "Runtime movie night",
+        status: "Parties are visible only to signed-in users on this Jellyfin server.",
+      });
+      assert.deepEqual(result.joined, {
+        name: "Runtime movie night",
+        participants: "Watching with: Runtime Viewer",
+        shared: "Shared controls: anyone can choose an item, play, pause, or seek.",
+      });
+      assert.equal(result.independentToast, "Left the party. Playback controls are independent again.");
+      assert.equal(result.createdName, "Runtime created party");
     });
 
     await test("movie details toggle explicit watched state through only the narrow item action", async () => {

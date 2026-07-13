@@ -66,7 +66,11 @@ function createHarness() {
 describe("IPC authorization and allowlist", () => {
   it("registers exactly the declared narrow channels and no reporting transport", () => {
     const { handlers } = createHarness();
-    const invokeChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged && channel !== IPC.downloadsChanged);
+    const invokeChannels = Object.values(IPC).filter((channel) => ![
+      IPC.playbackStateChanged,
+      IPC.downloadsChanged,
+      IPC.watchPartiesChanged,
+    ].includes(channel));
     expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
     expect([...handlers.keys()].join(" ")).not.toMatch(/report|sessions\/playing|request|fetch|filesystem|shell|command/i);
   });

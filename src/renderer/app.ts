@@ -1,7 +1,15 @@
-import type { DiscoveredServer, DownloadSummary, ImageKind, LibrarySummary, MediaItem, SafeSession } from "../shared/contracts";
+import type {
+  DiscoveredServer,
+  DownloadSummary,
+  ImageKind,
+  LibrarySummary,
+  MediaItem,
+  SafeSession,
+  WatchPartyViewState,
+} from "../shared/contracts";
 
 const TICKS_PER_SECOND = 10000000;
-type Route = "home" | "library" | "search" | "details";
+type Route = "home" | "library" | "search" | "details" | "watch-parties";
 type MediaRow = { title: string; items: MediaItem[]; shape: "poster" | "landscape" };
 type ImageOptions = { width?: number; height?: number };
 type LibraryFilter = "all" | "unwatched" | "watched" | "downloaded";
@@ -29,6 +37,7 @@ const brandHomeButton = byId<HTMLButtonElement>("brandHomeButton");
 const navHomeButton = byId<HTMLButtonElement>("navHomeButton");
 const navMoviesButton = byId<HTMLButtonElement>("navMoviesButton");
 const navShowsButton = byId<HTMLButtonElement>("navShowsButton");
+const navWatchPartiesButton = byId<HTMLButtonElement>("navWatchPartiesButton");
 const searchInput = byId<HTMLInputElement>("searchInput");
 const profileButton = byId<HTMLButtonElement>("profileButton");
 const profileInitial = byId<HTMLElement>("profileInitial");
@@ -44,6 +53,13 @@ const homeView = byId<HTMLElement>("homeView");
 const libraryView = byId<HTMLElement>("libraryView");
 const searchView = byId<HTMLElement>("searchView");
 const detailsView = byId<HTMLElement>("detailsView");
+const watchPartiesView = byId<HTMLElement>("watchPartiesView");
+const watchPartyNameInput = byId<HTMLInputElement>("watchPartyNameInput");
+const createWatchPartyButton = byId<HTMLButtonElement>("createWatchPartyButton");
+const refreshWatchPartiesButton = byId<HTMLButtonElement>("refreshWatchPartiesButton");
+const watchPartyStatus = byId<HTMLElement>("watchPartyStatus");
+const joinedWatchParty = byId<HTMLElement>("joinedWatchParty");
+const watchPartyList = byId<HTMLElement>("watchPartyList");
 
 const featureHero = byId<HTMLElement>("featureHero");
 const featureImage = byId<HTMLImageElement>("featureImage");
@@ -91,6 +107,7 @@ const episodeList = byId<HTMLOListElement>("episodeList");
 const mobileHomeButton = byId<HTMLButtonElement>("mobileHomeButton");
 const mobileSearchButton = byId<HTMLButtonElement>("mobileSearchButton");
 const mobileLibraryButton = byId<HTMLButtonElement>("mobileLibraryButton");
+const mobileWatchPartiesButton = byId<HTMLButtonElement>("mobileWatchPartiesButton");
 const playerView = byId<HTMLElement>("playerView");
 const videoPlayer = byId<HTMLVideoElement>("videoPlayer");
 const playerTitle = byId<HTMLElement>("playerTitle");
@@ -135,6 +152,7 @@ interface RendererState {
   searchTimer: ReturnType<typeof setTimeout> | null;
   searchRequestId: number;
   toastTimer: ReturnType<typeof setTimeout> | null;
+  watchParties: WatchPartyViewState | null;
 }
 
 const state: RendererState = {
@@ -169,6 +187,7 @@ const state: RendererState = {
   searchTimer: null,
   searchRequestId: 0,
   toastTimer: null,
+  watchParties: null,
 };
 
 let connectionRetryInFlight = false;
@@ -405,7 +424,7 @@ function setButtonActive(button: HTMLButtonElement, active: boolean): void {
 }
 
 function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?: number } = {}): void {
-  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView };
+  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView };
   for (const [name, element] of Object.entries(views)) element.classList.toggle("is-hidden", name !== route);
   state.currentRoute = route;
 
@@ -413,9 +432,11 @@ function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?:
   setButtonActive(navHomeButton, desktopRoute === "home");
   setButtonActive(navMoviesButton, desktopRoute === "library" && state.libraryType === "Movie");
   setButtonActive(navShowsButton, desktopRoute === "library" && state.libraryType === "Series");
+  setButtonActive(navWatchPartiesButton, desktopRoute === "watch-parties");
   setButtonActive(mobileHomeButton, desktopRoute === "home");
   setButtonActive(mobileSearchButton, desktopRoute === "search");
   setButtonActive(mobileLibraryButton, desktopRoute === "library");
+  setButtonActive(mobileWatchPartiesButton, desktopRoute === "watch-parties");
 
   if (!options.preserveScroll) contentScroller.scrollTop = options.scrollTop || 0;
 }
@@ -425,6 +446,149 @@ function showToast(message: string): void {
   toast.textContent = message;
   toast.classList.remove("is-hidden");
   state.toastTimer = setTimeout(() => toast.classList.add("is-hidden"), 3400);
+}
+
+function watchPartyStateLabel(value: string): string {
+  if (value === "Playing") return "Playing";
+  if (value === "Paused") return "Paused";
+  if (value === "Waiting") return "Waiting for everyone";
+  return "Idle";
+}
+
+function renderWatchParties(): void {
+  const value = state.watchParties;
+  watchPartyList.innerHTML = "";
+  joinedWatchParty.innerHTML = "";
+  joinedWatchParty.classList.add("is-hidden");
+  const available = value?.availability === "available" && value.connection === "connected";
+  createWatchPartyButton.disabled = !available;
+  refreshWatchPartiesButton.disabled = value?.availability === "signed-out" || value?.availability === "connecting";
+
+  if (!value || value.availability === "connecting") {
+    watchPartyStatus.textContent = "Connecting to Jellyfin watch parties...";
+    renderMessage(watchPartyList, "Loading active parties...");
+    return;
+  }
+  if (value.error) watchPartyStatus.textContent = value.error.message;
+  else if (value.joinedGroup) watchPartyStatus.textContent = "You are in a party. Playback controls are shared by everyone.";
+  else watchPartyStatus.textContent = "Parties are visible only to signed-in users on this Jellyfin server.";
+
+  if (value.joinedGroup) {
+    const group = value.joinedGroup;
+    joinedWatchParty.classList.remove("is-hidden");
+    const heading = document.createElement("div");
+    const copy = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const name = document.createElement("strong");
+    const metadata = document.createElement("p");
+    const leave = document.createElement("button");
+    eyebrow.textContent = "Joined party";
+    name.textContent = group.name;
+    metadata.textContent = `${watchPartyStateLabel(group.playbackState)} - ${group.participantCount} participant${group.participantCount === 1 ? "" : "s"}`;
+    leave.type = "button";
+    leave.textContent = "Leave Party";
+    leave.addEventListener("click", () => { void leaveWatchParty(leave); });
+    copy.append(eyebrow, name, metadata);
+    heading.append(copy, leave);
+    const participants = document.createElement("p");
+    participants.textContent = group.participants.length ? `Watching with: ${group.participants.join(", ")}` : "Waiting for participants";
+    const shared = document.createElement("p");
+    shared.className = "shared-control-note";
+    shared.textContent = "Shared controls: anyone can choose an item, play, pause, or seek.";
+    joinedWatchParty.append(heading, participants, shared);
+  }
+
+  if (!available) {
+    renderMessage(watchPartyList, value.error?.message || "Watch parties are unavailable.");
+    return;
+  }
+  if (value.groups.length === 0) {
+    renderMessage(watchPartyList, "No active parties yet. Create one to start watching together.");
+    return;
+  }
+  for (const group of value.groups) {
+    const card = document.createElement("article");
+    const copy = document.createElement("div");
+    const name = document.createElement("h2");
+    const status = document.createElement("p");
+    const participants = document.createElement("p");
+    const join = document.createElement("button");
+    card.className = "watch-party-card";
+    name.textContent = group.name;
+    status.textContent = watchPartyStateLabel(group.playbackState);
+    participants.textContent = group.participants.length
+      ? `${group.participantCount} participant${group.participantCount === 1 ? "" : "s"}: ${group.participants.join(", ")}`
+      : "No participants";
+    join.type = "button";
+    join.className = "primary";
+    const alreadyJoined = value.joinedGroup?.groupId === group.groupId;
+    join.textContent = alreadyJoined ? "Joined" : "Join Party";
+    join.disabled = alreadyJoined;
+    join.addEventListener("click", () => { void joinWatchParty(group.groupId, join); });
+    copy.append(name, status, participants);
+    card.append(copy, join);
+    watchPartyList.append(card);
+  }
+}
+
+async function refreshWatchParties(): Promise<void> {
+  try {
+    state.watchParties = await window.jellyfin.watchParties.list();
+    renderWatchParties();
+  } catch (error) {
+    showToast(errorMessage(error, "Watch parties could not be refreshed."));
+  }
+}
+
+async function openWatchParties(): Promise<void> {
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  setRoute("watch-parties");
+  await refreshWatchParties();
+}
+
+async function createWatchParty(): Promise<void> {
+  const name = watchPartyNameInput.value.trim();
+  if (!name) {
+    showToast("Enter a party name first.");
+    watchPartyNameInput.focus();
+    return;
+  }
+  createWatchPartyButton.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.create({ name });
+    watchPartyNameInput.value = "";
+    renderWatchParties();
+    showToast("Watch party created. Choose something to play when everyone joins.");
+  } catch (error) {
+    showToast(errorMessage(error, "The watch party could not be created."));
+  } finally {
+    createWatchPartyButton.disabled = state.watchParties?.availability !== "available";
+  }
+}
+
+async function joinWatchParty(groupId: string, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.join({ groupId });
+    renderWatchParties();
+    showToast("Joined. Playback controls are now shared with the party.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "That watch party could not be joined."));
+  }
+}
+
+async function leaveWatchParty(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.leave();
+    renderWatchParties();
+    showToast("Left the party. Playback controls are independent again.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "The watch party could not be left."));
+  }
 }
 
 function renderMessage(container: HTMLElement, message: string): void {
@@ -1496,6 +1660,7 @@ function resetSignedInState(): void {
   state.playbackItem = null;
   state.playbackId = null;
   state.lastFocusElement = null;
+  state.watchParties = null;
 
   clearImage(featureImage);
   clearImage(detailBackdrop);
@@ -1559,6 +1724,11 @@ function resetSignedInState(): void {
   toast.textContent = "";
   toast.classList.add("is-hidden");
   downloadsList.replaceChildren();
+  watchPartyList.replaceChildren();
+  joinedWatchParty.replaceChildren();
+  joinedWatchParty.classList.add("is-hidden");
+  watchPartyStatus.textContent = "";
+  watchPartyNameInput.value = "";
   closeDownloads();
   setButtonActive(libraryMoviesButton, true);
   setButtonActive(libraryShowsButton, false);
@@ -1611,6 +1781,7 @@ brandHomeButton.addEventListener("click", () => setRoute("home"));
 navHomeButton.addEventListener("click", () => setRoute("home"));
 navMoviesButton.addEventListener("click", () => openLibraryCategory("Movie"));
 navShowsButton.addEventListener("click", () => openLibraryCategory("Series"));
+navWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
 libraryMoviesButton.addEventListener("click", () => openLibraryCategory("Movie"));
 libraryShowsButton.addEventListener("click", () => openLibraryCategory("Series"));
 libraryFilter.addEventListener("change", () => {
@@ -1646,6 +1817,16 @@ mobileSearchButton.addEventListener("click", () => {
   searchInput.focus();
 });
 mobileLibraryButton.addEventListener("click", () => openLibraryCategory(state.libraryType || "Movie"));
+mobileWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
+
+createWatchPartyButton.addEventListener("click", () => { void createWatchParty(); });
+refreshWatchPartiesButton.addEventListener("click", () => { void refreshWatchParties(); });
+watchPartyNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void createWatchParty();
+  }
+});
 
 searchInput.addEventListener("input", () => {
   if (state.searchTimer) clearTimeout(state.searchTimer);
@@ -1706,6 +1887,11 @@ window.jellyfin.downloads.subscribe((downloads) => {
   renderDownloads();
   syncVisibleDownloadButtons();
   if (state.currentRoute === "library") renderLibraryGrid(state.libraryCache[state.libraryType] || []);
+});
+
+window.jellyfin.watchParties.subscribe((watchParties) => {
+  state.watchParties = watchParties;
+  if (state.currentRoute === "watch-parties") renderWatchParties();
 });
 
 void bootstrap();

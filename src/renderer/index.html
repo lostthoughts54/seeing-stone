@@ -74,6 +74,7 @@
             <button id="navHomeButton" class="is-active" type="button">Home</button>
             <button id="navMoviesButton" type="button">Movies</button>
             <button id="navShowsButton" type="button">Shows</button>
+            <button id="navWatchPartiesButton" type="button">Watch Parties</button>
           </nav>
 
           <div class="header-actions">
@@ -164,6 +165,25 @@
             <div id="searchRows" class="home-rows" aria-live="polite"></div>
           </section>
 
+          <section id="watchPartiesView" class="view watch-parties-view is-hidden">
+            <header class="page-heading watch-parties-heading">
+              <p class="eyebrow">Jellyfin SyncPlay</p>
+              <h1>Active Watch Parties</h1>
+              <p>Everyone in a party shares playback controls. Each computer still chooses its own local download or Jellyfin stream.</p>
+              <div class="watch-party-create">
+                <label for="watchPartyNameInput">New party name</label>
+                <div>
+                  <input id="watchPartyNameInput" type="text" maxlength="200" placeholder="Movie night" autocomplete="off" />
+                  <button id="createWatchPartyButton" class="primary" type="button">Create Party</button>
+                  <button id="refreshWatchPartiesButton" type="button">Refresh</button>
+                </div>
+              </div>
+            </header>
+            <div id="watchPartyStatus" class="watch-party-status" role="status"></div>
+            <section id="joinedWatchParty" class="joined-watch-party is-hidden" aria-live="polite"></section>
+            <div id="watchPartyList" class="watch-party-list" aria-live="polite"></div>
+          </section>
+
           <section id="detailsView" class="view details-view is-hidden">
             <button id="detailsBackButton" class="back-button" type="button" aria-label="Go back" title="Go back">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
@@ -238,6 +258,10 @@
           <button id="mobileLibraryButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5v5H4z"></path><path d="M15 5h5v5h-5z"></path><path d="M4 15h5v5H4z"></path><path d="M15 15h5v5h-5z"></path></svg>
             Library
+          </button>
+          <button id="mobileWatchPartiesButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6"></path><path d="M11 20c0-4 2-6 5-6s5 2 5 6"></path></svg>
+            Parties
           </button>
         </nav>
       </section>

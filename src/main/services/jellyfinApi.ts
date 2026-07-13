@@ -134,6 +134,31 @@ export interface AuthenticatedContext {
   userId: string;
   userName: string;
 }
+export interface AuthenticatedSocketContext extends AuthenticatedContext {
+  serverVersion: string;
+  authorizationHeader: string;
+  deviceId: string;
+  sessionRevision: number;
+  signal: AbortSignal;
+}
+export type SyncPlayEndpoint =
+  | "/SyncPlay/List"
+  | "/SyncPlay/New"
+  | "/SyncPlay/Join"
+  | "/SyncPlay/Leave"
+  | "/SyncPlay/SetNewQueue"
+  | "/SyncPlay/Pause"
+  | "/SyncPlay/Unpause"
+  | "/SyncPlay/Seek"
+  | "/SyncPlay/Stop"
+  | "/SyncPlay/Ready"
+  | "/SyncPlay/Buffering"
+  | "/SyncPlay/Ping";
+const syncPlayEndpoints = new Set<SyncPlayEndpoint>([
+  "/SyncPlay/List", "/SyncPlay/New", "/SyncPlay/Join", "/SyncPlay/Leave", "/SyncPlay/SetNewQueue",
+  "/SyncPlay/Pause", "/SyncPlay/Unpause", "/SyncPlay/Seek", "/SyncPlay/Stop", "/SyncPlay/Ready",
+  "/SyncPlay/Buffering", "/SyncPlay/Ping",
+]);
 interface PendingConnection {
   server: PublicServerInfo;
   expiresAt: number;
@@ -146,6 +171,7 @@ export class JellyfinApi {
   private session: AuthenticatedState | null = null;
   private sessionController = new AbortController();
   private sessionMutationTail: Promise<void> = Promise.resolve();
+  private sessionRevision = 0;
   private readonly pendingConnections = new Map<string, PendingConnection>();
 
   constructor(
@@ -264,6 +290,30 @@ export class JellyfinApi {
       userId: session.userId,
       userName: session.userName,
     };
+  }
+
+  /** Main-process-only transport material for authenticated Jellyfin protocols. */
+  getAuthenticatedSocketContext(): AuthenticatedSocketContext {
+    const session = this.requireSession();
+    return {
+      ...this.getAuthenticatedContext(),
+      serverVersion: session.serverVersion,
+      authorizationHeader: this.authorizationHeader(session.accessToken),
+      deviceId: this.identity.deviceId,
+      sessionRevision: this.sessionRevision,
+      signal: this.sessionController.signal,
+    };
+  }
+
+  /** Authenticated main-process extension endpoint; never expose this method through preload. */
+  syncPlayRequest(path: SyncPlayEndpoint, body?: unknown, method: "GET" | "POST" = body === undefined ? "GET" : "POST"): Promise<unknown> {
+    if (!syncPlayEndpoints.has(path)) {
+      throw new AppError("INVALID_SYNCPLAY_ENDPOINT", "The SyncPlay endpoint is invalid.", 400);
+    }
+    return this.request(path, {}, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
   }
 
   async logout(): Promise<SafeSession> {
@@ -618,6 +668,7 @@ export class JellyfinApi {
     this.sessionController.abort();
     this.sessionController = new AbortController();
     this.session = session;
+    this.sessionRevision += 1;
   }
 
   private async runSessionMutation<T>(operation: () => Promise<T>): Promise<T> {

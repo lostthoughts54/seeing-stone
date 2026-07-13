@@ -94,6 +94,19 @@ describe("renderer and preload security boundary", () => {
     expect(preload).toContain("ipcRenderer.removeListener(IPC.playbackStateChanged, receive)");
   });
 
+  it("exposes only sanitized watch-party summaries and narrow actions", async () => {
+    const contracts = await readFile("src/shared/contracts.ts", "utf8");
+    const preload = await readFile("src/preload/index.ts", "utf8");
+    const watchPartyContracts = contracts.slice(
+      contracts.indexOf("export type WatchPartyPlaybackState"),
+      contracts.indexOf("export interface JellyfinBridge"),
+    );
+    expect(watchPartyContracts).not.toMatch(/accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket|mediaUrl|api[_-]?key/i);
+    expect(preload).toContain("ipcRenderer.on(IPC.watchPartiesChanged, receive)");
+    expect(preload).toContain("ipcRenderer.removeListener(IPC.watchPartiesChanged, receive)");
+    expect(preload).not.toMatch(/new WebSocket|\bfetch\s*\(/);
+  });
+
   it("uses a main-controlled native mpv window without failed Electron HWND embedding", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
     expect(player).toContain('"--force-window=immediate"');

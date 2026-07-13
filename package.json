@@ -30,6 +30,7 @@
     "test:package": "node scripts/windows-package-acceptance.cjs",
     "test:authenticated": "pnpm run build && node scripts/authenticated-parity.cjs",
     "test:syncplay-spike": "pnpm run build:main && node scripts/syncplay-protocol-spike.cjs",
+    "test:syncplay-service": "pnpm run build:main && node scripts/syncplay-service-acceptance.cjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
@@ -41,10 +42,10 @@
     "electron-builder": "26.15.3",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
-    "vitest": "^3.2.0",
-    "ws": "8.18.3"
+    "vitest": "^3.2.0"
   },
   "dependencies": {
+    "ws": "8.18.3",
     "zod": "^4.0.0"
   }
 }

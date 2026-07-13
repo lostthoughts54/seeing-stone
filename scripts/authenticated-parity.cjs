@@ -112,7 +112,11 @@ async function runElectronChild() {
     const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
     const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 
-    ipcChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged && channel !== IPC.downloadsChanged);
+    ipcChannels = Object.values(IPC).filter((channel) => ![
+      IPC.playbackStateChanged,
+      IPC.downloadsChanged,
+      IPC.watchPartiesChanged,
+    ].includes(channel));
     rendererSession = security.hardenSession();
     const identity = await new DeviceIdentityService(
       productionUserData,

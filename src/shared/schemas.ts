@@ -57,3 +57,11 @@ export const downloadStartSchema = z.object({ itemId: z.string().min(1).max(128)
 export const downloadIdSchema = z.object({ downloadId: z.string().uuid() });
 
 export const downloadKeepSchema = downloadIdSchema.extend({ keepDownloaded: z.boolean() });
+
+export const watchPartyCreateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+});
+
+export const watchPartyGroupSchema = z.object({
+  groupId: z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
+});

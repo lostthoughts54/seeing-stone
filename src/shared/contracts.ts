@@ -161,6 +161,34 @@ export interface WatchedStateResult {
   synchronization: "synchronized" | "queued";
 }
 
+export type WatchPartyPlaybackState = "Idle" | "Waiting" | "Paused" | "Playing";
+
+export interface WatchPartySummary {
+  groupId: string;
+  name: string;
+  playbackState: WatchPartyPlaybackState;
+  participants: string[];
+  participantCount: number;
+  lastUpdatedAt: string;
+}
+
+export interface JoinedWatchParty extends WatchPartySummary {
+  currentItemId: string | null;
+  playlistItemId: string | null;
+}
+
+export interface WatchPartyViewState {
+  availability: "signed-out" | "connecting" | "available" | "denied" | "unsupported" | "offline";
+  connection: "disconnected" | "connecting" | "connected";
+  groups: WatchPartySummary[];
+  joinedGroup: JoinedWatchParty | null;
+  sharedControls: boolean;
+  error: { code: string; message: string } | null;
+}
+
+export interface WatchPartyCreateInput { name: string }
+export interface WatchPartyGroupInput { groupId: string }
+
 export interface JellyfinBridge {
   server: {
     discover(): Promise<DiscoveredServer[]>;
@@ -215,6 +243,14 @@ export interface JellyfinBridge {
     getState(): Promise<PlaybackState>;
     subscribe(listener: (state: PlaybackState) => void): () => void;
   };
+  watchParties: {
+    getState(): Promise<WatchPartyViewState>;
+    list(): Promise<WatchPartyViewState>;
+    create(input: WatchPartyCreateInput): Promise<WatchPartyViewState>;
+    join(input: WatchPartyGroupInput): Promise<WatchPartyViewState>;
+    leave(): Promise<WatchPartyViewState>;
+    subscribe(listener: (state: WatchPartyViewState) => void): () => void;
+  };
 }
 
 export const IPC = {
@@ -253,4 +289,10 @@ export const IPC = {
   playbackStop: "playback:stop",
   playbackGetState: "playback:get-state",
   playbackStateChanged: "playback:state-changed",
+  watchPartiesGetState: "watch-parties:get-state",
+  watchPartiesList: "watch-parties:list",
+  watchPartiesCreate: "watch-parties:create",
+  watchPartiesJoin: "watch-parties:join",
+  watchPartiesLeave: "watch-parties:leave",
+  watchPartiesChanged: "watch-parties:changed",
 } as const;
