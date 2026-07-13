@@ -77,6 +77,7 @@ const detailDownloadLabel = byId<HTMLElement>("detailDownloadLabel");
 const detailTrailerButton = byId<HTMLButtonElement>("detailTrailerButton");
 const detailWatchedButton = byId<HTMLButtonElement>("detailWatchedButton");
 const detailWatchedLabel = byId<HTMLElement>("detailWatchedLabel");
+const detailSeriesButton = byId<HTMLButtonElement>("detailSeriesButton");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
 const episodeList = byId<HTMLOListElement>("episodeList");
@@ -101,6 +102,7 @@ interface RendererState {
   discoveredServers: DiscoveredServer[];
   libraries: LibrarySummary[];
   homeRows: MediaRow[];
+  homeRequestId: number;
   resumeItems: MediaItem[];
   nextUpItems: MediaItem[];
   featureItem: MediaItem | null;
@@ -131,6 +133,7 @@ const state: RendererState = {
   discoveredServers: [],
   libraries: [],
   homeRows: [],
+  homeRequestId: 0,
   resumeItems: [],
   nextUpItems: [],
   featureItem: null,
@@ -155,6 +158,8 @@ const state: RendererState = {
   searchRequestId: 0,
   toastTimer: null,
 };
+
+let connectionRetryInFlight = false;
 
 function normalizeServerUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -441,9 +446,10 @@ async function loadLibraries(): Promise<void> {
   state.libraries = await window.jellyfin.libraries.list();
 }
 
-async function loadHome(): Promise<void> {
-  renderLoadingRows(homeRows);
+async function loadHome(requestId = ++state.homeRequestId): Promise<void> {
+  if (requestId === state.homeRequestId) renderLoadingRows(homeRows);
   const payload = await window.jellyfin.home.get();
+  if (requestId !== state.homeRequestId) return;
   state.libraries = payload.libraries;
   state.resumeItems = payload.resumeItems;
   state.nextUpItems = payload.nextUpItems;
@@ -460,15 +466,20 @@ async function loadHome(): Promise<void> {
 }
 
 async function loadInitialData(): Promise<void> {
+  const requestId = ++state.homeRequestId;
   showMain();
   renderLoadingRows(homeRows);
   try {
     await Promise.all([
-      loadHome(),
-      refreshDownloads().catch((error) => showToast(errorMessage(error, "Downloads could not be loaded."))),
+      loadHome(requestId),
+      refreshDownloads(() => requestId === state.homeRequestId).catch((error) => {
+        if (requestId === state.homeRequestId) showToast(errorMessage(error, "Downloads could not be loaded."));
+      }),
     ]);
+    if (requestId !== state.homeRequestId) return;
     setRoute("home");
   } catch (error) {
+    if (requestId !== state.homeRequestId) return;
     if (errorCode(error) === "SESSION_EXPIRED") {
       await window.jellyfin.session.logout().catch(() => undefined);
       state.session = null;
@@ -476,12 +487,55 @@ async function loadInitialData(): Promise<void> {
       showLogin("Your Jellyfin session expired. Sign in again.");
       return;
     }
-    homeRows.innerHTML = "";
-    const message = document.createElement("p");
-    message.className = "empty-state";
-    message.textContent = "Jellyfin could not load the home screen.";
-    homeRows.append(message);
+    renderConnectionFailure();
     showToast(errorMessage(error, "Jellyfin could not load the home screen."));
+  }
+}
+
+function renderConnectionFailure(): void {
+  state.homeRows = [];
+  state.resumeItems = [];
+  state.nextUpItems = [];
+  renderFeature(null);
+  featureEyebrow.textContent = "Connection unavailable";
+  featureTitle.textContent = "Jellyfin is offline";
+  featureOverview.textContent = "Start or restart your server, then try the connection again.";
+
+  const panel = document.createElement("section");
+  panel.className = "connection-failure";
+
+  const heading = document.createElement("h2");
+  heading.textContent = "Could not reach Jellyfin";
+
+  const copy = document.createElement("p");
+  copy.textContent = "Your protected session is still available. Downloaded media remains available while the server is offline.";
+
+  const retryButton = document.createElement("button");
+  retryButton.type = "button";
+  retryButton.className = "primary";
+  retryButton.dataset.retryConnection = "";
+  retryButton.textContent = "Retry Connection";
+  retryButton.addEventListener("click", () => { void retryConnection(retryButton); });
+
+  panel.append(heading, copy, retryButton);
+  homeRows.replaceChildren(panel);
+  setRoute("home");
+}
+
+async function retryConnection(trigger?: HTMLButtonElement): Promise<void> {
+  if (connectionRetryInFlight) return;
+  connectionRetryInFlight = true;
+  trigger?.setAttribute("disabled", "");
+  refreshButton.disabled = true;
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  state.libraryCache = { Movie: null, Series: null };
+  try {
+    await loadInitialData();
+  } finally {
+    connectionRetryInFlight = false;
+    refreshButton.disabled = false;
+    if (trigger?.isConnected) trigger.disabled = false;
   }
 }
 
@@ -659,6 +713,12 @@ function renderDetails(item: MediaItem): void {
   detailWatchedButton.onclick = watchedCapable
     ? () => setWatchedState(item, !item.userData.played, detailWatchedButton)
     : null;
+  const seriesCapable = item.type === "Episode" && Boolean(item.seriesId);
+  detailSeriesButton.classList.toggle("is-hidden", !seriesCapable);
+  detailSeriesButton.disabled = !seriesCapable;
+  detailSeriesButton.onclick = seriesCapable
+    ? () => { void openSeriesFromEpisode(item); }
+    : null;
   updateDetailPlayButton();
   syncVisibleDownloadButtons();
 }
@@ -733,7 +793,12 @@ function updateDetailPlayButton(): void {
   detailPlayLabel.textContent = hasProgress ? "Resume" : "Play";
 }
 
-async function openDetails(item: MediaItem): Promise<void> {
+interface OpenDetailsOptions {
+  alreadyLoaded?: boolean;
+  preferredSeasonId?: string | null;
+}
+
+async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): Promise<void> {
   if (!item?.id) return;
   state.returnRoute = state.currentRoute === "details" ? "home" : state.currentRoute;
   state.returnScrollTop = contentScroller.scrollTop;
@@ -745,12 +810,36 @@ async function openDetails(item: MediaItem): Promise<void> {
   renderDetails(item);
   setRoute("details");
   try {
-    const fullItem = await window.jellyfin.items.getDetails({ itemId: item.id });
+    const fullItem = options.alreadyLoaded
+      ? item
+      : await window.jellyfin.items.getDetails({ itemId: item.id });
     if (requestId !== state.detailsRequestId) return;
     renderDetails(fullItem);
-    if (fullItem.type === "Series") await loadSeriesSeasons(fullItem, requestId);
+    if (fullItem.type === "Series") await loadSeriesSeasons(fullItem, requestId, options.preferredSeasonId);
   } catch (error) {
     showToast(errorMessage(error, "Details could not be loaded."));
+  }
+}
+
+async function openSeriesFromEpisode(episode: MediaItem): Promise<void> {
+  if (episode.type !== "Episode" || !episode.seriesId) return;
+  const originRequestId = state.detailsRequestId;
+  const originIsActive = (): boolean => state.currentRoute === "details"
+    && originRequestId === state.detailsRequestId
+    && state.detailItem?.id === episode.id;
+  detailSeriesButton.disabled = true;
+  try {
+    const series = await window.jellyfin.items.getDetails({ itemId: episode.seriesId });
+    if (!originIsActive()) return;
+    if (series.type !== "Series") throw new Error("The parent series could not be found.");
+    await openDetails(series, {
+      alreadyLoaded: true,
+      preferredSeasonId: episode.seasonId,
+    });
+  } catch (error) {
+    if (!originIsActive()) return;
+    detailSeriesButton.disabled = false;
+    showToast(errorMessage(error, "The series could not be opened."));
   }
 }
 
@@ -763,7 +852,7 @@ function returnFromDetails(): void {
   });
 }
 
-async function loadSeriesSeasons(series: MediaItem, requestId: number): Promise<void> {
+async function loadSeriesSeasons(series: MediaItem, requestId: number, preferredSeasonId?: string | null): Promise<void> {
   episodeSection.classList.remove("is-hidden");
   seasonSelect.disabled = true;
   episodeList.innerHTML = '<li class="empty-state">Loading episodes...</li>';
@@ -783,7 +872,9 @@ async function loadSeriesSeasons(series: MediaItem, requestId: number): Promise<
     return;
   }
   const nextForSeries = state.nextUpItems.find((entry) => entry.seriesId === series.id);
-  const preferredSeason = state.seasons.find((season) => season.id === nextForSeries?.seasonId) || state.seasons[0];
+  const preferredSeason = state.seasons.find((season) => season.id === preferredSeasonId)
+    || state.seasons.find((season) => season.id === nextForSeries?.seasonId)
+    || state.seasons[0];
   seasonSelect.value = preferredSeason.id;
   await loadEpisodes(series.id, preferredSeason.id, requestId);
 }
@@ -995,8 +1086,10 @@ function closeDownloads(): void {
   downloadsPanel.classList.add("is-hidden");
 }
 
-async function refreshDownloads(): Promise<void> {
-  state.downloads = await window.jellyfin.downloads.list();
+async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
+  const downloads = await window.jellyfin.downloads.list();
+  if (!isCurrent()) return;
+  state.downloads = downloads;
   renderDownloads();
   syncVisibleDownloadButtons();
 }
@@ -1215,6 +1308,7 @@ function resetSignedInState(): void {
   state.playbackRequestId += 1;
   state.libraries = [];
   state.homeRows = [];
+  state.homeRequestId += 1;
   state.resumeItems = [];
   state.nextUpItems = [];
   state.featureItem = null;
@@ -1227,6 +1321,9 @@ function resetSignedInState(): void {
   state.libraryCache = { Movie: null, Series: null };
   state.detailItem = null;
   state.detailPlayItem = null;
+  detailSeriesButton.classList.add("is-hidden");
+  detailSeriesButton.disabled = true;
+  detailSeriesButton.onclick = null;
   state.seasons = [];
   state.episodes = [];
   state.playbackItem = null;
@@ -1378,11 +1475,7 @@ document.addEventListener("click", () => {
   profileButton.setAttribute("aria-expanded", "false");
 });
 
-refreshButton.addEventListener("click", async () => {
-  profileMenu.classList.add("is-hidden");
-  state.libraryCache = { Movie: null, Series: null };
-  await loadInitialData();
-});
+refreshButton.addEventListener("click", () => { void retryConnection(refreshButton); });
 
 downloadsButton.addEventListener("click", () => openDownloads());
 closeDownloadsButton.addEventListener("click", closeDownloads);

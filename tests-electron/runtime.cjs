@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 12;
+const EXPECTED_TESTS = 14;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -111,6 +111,13 @@ async function runElectronChild() {
     let downloadStartCount = 0;
     const watchedActions = [];
     let expireHome = false;
+    let homeUnavailable = false;
+    let homeGetCount = 0;
+    let logoutCount = 0;
+    let seriesDetailsDelayMs = 0;
+    const detailRequests = [];
+    const seasonRequests = [];
+    const episodeRequests = [];
     const streamRequests = [];
     const safeSession = {
       authenticated: true,
@@ -148,6 +155,45 @@ async function runElectronChild() {
       hasTrailer: false,
       playable: true,
     };
+    const runtimeSeries = {
+      ...runtimeItem,
+      id: "runtime-series-id",
+      name: "Runtime series",
+      type: "Series",
+      overview: "Runtime parent series.",
+      playable: false,
+      userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+    };
+    const runtimeSeasonOne = {
+      ...runtimeItem,
+      id: "runtime-season-one-id",
+      name: "Season 1",
+      type: "Season",
+      seriesId: runtimeSeries.id,
+      seriesName: runtimeSeries.name,
+      indexNumber: 1,
+      playable: false,
+      userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+    };
+    const runtimeSeasonTwo = {
+      ...runtimeSeasonOne,
+      id: "runtime-season-two-id",
+      name: "Season 2",
+      indexNumber: 2,
+    };
+    const runtimeEpisode = {
+      ...runtimeItem,
+      id: "runtime-episode-id",
+      name: "Runtime episode",
+      type: "Episode",
+      overview: "Runtime episode to parent-series navigation test.",
+      seriesId: runtimeSeries.id,
+      seriesName: runtimeSeries.name,
+      seasonId: runtimeSeasonTwo.id,
+      indexNumber: 3,
+      parentIndexNumber: 2,
+      userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+    };
     const api = {
       async connect(url) {
         connectionCount += 1;
@@ -163,18 +209,21 @@ async function runElectronChild() {
       getSafeSession() { return safeSession; },
       async getLibraries() { return []; },
       async getHome() {
+        homeGetCount += 1;
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
+        if (homeUnavailable) throw new AppError("SERVER_UNAVAILABLE", "Jellyfin is unavailable.", 503);
         return {
           libraries: [],
           resumeItems: [],
           nextUpItems: [],
           latestRows: [{
             library: { id: "runtime-library", name: "Runtime library", collectionType: "movies" },
-            items: [runtimeItem],
+            items: [runtimeItem, runtimeEpisode],
           }],
         };
       },
       async logout() {
+        logoutCount += 1;
         return { authenticated: false, persistence: "none", server: null, user: null };
       },
       async fetchArtwork() {
@@ -185,7 +234,13 @@ async function runElectronChild() {
         });
       },
       async getDetails(itemId) {
+        detailRequests.push(itemId);
         if (itemId === runtimeItem.id) return runtimeItem;
+        if (itemId === runtimeEpisode.id) return runtimeEpisode;
+        if (itemId === runtimeSeries.id) {
+          if (seriesDetailsDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, seriesDetailsDelayMs));
+          return runtimeSeries;
+        }
         return {
           id: itemId,
           name: "Runtime item",
@@ -204,6 +259,14 @@ async function runElectronChild() {
             supportsTranscoding: false,
           }],
         };
+      },
+      async getSeasons(seriesId) {
+        seasonRequests.push(seriesId);
+        return seriesId === runtimeSeries.id ? [runtimeSeasonOne, runtimeSeasonTwo] : [];
+      },
+      async getEpisodes(seriesId, seasonId) {
+        episodeRequests.push({ seriesId, seasonId });
+        return seriesId === runtimeSeries.id && seasonId === runtimeSeasonTwo.id ? [runtimeEpisode] : [];
       },
       async fetchStaticStream(itemId, mediaSourceId, range, signal) {
         streamRequests.push({ itemId, mediaSourceId, range, signal });
@@ -530,6 +593,73 @@ async function runElectronChild() {
       ]);
     });
 
+    await test("episode details open the parent series at the episode season", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector('[data-media-item="runtime-episode-id"]')) break;
+          await delay(20);
+        }
+        document.querySelector('[data-media-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime episode") break;
+          await delay(20);
+        }
+        const seriesButton = document.getElementById("detailSeriesButton");
+        const buttonVisible = !seriesButton.classList.contains("is-hidden") && !seriesButton.disabled;
+        const buttonLabel = seriesButton.textContent.trim();
+        seriesButton.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          const titleReady = document.getElementById("detailTitle").textContent === "Runtime series";
+          const episodesReady = !document.getElementById("episodeSection").classList.contains("is-hidden");
+          const seasonReady = document.getElementById("seasonSelect").value === "runtime-season-two-id";
+          if (titleReady && episodesReady && seasonReady) break;
+          await delay(20);
+        }
+        const value = {
+          buttonVisible,
+          buttonLabel,
+          title: document.getElementById("detailTitle").textContent,
+          episodeSectionVisible: !document.getElementById("episodeSection").classList.contains("is-hidden"),
+          seasonId: document.getElementById("seasonSelect").value,
+          seriesButtonHidden: document.getElementById("detailSeriesButton").classList.contains("is-hidden"),
+        };
+        document.getElementById("detailsBackButton").click();
+        return value;
+      })()`);
+
+      assert.equal(result.buttonVisible, true);
+      assert.equal(result.buttonLabel, "View Series");
+      assert.equal(result.title, runtimeSeries.name);
+      assert.equal(result.episodeSectionVisible, true);
+      assert.equal(result.seasonId, runtimeSeasonTwo.id);
+      assert.equal(result.seriesButtonHidden, true);
+      assert.deepEqual(detailRequests.slice(-2), [runtimeEpisode.id, runtimeSeries.id]);
+      assert.equal(seasonRequests.at(-1), runtimeSeries.id);
+      assert.deepEqual(episodeRequests.at(-1), { seriesId: runtimeSeries.id, seasonId: runtimeSeasonTwo.id });
+
+      seriesDetailsDelayMs = 150;
+      const cancelled = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('[data-media-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime episode"
+            && !document.getElementById("detailSeriesButton").disabled) break;
+          await delay(20);
+        }
+        document.getElementById("detailSeriesButton").click();
+        document.getElementById("detailsBackButton").click();
+        await delay(250);
+        return {
+          homeVisible: !document.getElementById("homeView").classList.contains("is-hidden"),
+          detailsHidden: document.getElementById("detailsView").classList.contains("is-hidden"),
+        };
+      })()`);
+      seriesDetailsDelayMs = 0;
+      assert.equal(cancelled.homeVisible, true);
+      assert.equal(cancelled.detailsHidden, true);
+    });
+
     await test("downloaded media exposes Play and invokes only the narrow playback action", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -628,6 +758,57 @@ async function runElectronChild() {
       assert.equal(result.landscapeFit, "cover");
       assert.equal(result.landscapePosition, "50% 50%");
       assert.equal(result.episodeFit, "contain");
+    });
+
+    await test("server-unavailable Home exposes a retry that restores the protected session", async () => {
+      const homeCallsBefore = homeGetCount;
+      homeUnavailable = true;
+      const failed = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("refreshButton").click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (document.querySelector("[data-retry-connection]")) break;
+          await delay(20);
+        }
+        const retry = document.querySelector("[data-retry-connection]");
+        return {
+          retryVisible: Boolean(retry) && !retry.disabled,
+          retryLabel: retry?.textContent.trim(),
+          heading: document.querySelector(".connection-failure h2")?.textContent,
+          loginHidden: document.getElementById("loginView").classList.contains("is-hidden"),
+          mainVisible: !document.getElementById("mainView").classList.contains("is-hidden"),
+          homeVisible: !document.getElementById("homeView").classList.contains("is-hidden"),
+        };
+      })()`);
+
+      assert.equal(failed.retryVisible, true);
+      assert.equal(failed.retryLabel, "Retry Connection");
+      assert.equal(failed.heading, "Could not reach Jellyfin");
+      assert.equal(failed.loginHidden, true);
+      assert.equal(failed.mainVisible, true);
+      assert.equal(failed.homeVisible, true);
+      assert.equal(logoutCount, 0);
+
+      homeUnavailable = false;
+      const recovered = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector("[data-retry-connection]")?.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (document.querySelector('[data-media-item="runtime-movie-id"]') && !document.querySelector("[data-retry-connection]")) break;
+          await delay(20);
+        }
+        return {
+          homeCardRestored: Boolean(document.querySelector('[data-media-item="runtime-movie-id"]')),
+          failureRemoved: !document.querySelector("[data-retry-connection]"),
+          featureTitle: document.getElementById("featureTitle").textContent,
+        };
+      })()`);
+
+      assert.equal(recovered.homeCardRestored, true);
+      assert.equal(recovered.failureRemoved, true);
+      assert.equal(recovered.featureTitle, runtimeItem.name);
+      assert.equal(homeGetCount, homeCallsBefore + 2);
+      assert.equal(logoutCount, 0);
     });
 
     await test("renderer preserves safe reauthentication context and scrubs expired-account UI", async () => {

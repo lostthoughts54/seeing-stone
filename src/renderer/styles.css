@@ -887,6 +887,32 @@ select {
   padding: 22px 0;
 }
 
+.connection-failure {
+  align-items: flex-start;
+  background: rgba(24, 24, 28, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 620px;
+  padding: 24px;
+}
+
+.connection-failure h2,
+.connection-failure p {
+  margin: 0;
+}
+
+.connection-failure p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.connection-failure button {
+  margin-top: 4px;
+}
+
 /* Details */
 
 .details-view {
@@ -1590,7 +1616,7 @@ select {
     grid-template-columns: 1fr 1fr;
   }
 
-  .detail-actions button:nth-child(3) {
+  .detail-actions button:last-child {
     grid-column: 1 / -1;
   }
 

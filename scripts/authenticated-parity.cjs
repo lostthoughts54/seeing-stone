@@ -492,6 +492,27 @@ async function runRendererScenarios(window) {
       if (!Array.isArray(episodes) || episodes.length === 0 || hasForbiddenKey(episodes)) throw coded("EPISODES_MISSING");
       context.episodes = episodes;
       addCandidates(episodes);
+
+      const episode = episodes.find((entry) => entry.seriesId === series.id && entry.seasonId) || episodes[0];
+      if (!episode?.seasonId) throw coded("EPISODE_PARENT_MISSING");
+      const input = document.getElementById("searchInput");
+      input.value = episode.name;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const searchReady = await waitFor(() => !document.getElementById("searchView").classList.contains("is-hidden")
+        && [...document.querySelectorAll("#searchRows .media-card")].some((entry) => entry.dataset.mediaItem === episode.id));
+      if (!searchReady) throw coded("EPISODE_SEARCH_UI_MISSING");
+      const episodeCard = [...document.querySelectorAll("#searchRows .media-card")]
+        .find((entry) => entry.dataset.mediaItem === episode.id);
+      episodeCard.click();
+      const episodeReady = await waitFor(() => document.getElementById("detailTitle").textContent === episode.name
+        && !document.getElementById("detailSeriesButton").classList.contains("is-hidden")
+        && !document.getElementById("detailSeriesButton").disabled);
+      if (!episodeReady) throw coded("EPISODE_DETAIL_SERIES_ACTION_MISSING");
+      document.getElementById("detailSeriesButton").click();
+      const seriesReady = await waitFor(() => document.getElementById("detailTitle").textContent === series.name
+        && !document.getElementById("episodeSection").classList.contains("is-hidden")
+        && document.getElementById("seasonSelect").value === episode.seasonId);
+      if (!seriesReady) throw coded("EPISODE_PARENT_NAVIGATION_FAILED");
       return {};
     });
 
