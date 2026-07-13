@@ -235,6 +235,7 @@ async function runElectronChild() {
       async getLibraryItems(type) {
         return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
       },
+      async search() { return [runtimeOtherMovie]; },
       async getHome() {
         homeGetCount += 1;
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
@@ -799,26 +800,39 @@ async function runElectronChild() {
       assert.deepEqual(result.downloaded, ["Runtime movie"]);
     });
 
-    await test("Home and library cards expose narrow quick Play without replacing details navigation", async () => {
+    await test("Home, library, and search cards expose narrow quick Play without replacing details navigation", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         const card = document.querySelector('#libraryGrid [data-media-item="runtime-zulu-movie-id"]');
-        const quickPlay = document.querySelector('#libraryGrid [data-quick-play-item="runtime-zulu-movie-id"]');
-        quickPlay?.click();
+        const libraryQuickPlay = document.querySelector('#libraryGrid [data-quick-play-item="runtime-zulu-movie-id"]');
+        const homeQuickPlay = document.querySelector('#homeRows [data-quick-play-item="runtime-movie-id"]');
+        const search = document.getElementById("searchInput");
+        search.value = "Zulu";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector('#searchRows [data-quick-play-item="runtime-zulu-movie-id"]')) break;
+          await delay(20);
+        }
+        const searchQuickPlay = document.querySelector('#searchRows [data-quick-play-item="runtime-zulu-movie-id"]');
+        searchQuickPlay?.click();
         for (let attempt = 0; attempt < 100; attempt += 1) {
           if (document.getElementById("playerTitle").textContent === "Zulu movie") break;
           await delay(20);
         }
         return {
           detailsCardPresent: Boolean(card),
-          quickPlayPresent: Boolean(quickPlay),
-          quickPlayLabel: quickPlay?.getAttribute("aria-label"),
+          homeQuickPlayPresent: Boolean(homeQuickPlay),
+          libraryQuickPlayPresent: Boolean(libraryQuickPlay),
+          searchQuickPlayPresent: Boolean(searchQuickPlay),
+          quickPlayLabel: searchQuickPlay?.getAttribute("aria-label"),
           playerTitle: document.getElementById("playerTitle").textContent,
         };
       })()`);
 
       assert.equal(result.detailsCardPresent, true);
-      assert.equal(result.quickPlayPresent, true);
+      assert.equal(result.homeQuickPlayPresent, true);
+      assert.equal(result.libraryQuickPlayPresent, true);
+      assert.equal(result.searchQuickPlayPresent, true);
       assert.equal(result.quickPlayLabel, "Play Zulu movie");
       assert.equal(result.playerTitle, "Zulu movie");
       const playbackState = playback.getState();
