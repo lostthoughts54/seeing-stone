@@ -100,7 +100,10 @@ export class SqlitePersistenceService {
   }>();
   private closed = false;
 
-  constructor(private readonly userDataPath: string) {
+  constructor(
+    private readonly userDataPath: string,
+    private readonly workerPath = join(__dirname, "persistenceWorker.js"),
+  ) {
     this.databasePath = join(userDataPath, "localfirst.sqlite3");
   }
 
@@ -362,7 +365,7 @@ export class SqlitePersistenceService {
 
   private async startWorker(): Promise<PersistenceHealth> {
     await mkdir(this.userDataPath, { recursive: true });
-    const worker = new Worker(join(__dirname, "persistenceWorker.js"), { workerData: { databasePath: this.databasePath } });
+    const worker = new Worker(this.workerPath, { workerData: { databasePath: this.databasePath } });
     this.worker = worker;
     worker.on("message", (message: PersistenceResponse) => this.receive(message));
     worker.on("error", () => this.failWorker());

@@ -28,12 +28,14 @@ import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
 import { SqlitePersistenceService } from "./services/persistence";
+import { resolveVerifiedPersistenceWorkerPath } from "./services/persistenceWorkerIntegrity";
 import { MediaProbeService } from "./services/mediaProbe";
 import { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { IPC } from "../shared/contracts";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
+app.setAppUserModelId("com.localfirst.jellyfin");
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
@@ -69,7 +71,10 @@ app.on("second-instance", () => {
 });
 
 if (ownsSingleInstance) app.whenReady().then(async () => {
-  persistence = new SqlitePersistenceService(app.getPath("userData"));
+  const persistenceWorkerPath = app.isPackaged
+    ? await resolveVerifiedPersistenceWorkerPath(process.resourcesPath, __dirname)
+    : undefined;
+  persistence = new SqlitePersistenceService(app.getPath("userData"), persistenceWorkerPath);
   await persistence.open();
   const rendererSession = hardenSession();
   const identity = await new DeviceIdentityService(

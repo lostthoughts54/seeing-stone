@@ -3,6 +3,7 @@
   "productName": "LocalFirst Jellyfin",
   "version": "0.4.0",
   "private": true,
+  "author": "LocalFirst Jellyfin",
   "description": "A Windows-first, local-file-first Jellyfin client.",
   "main": "dist/main/index.js",
   "scripts": {
@@ -13,6 +14,9 @@
     "clean": "node scripts/clean.mjs",
     "setup:mpv": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-mpv.ps1",
     "package:mpv-spike": "pnpm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-mpv-package.ps1",
+    "generate:worker-integrity": "node scripts/generate-worker-integrity.cjs",
+    "package:windows": "pnpm run setup:mpv && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win nsis --x64",
+    "package:windows:dir": "pnpm run setup:mpv && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win dir --x64",
     "start": "pnpm run build && electron .",
     "test": "pnpm run typecheck && pnpm run test:unit && pnpm run test:core && pnpm run test:electron && pnpm run test:persistence-runtime && pnpm run test:media-probe",
     "test:unit": "vitest run",
@@ -23,13 +27,17 @@
     "test:mpv-runtime": "pnpm run build:main && node scripts/mpv-runtime-acceptance.cjs",
     "test:mpv-visual": "pnpm run build:main && node scripts/mpv-visual-acceptance.cjs",
     "test:mpv-completion": "pnpm run build:main && node scripts/mpv-completion-acceptance.cjs",
+    "test:package": "node scripts/windows-package-acceptance.cjs",
     "test:authenticated": "pnpm run build && node scripts/authenticated-parity.cjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@electron/fuses": "2.1.2",
     "@types/node": "^24.0.0",
     "electron": "43.1.0",
+    "electron-builder": "26.15.3",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"

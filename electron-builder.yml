@@ -1,0 +1,57 @@
+appId: com.localfirst.jellyfin
+productName: LocalFirst Jellyfin
+executableName: LocalFirst Jellyfin
+asar: true
+
+directories:
+  output: .runtime/release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  - "!dist/**/*.map"
+
+asarUnpack:
+  - dist/main/services/persistenceWorker.js
+  - dist/main/services/persistenceTypes.js
+
+extraResources:
+  - from: .runtime/mpv
+    to: mpv
+    filter:
+      - mpv.exe
+      - mpv.com
+      - vulkan-1.dll
+  - from: assets/mpv/input.conf
+    to: mpv/input.conf
+  - from: assets/mpv/NOTICE.md
+    to: mpv/NOTICE.md
+  - from: assets/mpv/licenses
+    to: mpv/licenses
+    filter:
+      - "**/*"
+  - from: mpv-runtime.json
+    to: mpv/mpv-runtime.json
+
+afterPack: ./scripts/after-pack.cjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.svg
+  artifactName: LocalFirst-Jellyfin-Setup-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  selectPerMachineByDefault: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LocalFirst Jellyfin
+  buildUniversalInstaller: false

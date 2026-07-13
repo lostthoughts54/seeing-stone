@@ -72,7 +72,8 @@ describe("renderer and preload security boundary", () => {
     const renderer = await readFile("src/renderer/app.ts", "utf8");
     const preload = await readFile("src/preload/index.ts", "utf8");
     const contracts = await readFile("src/shared/contracts.ts", "utf8");
-    expect(service).toContain('new Worker(join(__dirname, "persistenceWorker.js")');
+    expect(service).toContain('private readonly workerPath = join(__dirname, "persistenceWorker.js")');
+    expect(service).toContain("new Worker(this.workerPath");
     expect(service).not.toMatch(/DatabaseSync|node:sqlite|readFileSync|writeFileSync/);
     expect(worker).toContain('from "node:sqlite"');
     expect(worker).toContain("new DatabaseSync");

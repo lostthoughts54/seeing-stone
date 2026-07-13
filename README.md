@@ -30,6 +30,7 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Resolves every normal Play action through a main-only local-first boundary: an exact verified download is used first, otherwise Jellyfin direct streaming or transcoding is used.
 - Revalidates the authorized root, path containment, existence, size, and media probe before every local playback.
 - Keeps source resolution behind the Play action so the future local-first choice does not clutter browsing.
+- Produces a branded x64 Windows installer with the sandboxed application and pinned mpv runtime packaged together.
 
 ## Try it
 
@@ -48,6 +49,14 @@ pnpm start
 
 If `pnpm` is not installed globally, the same commands can be run as `npx pnpm install`, `npx pnpm setup:mpv`, and `npx pnpm start`.
 
+Build the current unsigned Windows installer:
+
+```powershell
+pnpm package:windows
+```
+
+The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
+
 Example server URLs:
 
 - `http://192.168.1.10:8096`
@@ -62,10 +71,11 @@ pnpm test:mpv-runtime
 pnpm test:mpv-visual
 pnpm test:mpv-completion
 pnpm test:authenticated
+pnpm test:package
 ```
 
-The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). Windows release construction and its current redistribution limitation are documented in [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 
-Completed foundations are committed one milestone at a time. Milestone 7 stops at durable offline playback synchronization; Windows packaging remains a separate acceptance milestone.
+Completed foundations are committed one milestone at a time. This work stops at the Milestone 8 Windows packaging acceptance gate; it does not add new product features.
