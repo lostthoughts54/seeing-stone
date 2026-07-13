@@ -208,6 +208,7 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   assert.doesNotMatch(renderer, /\bfetch\s*\(|localStorage|sessionStorage|accessToken|api_key|ipcRenderer|window\.open/);
   assert.doesNotMatch(renderer, /from\s+["'](?:node:|electron|.*\/main\/)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^,]+,\s*ipcRenderer/);
+  assert.doesNotMatch(`${renderer}\n${preload}`, /localPath|storageRoot|mediaSourceId|file:\/\//);
   assert.doesNotMatch(contracts, /reportStart|reportProgress|reportStop|Sessions\/Playing/);
   const downloadContract = contracts.slice(
     contracts.indexOf("export interface DownloadSummary"),

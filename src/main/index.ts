@@ -19,6 +19,7 @@ import { ArtworkService } from "./services/artwork";
 import { DeviceIdentityService } from "./services/deviceIdentity";
 import { DownloadManager } from "./services/downloadManager";
 import { JellyfinApi } from "./services/jellyfinApi";
+import { LocalPlaybackResolver } from "./services/localPlaybackResolver";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
 import { PlayerPreferencesService } from "./services/playerPreferences";
@@ -75,7 +76,6 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
-  const playbackSource = new PlaybackSessionService(api);
   const playbackReporting = new PlaybackReportingService(api, logger);
   const playerPreferences = new PlayerPreferencesService(app.getPath("userData"));
 
@@ -90,11 +90,14 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     moduleDirectory: __dirname,
   });
   const mediaProbe = new MediaProbeService(runtime);
+  const downloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
+  const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, [downloadStorageRoot]);
+  const playbackSource = new PlaybackSessionService(api, localPlayback);
   downloadManager = new DownloadManager(
     api,
     persistence,
     mediaProbe,
-    join(app.getPath("videos"), "LocalFirst Jellyfin Downloads"),
+    downloadStorageRoot,
     logger,
   );
   downloadManager.onChanged((downloads) => {

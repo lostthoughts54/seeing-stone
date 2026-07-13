@@ -29,6 +29,56 @@ const item: MediaItem = {
 };
 
 describe("PlaybackSessionService", () => {
+  it("prefers a verified local source before any Jellyfin playback-info request", async () => {
+    const api = {
+      getDetails: vi.fn(),
+      getMediaSourceCapabilities: vi.fn(),
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    };
+    const local = {
+      resolve: vi.fn(async () => ({
+        playbackId: "11111111-1111-4111-8111-111111111111",
+        itemId: "movie-1",
+        itemType: "Movie" as const,
+        seriesId: null,
+        mediaSourceId: "source-1",
+        mediaUrl: "D:\\Authorized Downloads\\movie-1\\media.mkv",
+        resumePositionTicks: 50000000,
+        durationTicks: 100000000,
+        source: "local" as const,
+        delivery: "local" as const,
+      })),
+    };
+    const service = new PlaybackSessionService(api, local);
+    const started = await service.start("movie-1", "resume");
+    expect(started.source).toBe("local");
+    expect(started.delivery).toBe("local");
+    expect(local.resolve).toHaveBeenCalledWith("movie-1", "resume");
+    expect(api.getDetails).not.toHaveBeenCalled();
+    expect(api.getMediaSourceCapabilities).not.toHaveBeenCalled();
+    expect((await service.handle(new Request("jellyfin-media://stream/11111111-1111-4111-8111-111111111111"))).status).toBe(404);
+  });
+
+  it("falls back to the existing Jellyfin resolver when no valid local copy is available", async () => {
+    const local = { resolve: vi.fn(async () => null) };
+    const getDetails = vi.fn(async () => item);
+    const getMediaSourceCapabilities = vi.fn(async () => ({
+      itemId: item.id,
+      sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }],
+    }));
+    const service = new PlaybackSessionService({
+      getDetails,
+      getMediaSourceCapabilities,
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    }, local);
+    const started = await service.start(item.id, "resume");
+    expect(started.source).toBe("server");
+    expect(getDetails).toHaveBeenCalledOnce();
+    expect(getMediaSourceCapabilities).toHaveBeenCalledOnce();
+  });
+
   it("keeps the authenticated source main-only and resolves an opaque internal stream", async () => {
     const fetchStaticStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const fetchTranscodedStream = vi.fn();

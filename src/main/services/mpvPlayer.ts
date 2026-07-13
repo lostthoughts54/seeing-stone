@@ -61,7 +61,7 @@ export class MpvPlayerService {
   private process: ChildProcess | null = null;
   private ipc: MpvIpcClient | null = null;
   private source: ResolvedPlaybackSource | null = null;
-  private proxyUrl: string | null = null;
+  private playbackTarget: string | null = null;
   private proxy: PlaybackProxy;
   private listeners = new Set<(state: PlaybackState) => void>();
   private reportingTimer: ReturnType<typeof setInterval> | null = null;
@@ -98,14 +98,14 @@ export class MpvPlayerService {
     const revision = ++this.playbackRevision;
     const preferences = await this.preferences.get().catch(() => ({ windowMaximized: true }));
     this.windowMaximized = preferences.windowMaximized;
-    this.update(emptyState({ itemId, phase: "resolving", source: "server" }));
+    this.update(emptyState({ itemId, phase: "resolving" }));
     let source: ResolvedPlaybackSource;
     try {
       source = await this.playback.start(itemId, resumeMode);
     } catch (error) {
       if (revision === this.playbackRevision) {
         const message = error instanceof AppError ? error.message : "Playback could not be resolved.";
-        this.update(emptyState({ itemId, phase: "error", source: "server", error: message }));
+        this.update(emptyState({ itemId, phase: "error", error: message }));
       }
       throw error;
     }
@@ -115,14 +115,14 @@ export class MpvPlayerService {
       playbackId: source.playbackId,
       itemId,
       phase: "loading",
-      source: "server",
+      source: source.source,
       positionTicks: source.resumePositionTicks,
       durationTicks: source.durationTicks,
     }));
     try {
-      const mediaUrl = await this.proxy.open(source);
-      this.proxyUrl = mediaUrl;
-      await this.launchProcess(mediaUrl, source.resumePositionTicks, false, this.windowMaximized);
+      const playbackTarget = await this.openPlaybackTarget(source);
+      this.playbackTarget = playbackTarget;
+      await this.launchProcess(playbackTarget, source.resumePositionTicks, false, this.windowMaximized);
       this.mainWindow.hide();
       await this.report("start");
       this.update({ ...this.state, phase: this.state.paused ? "paused" : "playing" });
@@ -131,7 +131,7 @@ export class MpvPlayerService {
         playbackId: source.playbackId,
         resumePositionTicks: source.resumePositionTicks,
         durationTicks: source.durationTicks,
-        source: "server",
+        source: source.source,
       };
     } catch (error) {
       await this.failAndClean(error);
@@ -225,7 +225,7 @@ export class MpvPlayerService {
       ipc?.close();
       if (process && !process.killed) process.kill();
       await this.proxy.close();
-      this.proxyUrl = null;
+      this.playbackTarget = null;
       try { this.playback.stop(playbackId); } catch { /* Already cleared. */ }
       this.source = null;
       this.update(emptyState({ phase }));
@@ -248,7 +248,12 @@ export class MpvPlayerService {
     }
   }
 
-  private async launchProcess(mediaUrl: string, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
+  private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<string> {
+    await this.proxy.close();
+    return source.source === "local" ? source.mediaUrl : this.proxy.open(source);
+  }
+
+  private async launchProcess(playbackTarget: string, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
     this.eofArmed = false;
     const pipePath = `\\\\.\\pipe\\localfirst-jellyfin-${randomUUID()}`;
     const args = [
@@ -267,7 +272,7 @@ export class MpvPlayerService {
       `--start=${positionTicks / TICKS_PER_SECOND}`,
       ...(paused ? ["--pause=yes"] : []),
       "--",
-      mediaUrl,
+      playbackTarget,
     ];
     const child = spawn(this.runtime.executable, args, { windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
     this.process = child;
@@ -301,8 +306,8 @@ export class MpvPlayerService {
   }
 
   private async restartAt(positionTicks: number): Promise<void> {
-    const mediaUrl = this.proxyUrl;
-    if (!mediaUrl) throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this stream.", 422);
+    const playbackTarget = this.playbackTarget;
+    if (!playbackTarget) throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this media.", 422);
     const paused = this.state.paused;
     const oldProcess = this.process;
     const oldIpc = this.ipc;
@@ -313,7 +318,7 @@ export class MpvPlayerService {
     if (oldProcess && !oldProcess.killed) oldProcess.kill();
     this.update({ ...this.state, phase: "loading", buffering: true });
     try {
-      await this.launchProcess(mediaUrl, positionTicks, paused, this.windowMaximized);
+      await this.launchProcess(playbackTarget, positionTicks, paused, this.windowMaximized);
       await this.report("progress");
     } catch {
       throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this stream.", 422);
@@ -336,7 +341,7 @@ export class MpvPlayerService {
 
       try { this.playback.stop(completedSource.playbackId); } catch { /* Already finalized. */ }
       await this.proxy.close();
-      this.proxyUrl = null;
+      this.playbackTarget = null;
 
       if (completedSource.itemType !== "Episode" || !completedSource.seriesId) {
         await this.stop(completedSource.playbackId, "ended");
@@ -378,7 +383,7 @@ export class MpvPlayerService {
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
       return;
     }
-    const mediaUrl = await this.proxy.open(nextSource);
+    const playbackTarget = await this.openPlaybackTarget(nextSource);
     if (!this.isCurrent(completedRevision, completedSource)) {
       await this.proxy.close();
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
@@ -387,13 +392,13 @@ export class MpvPlayerService {
 
     const revision = ++this.playbackRevision;
     this.source = nextSource;
-    this.proxyUrl = mediaUrl;
+    this.playbackTarget = playbackTarget;
     this.reportingActive = false;
     this.update(emptyState({
       playbackId: nextSource.playbackId,
       itemId: nextSource.itemId,
       phase: "loading",
-      source: "server",
+      source: nextSource.source,
       durationTicks: nextSource.durationTicks,
     }));
 
@@ -403,7 +408,7 @@ export class MpvPlayerService {
       try {
         const fileLoaded = this.waitForEvent(ipc, "file-loaded", 15000);
         void fileLoaded.catch(() => undefined);
-        await ipc.command(["loadfile", mediaUrl, "replace"]);
+        await ipc.command(["loadfile", playbackTarget, "replace"]);
         await fileLoaded;
       } finally {
         this.replacingFile = false;
@@ -549,6 +554,9 @@ export class MpvPlayerService {
       kind,
       itemId: this.source.itemId,
       mediaSourceId: this.source.mediaSourceId,
+      playMethod: this.source.source === "local"
+        ? "DirectPlay"
+        : this.source.delivery === "transcode" ? "Transcode" : "DirectStream",
       positionTicks: this.state.positionTicks,
       paused: this.state.paused,
     });

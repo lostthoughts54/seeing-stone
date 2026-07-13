@@ -13,7 +13,7 @@ interface PlaybackRecord {
   id: string;
   itemId: string;
   mediaSourceId: string;
-  delivery: "direct" | "transcode";
+  delivery: "direct" | "transcode" | "local";
   requests: Set<AbortController>;
 }
 
@@ -23,7 +23,11 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   seriesId: string | null;
   mediaSourceId: string;
   mediaUrl: string;
-  delivery: "direct" | "transcode";
+  delivery: "direct" | "transcode" | "local";
+}
+
+export interface LocalSourceResolver {
+  resolve(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource | null>;
 }
 
 function state(overrides: Partial<PlaybackState> = {}): PlaybackState {
@@ -50,12 +54,34 @@ export class PlaybackSessionService {
   private revision = 0;
   private state: PlaybackState = state();
 
-  constructor(private readonly api: PlaybackApi) {}
+  constructor(
+    private readonly api: PlaybackApi,
+    private readonly localResolver?: LocalSourceResolver,
+  ) {}
 
   async start(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource> {
     const revision = ++this.revision;
     this.abortCurrent();
-    this.state = state({ itemId, phase: "resolving", source: "server" });
+    this.state = state({ itemId, phase: "resolving" });
+    const local = await this.localResolver?.resolve(itemId, resumeMode).catch(() => null) ?? null;
+    if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
+    if (local) {
+      this.current = {
+        id: local.playbackId,
+        itemId,
+        mediaSourceId: local.mediaSourceId,
+        delivery: "local",
+        requests: new Set(),
+      };
+      this.state = state({
+        playbackId: local.playbackId,
+        itemId,
+        phase: "loading",
+        source: "local",
+        durationTicks: local.durationTicks,
+      });
+      return local;
+    }
     let details: Awaited<ReturnType<PlaybackApi["getDetails"]>>;
     let capabilities: Awaited<ReturnType<PlaybackApi["getMediaSourceCapabilities"]>>;
     try {
@@ -132,6 +158,7 @@ export class PlaybackSessionService {
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts.length !== 1 || !this.current || parts[0] !== this.current.id) return new Response(null, { status: 404 });
     const playback = this.current;
+    if (playback.delivery === "local") return new Response(null, { status: 404 });
     const requestController = new AbortController();
     playback.requests.add(requestController);
     let upstream: Response;

@@ -1,13 +1,13 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const { existsSync, rmSync } = require("node:fs");
 const { hostname } = require("node:os");
 const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--authenticated-parity-child";
 const PARENT_ENV = "JELLYFIN_PARITY_PARENT";
-const REQUIRED_TESTS = 15;
+const REQUIRED_TESTS = 17;
 
 if (!process.versions.electron) {
   try {
@@ -44,7 +44,7 @@ function runNodeParent() {
 }
 
 async function runElectronChild() {
-  const { app, ipcMain } = require("electron");
+  const { app, ipcMain, nativeImage } = require("electron");
   const packageJson = require("../package.json");
   if (!process.argv.includes(CHILD_FLAG) || process.env[PARENT_ENV] !== "1") throw coded("INVALID_HARNESS_START");
   const productionUserData = findProductionUserData(packageJson);
@@ -70,6 +70,9 @@ async function runElectronChild() {
   let ipcChannels = [];
   let playbackToStop = null;
   let player = null;
+  let persistence = null;
+  let downloads = null;
+  let forwardPlaybackReports = true;
   const playbackReports = [];
   let testsRun = 0;
   let testsPassed = 0;
@@ -95,12 +98,16 @@ async function runElectronChild() {
     const { registerIpcHandlers } = require("../dist/main/ipc.js");
     const { ArtworkService } = require("../dist/main/services/artwork.js");
     const { DeviceIdentityService } = require("../dist/main/services/deviceIdentity.js");
+    const { DownloadManager } = require("../dist/main/services/downloadManager.js");
     const { JellyfinApi } = require("../dist/main/services/jellyfinApi.js");
+    const { LocalPlaybackResolver } = require("../dist/main/services/localPlaybackResolver.js");
     const { logger } = require("../dist/main/services/logger.js");
+    const { MediaProbeService } = require("../dist/main/services/mediaProbe.js");
     const { MpvPlayerService } = require("../dist/main/services/mpvPlayer.js");
     const { resolveMpvRuntime } = require("../dist/main/services/mpvRuntime.js");
     const { PlaybackReportingService } = require("../dist/main/services/playbackReporting.js");
     const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
+    const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
     const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 
     ipcChannels = Object.values(IPC).filter((channel) => channel !== IPC.playbackStateChanged && channel !== IPC.downloadsChanged);
@@ -114,7 +121,8 @@ async function runElectronChild() {
     const sessionStore = new SecureSessionStore(productionUserData, security.createSafeStorageProtector());
     const api = new JellyfinApi(identity, sessionStore, async () => { throw coded("EXTERNAL_OPEN_DISABLED"); });
     const artwork = new ArtworkService(api);
-    const playbackSource = new PlaybackSessionService(api);
+    persistence = new SqlitePersistenceService(productionUserData);
+    await persistence.open();
 
     rendererSession.protocol.handle("app", security.serveRendererAsset);
     rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
@@ -122,11 +130,19 @@ async function runElectronChild() {
     });
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
     const runtime = await resolveMpvRuntime({ packaged: false, resourcesPath: process.resourcesPath, moduleDirectory: resolve(__dirname, "../dist/main") });
+    const mediaProbe = new MediaProbeService(runtime);
+    const downloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
+    const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, [downloadStorageRoot]);
+    const playbackSource = new PlaybackSessionService(api, localPlayback);
+    downloads = new DownloadManager(api, persistence, mediaProbe, downloadStorageRoot, logger);
+    downloads.onChanged((state) => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, state);
+    });
     const reporting = new PlaybackReportingService(api, logger);
     player = new MpvPlayerService(mainWindow, playbackSource, {
       acceptAuthoritativeEvent: async (event) => {
-        playbackReports.push({ kind: event.kind, positionTicks: event.positionTicks, paused: event.paused });
-        await reporting.acceptAuthoritativeEvent(event);
+        playbackReports.push({ kind: event.kind, positionTicks: event.positionTicks, paused: event.paused, playMethod: event.playMethod });
+        if (forwardPlaybackReports) await reporting.acceptAuthoritativeEvent(event);
       },
     }, {
       get: async () => ({ windowMaximized: true }),
@@ -135,18 +151,6 @@ async function runElectronChild() {
     player.onState((state) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
     });
-    const downloads = {
-      async activate() {},
-      async deactivate() {},
-      async list() { return []; },
-      async start() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async pause() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async resume() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async retry() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async cancel() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async delete() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-      async setKeep() { throw coded("DOWNLOAD_TEST_DISABLED"); },
-    };
     registerIpcHandlers(ipcMain, mainWindow, api, artwork, player, downloads);
     await mainWindow.loadURL(security.APP_URL);
     await waitForAuthenticated(mainWindow);
@@ -192,11 +196,113 @@ async function runElectronChild() {
       if (Math.abs(result.scrollTop - live.priorScroll) > 1) throw coded("MPV_SCROLL_NOT_RESTORED");
       playbackToStop = null;
     });
+    await test("a completed exact download plays locally without exposing its path", async () => {
+      forwardPlaybackReports = false;
+      const context = api.getAuthenticatedContext();
+      const bundles = await persistence.listDownloadBundles(context.serverId, context.userId);
+      const downloaded = bundles.find((bundle) => bundle.job.state === "completed"
+        && bundle.localVersion?.fileState === "finalized"
+        && bundle.localVersion.probeState === "valid");
+      if (!downloaded) throw coded("NO_VERIFIED_LOCAL_DOWNLOAD");
+      const badgeVisible = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const input = document.getElementById("searchInput");
+        input.value = ${JSON.stringify(downloaded.itemName)};
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          const card = document.querySelector('[data-media-item="' + CSS.escape(${JSON.stringify(downloaded.job.itemId)}) + '"]');
+          const badge = card?.querySelector(".local-availability-badge");
+          if (badge && !badge.classList.contains("is-hidden")) return true;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return false;
+      })()`);
+      if (!badgeVisible) throw coded("LOCAL_AVAILABILITY_BADGE_MISSING");
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        const card = document.querySelector('[data-media-item="' + CSS.escape(${JSON.stringify(downloaded.job.itemId)}) + '"]');
+        if (!card) throw new Error("LOCAL_CARD_MISSING");
+        card.click();
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const ready = !document.getElementById("detailsView").classList.contains("is-hidden")
+            && document.getElementById("detailTitle").textContent === ${JSON.stringify(downloaded.itemName)}
+            && !document.getElementById("detailPlayButton").disabled;
+          if (ready) break;
+          await delay(50);
+        }
+        document.getElementById("detailPlayButton").click();
+        for (let attempt = 0; attempt < 1200; attempt += 1) {
+          const state = await window.jellyfin.playback.getState();
+          if (state.playbackId && ["playing", "paused", "buffering"].includes(state.phase)) return state;
+          await delay(50);
+        }
+        throw new Error("LOCAL_PLAYBACK_TIMEOUT");
+      })()`);
+      playbackToStop = result;
+      if (result.source !== "local") throw coded("LOCAL_SOURCE_NOT_SELECTED");
+      if (JSON.stringify(result).includes(downloaded.localVersion.localPath)) throw coded("LOCAL_PATH_EXPOSED");
+      const state = player.getState();
+      if (state.source !== "local" || state.itemId !== downloaded.job.itemId || state.phase !== "playing") {
+        throw coded("LOCAL_PLAYBACK_STATE_INVALID");
+      }
+      await player.getOutputDimensions().catch(() => { throw coded("LOCAL_MPV_OUTPUT_UNAVAILABLE"); });
+      const capturePosition = Math.min(60 * 10000000, Math.floor(state.durationTicks / 4));
+      if (capturePosition > 0) await player.seek(result.playbackId, capturePosition);
+      await delay(2000);
+      const processId = player.process?.pid;
+      if (!processId) throw coded("LOCAL_MPV_PROCESS_MISSING");
+      const handle = await waitForProcessWindow(processId);
+      const capturePath = join(resolve(__dirname, ".."), ".runtime", "local-playback-capture.png");
+      rmSync(capturePath, { force: true });
+      capturePhysicalWindow(handle, capturePath);
+      const image = nativeImage.createFromPath(capturePath);
+      const metrics = pixelMetrics(image);
+      process.stdout.write(`# local playback capture ${metrics.nonBlackRatio.toFixed(3)} non-black, ${metrics.uniqueColors} colors\n`);
+      await mainWindow.webContents.executeJavaScript(`window.jellyfin.playback.stop({ playbackId: ${JSON.stringify(result.playbackId)} })`);
+      playbackToStop = null;
+      forwardPlaybackReports = true;
+      if (metrics.nonBlackRatio < 0.15 || metrics.uniqueColors < 12) throw coded("LOCAL_MPV_VIDEO_BLACK");
+    });
+    await test("an item without a verified download falls back to Jellyfin streaming", async () => {
+      forwardPlaybackReports = false;
+      const context = api.getAuthenticatedContext();
+      const bundles = await persistence.listDownloadBundles(context.serverId, context.userId);
+      const localItemIds = new Set(bundles
+        .filter((bundle) => bundle.job.state === "completed"
+          && bundle.localVersion?.fileState === "finalized"
+          && bundle.localVersion.probeState === "valid")
+        .map((bundle) => bundle.job.itemId));
+      const home = await api.getHome();
+      let candidate = [
+        ...home.resumeItems,
+        ...home.nextUpItems,
+        ...home.latestRows.flatMap((row) => row.items),
+      ].find((item) => item.playable && !localItemIds.has(item.id));
+      if (!candidate) {
+        candidate = (await api.getLibraryItems("Movie", 100)).find((item) => item.playable && !localItemIds.has(item.id));
+      }
+      if (!candidate) throw coded("NO_SERVER_FALLBACK_ITEM");
+      const result = await mainWindow.webContents.executeJavaScript(`window.jellyfin.playback.start({
+        itemId: ${JSON.stringify(candidate.id)},
+        resumeMode: "start-over"
+      })`);
+      playbackToStop = result;
+      if (result.source !== "server") throw coded("SERVER_FALLBACK_NOT_SELECTED");
+      const state = player.getState();
+      if (state.source !== "server" || state.itemId !== candidate.id || state.phase !== "playing") {
+        throw coded("SERVER_FALLBACK_STATE_INVALID");
+      }
+      await mainWindow.webContents.executeJavaScript(`window.jellyfin.playback.stop({ playbackId: ${JSON.stringify(result.playbackId)} })`);
+      playbackToStop = null;
+      forwardPlaybackReports = true;
+    });
     await test("authoritative mpv events drive main-only Jellyfin playback reporting", () => {
       if (playbackReports[0]?.kind !== "start") throw coded("MPV_REPORT_START_MISSING");
       if (!playbackReports.some((report) => report.kind === "progress")) throw coded("MPV_REPORT_PROGRESS_MISSING");
       if (playbackReports.at(-1)?.kind !== "stop") throw coded("MPV_REPORT_STOP_MISSING");
       if (playbackReports.some((report) => !Number.isFinite(report.positionTicks) || report.positionTicks < 0)) throw coded("MPV_REPORT_POSITION_INVALID");
+      if (!playbackReports.some((report) => report.kind === "start" && report.playMethod === "DirectPlay")) {
+        throw coded("LOCAL_DIRECT_PLAY_REPORT_MISSING");
+      }
     });
   } finally {
     if (mainWindow && playbackToStop?.playbackId && !mainWindow.isDestroyed()) {
@@ -206,6 +312,8 @@ async function runElectronChild() {
       ).catch(() => undefined);
     }
     await player?.clear().catch(() => undefined);
+    await downloads?.shutdown().catch(() => undefined);
+    await persistence?.close().catch(() => undefined);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     for (const channel of ipcChannels) ipcMain.removeHandler(channel);
     if (rendererSession) {
@@ -513,4 +621,79 @@ function safeCode(error) {
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+async function waitForProcessWindow(processId) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const result = spawnSync(powershellPath(), [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$process=Get-Process -Id ([int]$env:JELLYFIN_CAPTURE_PID) -ErrorAction SilentlyContinue; if($process){$process.Refresh(); [Console]::Write($process.MainWindowHandle)}",
+    ], {
+      env: { ...process.env, JELLYFIN_CAPTURE_PID: String(processId) },
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const handle = Number(String(result.stdout || "").trim());
+    if (Number.isSafeInteger(handle) && handle > 0) return handle;
+    await delay(50);
+  }
+  throw coded("LOCAL_MPV_WINDOW_MISSING");
+}
+
+function capturePhysicalWindow(handle, outputPath) {
+  const script = [
+    "Add-Type -AssemblyName System.Drawing",
+    "$definition='using System; using System.Runtime.InteropServices; public static class LocalFirstCapture { [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; } [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect); }'",
+    "Add-Type -TypeDefinition $definition",
+    "$rect=New-Object LocalFirstCapture+RECT",
+    "$ok=[LocalFirstCapture]::GetWindowRect([IntPtr]::new([int64]$env:JELLYFIN_CAPTURE_HANDLE),[ref]$rect)",
+    "if(-not $ok){exit 2}",
+    "$width=$rect.Right-$rect.Left; $height=$rect.Bottom-$rect.Top",
+    "if($width -le 0 -or $height -le 0){exit 3}",
+    "$bitmap=New-Object System.Drawing.Bitmap($width,$height)",
+    "$graphics=[System.Drawing.Graphics]::FromImage($bitmap)",
+    "$graphics.CopyFromScreen($rect.Left,$rect.Top,0,0,$bitmap.Size)",
+    "$bitmap.Save($env:JELLYFIN_CAPTURE_PATH,[System.Drawing.Imaging.ImageFormat]::Png)",
+    "$graphics.Dispose(); $bitmap.Dispose()",
+  ].join("; ");
+  const result = spawnSync(powershellPath(), ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: { ...process.env, JELLYFIN_CAPTURE_HANDLE: String(handle), JELLYFIN_CAPTURE_PATH: outputPath },
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0 || !existsSync(outputPath)) throw coded("LOCAL_MPV_CAPTURE_FAILED");
+}
+
+function powershellPath() {
+  return process.env.SystemRoot
+    ? join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    : "powershell.exe";
+}
+
+function pixelMetrics(image) {
+  const size = image.getSize();
+  if (image.isEmpty() || size.width <= 100 || size.height <= 100) throw coded("LOCAL_MPV_CAPTURE_EMPTY");
+  const x = Math.min(16, Math.floor(size.width / 10));
+  const y = Math.min(48, Math.floor(size.height / 10));
+  const bitmap = image.crop({
+    x,
+    y,
+    width: Math.max(1, size.width - (x * 2)),
+    height: Math.max(1, size.height - y - x),
+  }).resize({ width: 160, height: 90, quality: "good" }).toBitmap();
+  const colors = new Set();
+  let nonBlack = 0;
+  let pixels = 0;
+  for (let offset = 0; offset + 3 < bitmap.length; offset += 4) {
+    const blue = bitmap[offset];
+    const green = bitmap[offset + 1];
+    const red = bitmap[offset + 2];
+    if (red + green + blue >= 24) nonBlack += 1;
+    colors.add(`${red >> 4}:${green >> 4}:${blue >> 4}`);
+    pixels += 1;
+  }
+  return { nonBlackRatio: pixels ? nonBlack / pixels : 0, uniqueColors: colors.size };
 }

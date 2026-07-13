@@ -10,6 +10,7 @@ import type {
   DownloadBundleRecord,
   DownloadJobRecord,
   LocalVersionRecord,
+  MediaItemRecord,
   MediaItemRecordInput,
   MediaSourceRecordInput,
   PersistenceHealth,
@@ -148,6 +149,16 @@ export class SqlitePersistenceService {
         runTimeTicks: nonnegativeInteger(input.runTimeTicks, "Runtime"),
       },
     });
+  }
+
+  async getMediaItem(serverId: string, userId: string, itemId: string): Promise<MediaItemRecord | null> {
+    const identity = safeIdentity({ serverId, userId, itemId });
+    return this.invoke({
+      kind: "getMediaItem",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: identity.itemId!,
+    }) as Promise<MediaItemRecord | null>;
   }
 
   async upsertMediaSource(input: MediaSourceRecordInput): Promise<void> {

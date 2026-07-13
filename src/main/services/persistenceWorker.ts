@@ -6,6 +6,7 @@ import {
   type DownloadJobRecord,
   type DownloadJobState,
   type LocalVersionRecord,
+  type MediaItemRecord,
   type PersistenceHealth,
   type PersistenceOperation,
   type PersistenceRequest,
@@ -270,6 +271,25 @@ function upsertMediaItem(input: Extract<PersistenceOperation, { kind: "upsertMed
       season_id = excluded.season_id, runtime_ticks = excluded.runtime_ticks, updated_at = excluded.updated_at
   `).run(input.serverId, input.userId, input.itemId, input.itemType, input.name, input.seriesId, input.seasonId, input.runTimeTicks, now, now);
   return null;
+}
+
+function getMediaItem(serverId: string, userId: string, itemId: string): MediaItemRecord | null {
+  const row = db().prepare(`
+    SELECT * FROM media_items WHERE server_id = ? AND user_id = ? AND item_id = ?
+  `).get(serverId, userId, itemId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    serverId: String(row.server_id),
+    userId: String(row.user_id),
+    itemId: String(row.item_id),
+    itemType: row.item_type as MediaItemRecord["itemType"],
+    name: String(row.name),
+    seriesId: row.series_id === null ? null : String(row.series_id),
+    seasonId: row.season_id === null ? null : String(row.season_id),
+    runTimeTicks: Number(row.runtime_ticks),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 function upsertMediaSource(input: Extract<PersistenceOperation, { kind: "upsertMediaSource" }>["input"]): null {
@@ -610,6 +630,7 @@ function execute(operation: PersistenceOperation): unknown {
   switch (operation.kind) {
     case "upsertCatalogIdentity": return upsertCatalogIdentity(operation.input);
     case "upsertMediaItem": return upsertMediaItem(operation.input);
+    case "getMediaItem": return getMediaItem(operation.serverId, operation.userId, operation.itemId);
     case "upsertMediaSource": return upsertMediaSource(operation.input);
     case "createDownload": return createDownload(operation.input);
     case "createDownloadBundle": return createDownloadBundle(operation);

@@ -52,10 +52,16 @@ function nextEpisode(itemId: string) {
   };
 }
 
-function harness(options: { nextId?: string | null; failNextStart?: boolean } = {}) {
+function harness(options: { nextId?: string | null; failNextStart?: boolean; localNext?: boolean } = {}) {
   const current = source("episode-1", "playback-1");
   const replacement = source(options.nextId || "episode-2", "playback-2");
+  if (options.localNext) {
+    replacement.source = "local";
+    replacement.delivery = "local";
+    replacement.mediaUrl = "D:\\Authorized Downloads\\episode-2\\media.mkv";
+  }
   const reports: Array<{ kind: string; itemId: string }> = [];
+  const reportedEvents: Array<Record<string, unknown>> = [];
   const stopped = new Set<string>();
   const playback = {
     start: vi.fn(async () => {
@@ -94,7 +100,10 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean } = 
   const player = new MpvPlayerService(
     window as never,
     playback as never,
-    { acceptAuthoritativeEvent: vi.fn(async (event) => { reports.push({ kind: event.kind, itemId: event.itemId }); }) } as never,
+    { acceptAuthoritativeEvent: vi.fn(async (event) => {
+      reports.push({ kind: event.kind, itemId: event.itemId });
+      reportedEvents.push(event);
+    }) } as never,
     { get: async () => ({ windowMaximized: true }), setWindowMaximized: async () => undefined },
     { executable: "mpv.exe", inputConfig: "input.conf" },
   );
@@ -116,12 +125,13 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean } = 
     error: null,
   };
   internals.ipc = ipc;
-  internals.proxy = { close: vi.fn(async () => undefined), open: vi.fn(async () => "http://127.0.0.1/next") };
-  internals.proxyUrl = "http://127.0.0.1/current";
+  const proxy = { close: vi.fn(async () => undefined), open: vi.fn(async () => "http://127.0.0.1/next") };
+  internals.proxy = proxy;
+  internals.playbackTarget = "http://127.0.0.1/current";
   internals.reportingActive = true;
   internals.playbackRevision = 1;
   internals.completion = new PlaybackCompletionCoordinator(10, 3, async () => undefined);
-  return { player, internals, playback, reports, commands, window, current };
+  return { player, internals, playback, reports, reportedEvents, commands, window, current, proxy };
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -146,6 +156,7 @@ describe("MpvPlayerService natural completion", () => {
     await waitFor(() => h.player.getState().phase === "ended" && h.window.show.mock.calls.length === 1);
 
     expect(h.reports).toEqual([{ kind: "stop", itemId: "movie-1" }]);
+    expect(h.reportedEvents[0]).toMatchObject({ playMethod: "DirectStream" });
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
   });
 
@@ -161,6 +172,22 @@ describe("MpvPlayerService natural completion", () => {
     ]);
     expect(h.commands.filter((command) => command[0] === "show-text")).toHaveLength(10);
     expect(h.commands.filter((command) => command[0] === "loadfile")).toHaveLength(1);
+  });
+
+  it("autoplay resolves a downloaded Next Up episode locally without opening the Jellyfin proxy", async () => {
+    const h = harness({ nextId: "episode-2", localNext: true });
+
+    (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
+    await waitFor(() => h.player.getState().itemId === "episode-2" && h.player.getState().phase === "playing");
+
+    expect(h.player.getState().source).toBe("local");
+    expect(h.proxy.open).not.toHaveBeenCalled();
+    expect(h.commands).toContainEqual(["loadfile", "D:\\Authorized Downloads\\episode-2\\media.mkv", "replace"]);
+    expect(h.reportedEvents.at(-1)).toMatchObject({
+      kind: "start",
+      itemId: "episode-2",
+      playMethod: "DirectPlay",
+    });
   });
 
   it.each([

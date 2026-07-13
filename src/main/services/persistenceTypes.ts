@@ -19,6 +19,11 @@ export interface MediaItemRecordInput {
   runTimeTicks: number;
 }
 
+export interface MediaItemRecord extends MediaItemRecordInput {
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface MediaSourceRecordInput {
   serverId: string;
   userId: string;
@@ -159,6 +164,7 @@ export type PersistenceOperation =
   | { kind: "initialize" }
   | { kind: "upsertCatalogIdentity"; input: CatalogIdentityInput }
   | { kind: "upsertMediaItem"; input: MediaItemRecordInput }
+  | { kind: "getMediaItem"; serverId: string; userId: string; itemId: string }
   | { kind: "upsertMediaSource"; input: MediaSourceRecordInput }
   | { kind: "createDownload"; input: CreateDownloadInput & { downloadId: string } }
   | {

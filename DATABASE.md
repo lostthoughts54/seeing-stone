@@ -39,7 +39,7 @@ Milestone 5 never automatically removes media. Insufficient storage pauses a job
 - A version cannot become `finalized` unless probing is `valid`, an actual size exists, and the expected size matches when one is available.
 - Full-file checksums are deliberately not required by the V1 schema.
 
-Later playback resolution must additionally confirm current path containment, existence, finalized state, size when available, and a successful probe before using a local file.
+Milestone 6 playback resolution additionally confirms the configured authorized root, current path containment, existence, finalized state, actual and expected size, and a fresh successful probe before using a local file. Failed validation marks the copy missing or invalid and falls back to Jellyfin without deleting it.
 
 ### Playback and synchronization foundation
 

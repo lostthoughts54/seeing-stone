@@ -569,9 +569,11 @@ function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poste
   const copy = document.createElement("span");
   const title = document.createElement("strong");
   const subtitle = document.createElement("small");
+  const localBadge = document.createElement("span");
 
   button.type = "button";
   button.className = `media-card ${shape}`;
+  button.dataset.mediaItem = item.id;
   button.title = itemCardTitle(item);
   button.addEventListener("click", () => openDetails(item));
 
@@ -581,7 +583,9 @@ function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poste
   image.decoding = "async";
   fallback.className = "art-fallback";
   fallback.textContent = initials(itemCardTitle(item));
-  art.append(image, fallback);
+  localBadge.className = `local-availability-badge${downloadForItem(item.id)?.state === "downloaded" ? "" : " is-hidden"}`;
+  localBadge.textContent = "Local";
+  art.append(image, fallback, localBadge);
   setImage(image, fallback, item, preferredArtwork(item, shape), {
     width: shape === "poster" ? 460 : 760,
     height: shape === "poster" ? 690 : 430,
@@ -901,6 +905,10 @@ function syncVisibleDownloadButtons(): void {
     if (button === detailDownloadButton) detailDownloadLabel.textContent = label;
     else button.textContent = label;
   }
+  for (const card of document.querySelectorAll<HTMLElement>("[data-media-item]")) {
+    const downloaded = downloadForItem(card.dataset.mediaItem || "")?.state === "downloaded";
+    card.querySelector(".local-availability-badge")?.classList.toggle("is-hidden", !downloaded);
+  }
 }
 
 function openDownloads(): void {
@@ -1064,7 +1072,7 @@ async function playItem(item: MediaItem): Promise<void> {
     return;
   }
   state.playbackId = resolved.playbackId;
-  playerSourceBadge.textContent = "mpv";
+  playerSourceBadge.textContent = resolved.source === "local" ? "Local" : "Jellyfin";
 }
 
 async function closePlayer(): Promise<void> {

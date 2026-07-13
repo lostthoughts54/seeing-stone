@@ -42,6 +42,7 @@ Client starts
 - `PersistenceWorker`: migrations and all synchronous SQLite work off Electron's event loop.
 - `DownloadManager`: main-owned queue, authenticated ranged transfers, lifecycle authorization, and sanitized state events.
 - `MediaProbeService`: controlled hidden mpv process that validates finalized media without blocking Electron's event loop.
+- `LocalPlaybackResolver`: exact Jellyfin-identity lookup plus authorized-root, containment, existence, size, and probe validation before mpv receives a local path.
 - `PlaybackSessionService`: main-only Jellyfin source authorization.
 - `PlaybackProxy`: private loopback capability consumed only by mpv.
 - `MpvPlayerService`: native player control and authoritative playback events.
@@ -49,8 +50,6 @@ Client starts
 
 Planned layers build on the SQLite and download boundaries without changing renderer trust:
 
-- `LocalIndex`: verified Jellyfin-item-to-local-version lookup.
-- `PlaybackResolver`: verified local version first, then Jellyfin fallback.
 - `OfflineSynchronization`: revision coalescing and conflict-safe reporting.
 
 ## Desktop process model

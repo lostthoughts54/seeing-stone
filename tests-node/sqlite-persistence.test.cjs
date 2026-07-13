@@ -53,6 +53,18 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
     assert.ok(health.workerThreadId > 0);
+    const storedMedia = await service.getMediaItem(identity.serverId, identity.userId, media.itemId);
+    assert.deepEqual({
+      serverId: storedMedia.serverId,
+      userId: storedMedia.userId,
+      itemId: storedMedia.itemId,
+      itemType: storedMedia.itemType,
+      name: storedMedia.name,
+      seriesId: storedMedia.seriesId,
+      seasonId: storedMedia.seasonId,
+      runTimeTicks: storedMedia.runTimeTicks,
+    }, media);
+    assert.ok(storedMedia.createdAt > 0 && storedMedia.updatedAt >= storedMedia.createdAt);
   } finally {
     await service.close();
   }

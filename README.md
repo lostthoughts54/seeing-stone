@@ -24,6 +24,8 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Shows transfer progress with pause, resume, retry, cancel, explicit delete, and Keep Downloaded controls.
 - Verifies path containment, expected size when available, finalized-file state, existence, and mpv media probing before marking a copy downloaded.
 - Pauses for manual cleanup when storage is insufficient and never auto-deletes media.
+- Resolves every normal Play action through a main-only local-first boundary: an exact verified download is used first, otherwise Jellyfin direct streaming or transcoding is used.
+- Revalidates the authorized root, path containment, existence, size, and media probe before every local playback.
 - Keeps source resolution behind the Play action so the future local-first choice does not clutter browsing.
 
 ## Try it
@@ -59,8 +61,8 @@ pnpm test:mpv-completion
 pnpm test:authenticated
 ```
 
-The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), and unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 
-Completed foundations are committed one milestone at a time. Manual downloads do not yet alter playback source selection: local-first playback through the normal Play action belongs to the next milestone and must not be inferred from a Downloaded label alone.
+Completed foundations are committed one milestone at a time. Local playback still reports directly to Jellyfin when reachable; durable offline progress queuing and conflict-safe synchronization belong to the next milestone.

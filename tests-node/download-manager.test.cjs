@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { DownloadManager } = require("../dist/main/services/downloadManager.js");
 const { AppError } = require("../dist/main/services/errors.js");
+const { LocalPlaybackResolver } = require("../dist/main/services/localPlaybackResolver.js");
 const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
 
 const identity = {
@@ -25,6 +26,7 @@ function mediaItem(itemId) {
     seriesId: itemId.startsWith("movie") ? null : "series-1",
     seasonId: itemId.startsWith("movie") ? null : "season-1",
     runTimeTicks: 1_800_000_000,
+    userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
   };
 }
 
@@ -130,6 +132,14 @@ test("manual download finalizes only after size and probe checks, exposes no pat
     assert.deepEqual(await fs.readFile(bundle.localVersion.localPath), content);
     assert.equal(bundle.localVersion.fileState, "finalized");
     assert.equal(bundle.localVersion.probeState, "valid");
+
+    const localPlayback = new LocalPlaybackResolver(api, value.persistence, probe, [value.storageRoot], 10);
+    const resolved = await localPlayback.resolve("movie-1", "start-over");
+    assert.equal(resolved.source, "local");
+    assert.equal(resolved.delivery, "local");
+    assert.equal(resolved.mediaSourceId, bundle.job.mediaSourceId);
+    assert.equal(resolved.mediaUrl, bundle.localVersion.localPath);
+    assert.equal(resolved.resumePositionTicks, 0);
 
     const kept = await value.manager.setKeep(completed.downloadId, true);
     assert.equal(kept.keepDownloaded, true);

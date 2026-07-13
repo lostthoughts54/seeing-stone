@@ -491,6 +491,7 @@ export class JellyfinApi {
     kind: "start" | "progress" | "stop";
     itemId: string;
     mediaSourceId: string;
+    playMethod: "DirectPlay" | "DirectStream" | "Transcode";
     positionTicks: number;
     paused: boolean;
   }): Promise<void> {
@@ -506,7 +507,7 @@ export class JellyfinApi {
         MediaSourceId: event.mediaSourceId,
         PositionTicks: Math.max(0, Math.floor(event.positionTicks)),
         IsPaused: event.paused,
-        PlayMethod: "DirectStream",
+        PlayMethod: event.playMethod,
       }),
     });
   }

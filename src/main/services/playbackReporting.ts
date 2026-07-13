@@ -5,6 +5,7 @@ export interface AuthoritativePlaybackEvent {
   kind: "start" | "progress" | "stop";
   itemId: string;
   mediaSourceId: string;
+  playMethod: "DirectPlay" | "DirectStream" | "Transcode";
   positionTicks: number;
   paused: boolean;
 }

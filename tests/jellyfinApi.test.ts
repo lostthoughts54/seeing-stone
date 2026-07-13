@@ -134,6 +134,7 @@ describe("JellyfinApi main-side boundary", () => {
       kind: "progress",
       itemId: "movie-1",
       mediaSourceId: "source-1",
+      playMethod: "DirectPlay",
       positionTicks: 1234,
       paused: false,
     });
@@ -154,6 +155,13 @@ describe("JellyfinApi main-side boundary", () => {
     expect(rendererPayload).not.toContain("Sensitive");
     expect(rendererPayload).not.toContain("DirectStreamUrl");
     expect(rendererPayload).not.toContain("TranscodingUrl");
+    const playbackRequest = observedRequests.find((entry) => entry.url.pathname === "/Sessions/Playing/Progress");
+    expect(JSON.parse(String(playbackRequest?.init?.body))).toMatchObject({
+      ItemId: "movie-1",
+      MediaSourceId: "source-1",
+      PositionTicks: 1234,
+      PlayMethod: "DirectPlay",
+    });
     expect(rendererPayload).not.toContain("RequiredHttpHeaders");
     expect(home.resumeItems[0]).toMatchObject({
       id: "movie-1",
