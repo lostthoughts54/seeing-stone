@@ -473,7 +473,18 @@ async function runElectronChild() {
     });
 
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloads, synchronization);
+    const playerController = {
+      loadItem: (itemId, resumeMode) => playback.start(itemId, resumeMode),
+      getState: () => playback.getState(),
+      stop: (playbackId) => playback.stop(playbackId),
+      clear: () => playback.clear(),
+      setPaused: async () => { throw new Error("not used"); },
+      seek: async () => { throw new Error("not used"); },
+      selectAudio: async () => { throw new Error("not used"); },
+      selectSubtitle: async () => { throw new Error("not used"); },
+      setFullscreen: async () => { throw new Error("not used"); },
+    };
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization);
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });

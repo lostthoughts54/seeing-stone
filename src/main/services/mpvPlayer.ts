@@ -12,6 +12,12 @@ import type { MpvRuntimePaths } from "./mpvRuntime";
 import { PlaybackCompletionCoordinator } from "./playbackCompletion";
 import { PlaybackProxy } from "./playbackProxy";
 import type { PlayerPreferencesStore } from "./playerPreferences";
+import type {
+  PlayerAction,
+  PlayerCommandContext,
+  PlayerController,
+  PlayerControllerEvent,
+} from "./playerController";
 import type { PlaybackReportingService } from "./playbackReporting";
 import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackSession";
 
@@ -56,7 +62,7 @@ function tracks(value: unknown): { audioTracks: PlaybackTrack[]; subtitleTracks:
   return { audioTracks, subtitleTracks };
 }
 
-export class MpvPlayerService {
+export class MpvPlayerService implements PlayerController {
   private state = emptyState();
   private process: ChildProcess | null = null;
   private ipc: MpvIpcClient | null = null;
@@ -64,6 +70,7 @@ export class MpvPlayerService {
   private playbackTarget: string | null = null;
   private proxy: PlaybackProxy;
   private listeners = new Set<(state: PlaybackState) => void>();
+  private eventListeners = new Set<(event: PlayerControllerEvent) => void>();
   private reportingTimer: ReturnType<typeof setInterval> | null = null;
   private reportingActive = false;
   private stopping = false;
@@ -73,6 +80,11 @@ export class MpvPlayerService {
   private eofArmed = false;
   private windowMaximized = true;
   private readonly completion = new PlaybackCompletionCoordinator();
+  private controllerRevision = 0;
+  private playbackRate = 1;
+  private pendingPause: { paused: boolean; expiresAt: number } | null = null;
+  private pendingSeek: { positionTicks: number; expiresAt: number } | null = null;
+  private pendingFullscreen: { fullscreen: boolean; expiresAt: number } | null = null;
 
   constructor(
     private readonly mainWindow: BrowserWindow,
@@ -89,12 +101,37 @@ export class MpvPlayerService {
     return () => this.listeners.delete(listener);
   }
 
+  onEvent(listener: (event: PlayerControllerEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
   getState(): PlaybackState {
     return structuredClone(this.state);
   }
 
-  async start(itemId: string, resumeMode: "resume" | "start-over"): Promise<PlaybackStartResult> {
-    if (this.source) await this.stop(this.source.playbackId);
+  getControllerRevision(): number {
+    return this.controllerRevision;
+  }
+
+  getPlaybackRate(): number {
+    return this.playbackRate;
+  }
+
+  loadItem(
+    itemId: string,
+    resumeMode: "resume" | "start-over",
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackStartResult> {
+    return this.start(itemId, resumeMode, context);
+  }
+
+  async start(
+    itemId: string,
+    resumeMode: "resume" | "start-over",
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackStartResult> {
+    if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
     const revision = ++this.playbackRevision;
     const preferences = await this.preferences.get().catch(() => ({ windowMaximized: true }));
     this.windowMaximized = preferences.windowMaximized;
@@ -127,6 +164,7 @@ export class MpvPlayerService {
       await this.report("start");
       this.update({ ...this.state, phase: this.state.paused ? "paused" : "playing" });
       this.startReportingTimer();
+      this.emitEvent("load-item", context);
       return {
         playbackId: source.playbackId,
         resumePositionTicks: source.resumePositionTicks,
@@ -139,15 +177,26 @@ export class MpvPlayerService {
     }
   }
 
-  async setPaused(playbackId: string, paused: boolean): Promise<PlaybackState> {
+  async setPaused(
+    playbackId: string,
+    paused: boolean,
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
+    this.pendingPause = { paused, expiresAt: performance.now() + 3000 };
     await this.command(["set_property", "pause", paused]);
+    this.emitEvent(paused ? "pause" : "play", context);
     return this.getState();
   }
 
-  async seek(playbackId: string, positionTicks: number): Promise<PlaybackState> {
+  async seek(
+    playbackId: string,
+    positionTicks: number,
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     const bounded = Math.max(0, Math.min(positionTicks, this.state.durationTicks || positionTicks));
+    this.pendingSeek = { positionTicks: bounded, expiresAt: performance.now() + 5000 };
     try {
       await this.command(["seek", bounded / TICKS_PER_SECOND, "absolute+exact"]);
     } catch {
@@ -157,6 +206,22 @@ export class MpvPlayerService {
         await this.restartAt(bounded);
       }
     }
+    this.emitEvent("seek", context);
+    return this.getState();
+  }
+
+  async setPlaybackRate(
+    playbackId: string,
+    rate: number,
+    context: PlayerCommandContext = { origin: "system" },
+  ): Promise<PlaybackState> {
+    this.assertPlayback(playbackId);
+    if (!Number.isFinite(rate) || rate < 0.9 || rate > 1.1) {
+      throw new AppError("INVALID_PLAYBACK_RATE", "Playback rate correction is outside the safe range.", 422);
+    }
+    await this.command(["set_property", "speed", rate]);
+    this.playbackRate = rate;
+    this.emitEvent("state", context);
     return this.getState();
   }
 
@@ -174,10 +239,15 @@ export class MpvPlayerService {
     return this.getState();
   }
 
-  async setFullscreen(playbackId: string, fullscreen: boolean): Promise<PlaybackState> {
+  async setFullscreen(
+    playbackId: string,
+    fullscreen: boolean,
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
+    this.pendingFullscreen = { fullscreen, expiresAt: performance.now() + 3000 };
     await this.command(["set_property", "fullscreen", fullscreen]);
-    this.update({ ...this.state, fullscreen });
+    this.update({ ...this.state, fullscreen }, "fullscreen", context);
     return this.getState();
   }
 
@@ -205,7 +275,11 @@ export class MpvPlayerService {
     throw new AppError("PLAYER_DIMENSIONS_UNAVAILABLE", "Player dimensions are unavailable.", 409);
   }
 
-  async stop(playbackId: string, phase: "stopped" | "ended" = "stopped"): Promise<PlaybackState> {
+  async stop(
+    playbackId: string,
+    phase: "stopped" | "ended" = "stopped",
+    context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     if (this.stopping) return this.getState();
     this.playbackRevision += 1;
@@ -228,7 +302,11 @@ export class MpvPlayerService {
       this.playbackTarget = null;
       try { this.playback.stop(playbackId); } catch { /* Already cleared. */ }
       this.source = null;
-      this.update(emptyState({ phase }));
+      this.playbackRate = 1;
+      this.pendingPause = null;
+      this.pendingSeek = null;
+      this.pendingFullscreen = null;
+      this.update(emptyState({ phase }), phase === "ended" ? "completed" : "stop", context);
       if (!this.mainWindow.isDestroyed()) {
         this.mainWindow.show();
         this.mainWindow.focus();
@@ -244,7 +322,8 @@ export class MpvPlayerService {
     else {
       this.playbackRevision += 1;
       this.playback.clear();
-      this.update(emptyState());
+      this.playbackRate = 1;
+      this.update(emptyState(), "stop", { origin: "system" });
     }
   }
 
@@ -334,7 +413,7 @@ export class MpvPlayerService {
         paused: true,
         buffering: false,
         positionTicks: Math.max(this.state.positionTicks, this.state.durationTicks),
-      });
+      }, "completed", { origin: "system" });
       await this.report("stop", "completed");
       this.stopReportingTimer();
       if (!this.isCurrent(revision, completedSource)) return;
@@ -344,7 +423,7 @@ export class MpvPlayerService {
       this.playbackTarget = null;
 
       if (completedSource.itemType !== "Episode" || !completedSource.seriesId) {
-        await this.stop(completedSource.playbackId, "ended");
+        await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         return;
       }
 
@@ -354,7 +433,7 @@ export class MpvPlayerService {
         () => this.isCurrent(revision, completedSource),
       );
       if (!nextEpisode || !this.isCurrent(revision, completedSource)) {
-        if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended");
+        if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         return;
       }
 
@@ -365,7 +444,7 @@ export class MpvPlayerService {
       if (!continuePlayback || !this.isCurrent(revision, completedSource)) return;
       await this.transitionToNextEpisode(revision, completedSource, nextEpisode.id);
     } catch {
-      if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended").catch(() => undefined);
+      if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended", { origin: "system" }).catch(() => undefined);
     } finally {
       if (this.endHandlingRevision === revision) this.endHandlingRevision = null;
     }
@@ -400,7 +479,7 @@ export class MpvPlayerService {
       phase: "loading",
       source: nextSource.source,
       durationTicks: nextSource.durationTicks,
-    }));
+    }), "item-transition", { origin: "system" });
 
     try {
       this.replacingFile = true;
@@ -427,7 +506,7 @@ export class MpvPlayerService {
       this.startReportingTimer();
     } catch (error) {
       if (this.isCurrent(revision, nextSource)) {
-        await this.stop(nextSource.playbackId, "ended").catch(() => undefined);
+        await this.stop(nextSource.playbackId, "ended", { origin: "system" }).catch(() => undefined);
       }
       throw error;
     }
@@ -485,11 +564,11 @@ export class MpvPlayerService {
 
   private handleMessage(message: MpvMessage): void {
     if (message.event === "client-message" && message.args?.[0] === "jellyfin-close" && this.source) {
-      void this.stop(this.source.playbackId);
+      void this.stop(this.source.playbackId, "stopped", { origin: "local-user" });
       return;
     }
     if (message.event === "client-message" && message.args?.[0] === "jellyfin-fullscreen" && this.source) {
-      void this.setFullscreen(this.source.playbackId, !this.state.fullscreen).catch(() => undefined);
+      void this.setFullscreen(this.source.playbackId, !this.state.fullscreen, { origin: "local-user" }).catch(() => undefined);
       return;
     }
     if (message.event === "end-file" && this.source) {
@@ -501,7 +580,7 @@ export class MpvPlayerService {
         this.endHandlingRevision = revision;
         void this.handleNaturalEnd(revision, this.source);
       } else if (!this.stopping) {
-        void this.stop(this.source.playbackId, "ended").catch(() => undefined);
+        void this.stop(this.source.playbackId, "ended", { origin: "system" }).catch(() => undefined);
       }
       return;
     }
@@ -520,20 +599,56 @@ export class MpvPlayerService {
       return;
     }
     const next = { ...this.state };
+    let action: PlayerAction = "state";
+    let context: PlayerCommandContext = { origin: "system" };
+    const now = performance.now();
     if (message.name === "time-pos" && typeof message.data === "number") next.positionTicks = Math.max(0, Math.round(message.data * TICKS_PER_SECOND));
     if (message.name === "duration" && typeof message.data === "number") next.durationTicks = Math.max(next.durationTicks, Math.round(message.data * TICKS_PER_SECOND));
-    if (message.name === "pause" && typeof message.data === "boolean") next.paused = message.data;
-    if (message.name === "paused-for-cache" && typeof message.data === "boolean") next.buffering = message.data;
+    if (message.name === "time-pos" && typeof message.data === "number") {
+      const pending = this.pendingSeek;
+      if (pending && now > pending.expiresAt) this.pendingSeek = null;
+      else if (pending && Math.abs(next.positionTicks - pending.positionTicks) <= 2 * TICKS_PER_SECOND) this.pendingSeek = null;
+      else if (!pending && this.reportingActive && Math.abs(next.positionTicks - this.state.positionTicks) > 2 * TICKS_PER_SECOND) {
+        action = "seek";
+        context = { origin: "local-user" };
+      }
+    }
+    if (message.name === "pause" && typeof message.data === "boolean") {
+      next.paused = message.data;
+      const pending = this.pendingPause;
+      if (pending && now <= pending.expiresAt && pending.paused === message.data) this.pendingPause = null;
+      else if (!pending || now > pending.expiresAt) {
+        this.pendingPause = null;
+        action = message.data ? "pause" : "play";
+        context = { origin: "local-user" };
+      }
+    }
+    if (message.name === "paused-for-cache" && typeof message.data === "boolean") {
+      next.buffering = message.data;
+      if (next.buffering !== this.state.buffering) action = "buffering";
+    }
     if (message.name === "seekable" && typeof message.data === "boolean") next.seekable = message.data;
-    if (message.name === "fullscreen" && typeof message.data === "boolean") next.fullscreen = message.data;
+    if (message.name === "fullscreen" && typeof message.data === "boolean") {
+      next.fullscreen = message.data;
+      const pending = this.pendingFullscreen;
+      if (pending && now <= pending.expiresAt && pending.fullscreen === message.data) this.pendingFullscreen = null;
+      else if (!pending || now > pending.expiresAt) {
+        this.pendingFullscreen = null;
+        action = "fullscreen";
+        context = { origin: "local-user" };
+      }
+    }
     if (message.name === "window-maximized" && typeof message.data === "boolean") {
       void this.persistWindowStateIfWindowed(this.ipc).catch(() => undefined);
     }
-    if (message.name === "track-list") Object.assign(next, tracks(message.data));
+    if (message.name === "track-list") {
+      Object.assign(next, tracks(message.data));
+      action = "tracks";
+    }
     next.phase = this.reportingActive
       ? (next.buffering ? "buffering" : next.paused ? "paused" : "playing")
       : "loading";
-    this.update(next);
+    this.update(next, action, context);
     if (message.name === "pause") void this.report("progress");
   }
 
@@ -568,10 +683,33 @@ export class MpvPlayerService {
     if (kind === "start") this.reportingActive = true;
   }
 
-  private update(state: PlaybackState): void {
+  private update(
+    state: PlaybackState,
+    action: PlayerAction = "state",
+    context: PlayerCommandContext = { origin: "system" },
+  ): void {
     this.state = state;
     const snapshot = this.getState();
     for (const listener of this.listeners) listener(snapshot);
+    this.emitEvent(action, context, snapshot);
+  }
+
+  private emitEvent(
+    action: PlayerAction,
+    context: PlayerCommandContext,
+    state: PlaybackState = this.getState(),
+  ): void {
+    this.controllerRevision += 1;
+    const event: PlayerControllerEvent = {
+      action,
+      origin: context.origin,
+      commandRevision: context.commandRevision ?? null,
+      commandId: context.commandId ?? null,
+      controllerRevision: this.controllerRevision,
+      monotonicTimestampMs: performance.now(),
+      state,
+    };
+    for (const listener of this.eventListeners) listener(structuredClone(event));
   }
 
   private async failAndClean(error: unknown): Promise<void> {
@@ -580,6 +718,6 @@ export class MpvPlayerService {
       try { await this.stop(playbackId); } catch { /* Preserve original failure. */ }
     }
     const message = error instanceof AppError ? error.message : "mpv playback could not be started.";
-    this.update(emptyState({ phase: "error", error: message }));
+    this.update(emptyState({ phase: "error", error: message }), "error", { origin: "system" });
   }
 }

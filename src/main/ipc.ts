@@ -27,7 +27,7 @@ import type { DownloadManager } from "./services/downloadManager";
 import type { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
-import type { MpvPlayerService } from "./services/mpvPlayer";
+import type { PlayerController } from "./services/playerController";
 import { discoverServers } from "./services/serverDiscovery";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
@@ -65,7 +65,7 @@ export function registerIpcHandlers(
   window: BrowserWindow,
   api: JellyfinApi,
   artwork: ArtworkService,
-  playback: MpvPlayerService,
+  playback: PlayerController,
   downloads: DownloadManager,
   synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched">,
 ): void {
@@ -147,15 +147,15 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
-    return playback.start(value.itemId, value.resumeMode);
+    return playback.loadItem(value.itemId, value.resumeMode, { origin: "local-user" });
   });
   register(IPC.playbackSetPaused, (input) => {
     const value = playbackPauseSchema.strict().parse(input);
-    return playback.setPaused(value.playbackId, value.paused);
+    return playback.setPaused(value.playbackId, value.paused, { origin: "local-user" });
   });
   register(IPC.playbackSeek, (input) => {
     const value = playbackSeekSchema.strict().parse(input);
-    return playback.seek(value.playbackId, value.positionTicks);
+    return playback.seek(value.playbackId, value.positionTicks, { origin: "local-user" });
   });
   register(IPC.playbackSelectAudio, (input) => {
     const value = playbackTrackSchema.strict().parse(input);
@@ -167,8 +167,8 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackSetFullscreen, (input) => {
     const value = playbackFullscreenSchema.strict().parse(input);
-    return playback.setFullscreen(value.playbackId, value.fullscreen);
+    return playback.setFullscreen(value.playbackId, value.fullscreen, { origin: "local-user" });
   });
-  register(IPC.playbackStop, (input) => playback.stop(playbackIdSchema.strict().parse(input).playbackId));
+  register(IPC.playbackStop, (input) => playback.stop(playbackIdSchema.strict().parse(input).playbackId, "stopped", { origin: "local-user" }));
   register(IPC.playbackGetState, () => playback.getState());
 }

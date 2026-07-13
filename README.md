@@ -79,7 +79,7 @@ pnpm test:syncplay-spike
 pnpm test:package
 ```
 
-The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The SyncPlay W1 protocol pin, live proof, and local-first watch-party boundary are documented in [SYNCPLAY_W1.md](SYNCPLAY_W1.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). Windows release construction and its current redistribution limitation are documented in [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The main-owned playback backend contract is documented in [PLAYER_CONTROLLER.md](PLAYER_CONTROLLER.md). The SyncPlay W1 protocol pin, live proof, and local-first watch-party boundary are documented in [SYNCPLAY_W1.md](SYNCPLAY_W1.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). Windows release construction and its current redistribution limitation are documented in [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 
