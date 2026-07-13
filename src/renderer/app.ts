@@ -4,6 +4,8 @@ const TICKS_PER_SECOND = 10000000;
 type Route = "home" | "library" | "search" | "details";
 type MediaRow = { title: string; items: MediaItem[]; shape: "poster" | "landscape" };
 type ImageOptions = { width?: number; height?: number };
+type LibraryFilter = "all" | "unwatched" | "watched" | "downloaded";
+type LibrarySort = "title-ascending" | "title-descending" | "year-descending" | "year-ascending" | "rating-descending";
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -55,6 +57,8 @@ const homeRows = byId<HTMLElement>("homeRows");
 const libraryTitle = byId<HTMLElement>("libraryTitle");
 const libraryMoviesButton = byId<HTMLButtonElement>("libraryMoviesButton");
 const libraryShowsButton = byId<HTMLButtonElement>("libraryShowsButton");
+const libraryFilter = byId<HTMLSelectElement>("libraryFilter");
+const librarySort = byId<HTMLSelectElement>("librarySort");
 const libraryGrid = byId<HTMLElement>("libraryGrid");
 const searchTitle = byId<HTMLElement>("searchTitle");
 const searchRows = byId<HTMLElement>("searchRows");
@@ -80,6 +84,8 @@ const detailWatchedLabel = byId<HTMLElement>("detailWatchedLabel");
 const detailSeriesButton = byId<HTMLButtonElement>("detailSeriesButton");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
+const selectSeasonEpisodes = byId<HTMLInputElement>("selectSeasonEpisodes");
+const downloadSelectedEpisodes = byId<HTMLButtonElement>("downloadSelectedEpisodes");
 const episodeList = byId<HTMLOListElement>("episodeList");
 
 const mobileHomeButton = byId<HTMLButtonElement>("mobileHomeButton");
@@ -112,12 +118,15 @@ interface RendererState {
   searchReturnRoute: Route;
   searchReturnScrollTop: number;
   libraryType: "Movie" | "Series";
+  libraryFilter: LibraryFilter;
+  librarySort: LibrarySort;
   libraryCache: { Movie: MediaItem[] | null; Series: MediaItem[] | null };
   detailItem: MediaItem | null;
   detailPlayItem: MediaItem | null;
   detailsRequestId: number;
   seasons: MediaItem[];
   episodes: MediaItem[];
+  selectedEpisodeIds: Set<string>;
   playbackItem: MediaItem | null;
   playbackId: string | null;
   playbackRequestId: number;
@@ -143,12 +152,15 @@ const state: RendererState = {
   searchReturnRoute: "home",
   searchReturnScrollTop: 0,
   libraryType: "Movie",
+  libraryFilter: "all",
+  librarySort: "title-ascending",
   libraryCache: { Movie: null, Series: null },
   detailItem: null,
   detailPlayItem: null,
   detailsRequestId: 0,
   seasons: [],
   episodes: [],
+  selectedEpisodeIds: new Set(),
   playbackItem: null,
   playbackId: null,
   playbackRequestId: 0,
@@ -469,16 +481,15 @@ async function loadInitialData(): Promise<void> {
   const requestId = ++state.homeRequestId;
   showMain();
   renderLoadingRows(homeRows);
+  const downloadsRequest = refreshDownloads(() => requestId === state.homeRequestId).catch((error) => {
+    if (requestId === state.homeRequestId) showToast(errorMessage(error, "Downloads could not be loaded."));
+  });
   try {
-    await Promise.all([
-      loadHome(requestId),
-      refreshDownloads(() => requestId === state.homeRequestId).catch((error) => {
-        if (requestId === state.homeRequestId) showToast(errorMessage(error, "Downloads could not be loaded."));
-      }),
-    ]);
+    await Promise.all([loadHome(requestId), downloadsRequest]);
     if (requestId !== state.homeRequestId) return;
     setRoute("home");
   } catch (error) {
+    await downloadsRequest;
     if (requestId !== state.homeRequestId) return;
     if (errorCode(error) === "SESSION_EXPIRED") {
       await window.jellyfin.session.logout().catch(() => undefined);
@@ -519,7 +530,47 @@ function renderConnectionFailure(): void {
 
   panel.append(heading, copy, retryButton);
   homeRows.replaceChildren(panel);
+  const offlineDownloads = state.downloads.filter((download) => download.state === "downloaded");
+  if (offlineDownloads.length) {
+    const byItemId = new Map(offlineDownloads.map((download) => [download.itemId, download]));
+    homeRows.append(createMediaRow({
+      title: "Downloaded Media",
+      items: offlineDownloads.map(downloadAsMediaItem),
+      shape: "landscape",
+    }, (item) => {
+      const download = byItemId.get(item.id);
+      if (download) void playDownloadedItem(download);
+    }, "Play offline"));
+  }
   setRoute("home");
+}
+
+function downloadAsMediaItem(download: DownloadSummary): MediaItem {
+  return {
+    id: download.itemId,
+    name: download.name,
+    type: download.itemType,
+    overview: "Available offline",
+    productionYear: null,
+    premiereYear: null,
+    officialRating: null,
+    communityRating: null,
+    runTimeTicks: 0,
+    genres: [],
+    primaryImageAspectRatio: null,
+    imageTags: {},
+    backdropImageTag: null,
+    parentThumbItemId: null,
+    parentThumbImageTag: null,
+    seriesId: null,
+    seriesName: null,
+    seasonId: null,
+    indexNumber: null,
+    parentIndexNumber: null,
+    userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+    hasTrailer: false,
+    playable: true,
+  };
 }
 
 async function retryConnection(trigger?: HTMLButtonElement): Promise<void> {
@@ -580,7 +631,11 @@ function renderMediaRows(container: HTMLElement, rows: MediaRow[]): void {
   for (const row of rows) container.append(createMediaRow(row));
 }
 
-function createMediaRow(row: MediaRow): HTMLElement {
+function createMediaRow(
+  row: MediaRow,
+  activate?: (item: MediaItem) => void,
+  actionLabel?: string,
+): HTMLElement {
   const section = document.createElement("section");
   const heading = document.createElement("div");
   const title = document.createElement("h2");
@@ -598,7 +653,7 @@ function createMediaRow(row: MediaRow): HTMLElement {
   rail.className = `media-rail ${row.shape}`;
   rail.setAttribute("tabindex", "0");
   rail.setAttribute("aria-label", row.title);
-  for (const item of row.items) rail.append(createMediaCard(item, row.shape));
+  for (const item of row.items) rail.append(createMediaCard(item, row.shape, activate, actionLabel));
 
   previous.className = "rail-arrow previous";
   previous.type = "button";
@@ -617,7 +672,13 @@ function createMediaRow(row: MediaRow): HTMLElement {
   return section;
 }
 
-function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poster"): HTMLElement {
+function createMediaCard(
+  item: MediaItem,
+  shape: "poster" | "landscape" = "poster",
+  activate?: (item: MediaItem) => void,
+  actionLabel?: string,
+): HTMLElement {
+  const shell = document.createElement("span");
   const button = document.createElement("button");
   const art = document.createElement("span");
   const image = document.createElement("img");
@@ -627,11 +688,13 @@ function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poste
   const subtitle = document.createElement("small");
   const localBadge = document.createElement("span");
 
+  shell.className = `media-card-shell ${shape}`;
   button.type = "button";
   button.className = `media-card ${shape}`;
   button.dataset.mediaItem = item.id;
-  button.title = itemCardTitle(item);
-  button.addEventListener("click", () => openDetails(item));
+  button.title = actionLabel ? `${actionLabel}: ${itemCardTitle(item)}` : itemCardTitle(item);
+  if (actionLabel) button.setAttribute("aria-label", `${actionLabel}: ${itemCardTitle(item)}`);
+  button.addEventListener("click", () => activate ? activate(item) : openDetails(item));
 
   art.className = "media-art";
   image.alt = "";
@@ -642,6 +705,12 @@ function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poste
   localBadge.className = `local-availability-badge${downloadForItem(item.id)?.state === "downloaded" ? "" : " is-hidden"}`;
   localBadge.textContent = "Local";
   art.append(image, fallback, localBadge);
+  if (actionLabel) {
+    const action = document.createElement("span");
+    action.className = "media-card-action";
+    action.textContent = actionLabel;
+    art.append(action);
+  }
   setImage(image, fallback, item, preferredArtwork(item, shape), {
     width: shape === "poster" ? 460 : 760,
     height: shape === "poster" ? 690 : 430,
@@ -662,7 +731,19 @@ function createMediaCard(item: MediaItem, shape: "poster" | "landscape" = "poste
   subtitle.textContent = itemCardSubtitle(item);
   copy.append(title, subtitle);
   button.append(art, copy);
-  return button;
+  shell.append(button);
+  if (!activate && canPlay(item)) {
+    const quickPlay = document.createElement("button");
+    quickPlay.type = "button";
+    quickPlay.className = "media-card-quick-play";
+    quickPlay.dataset.quickPlayItem = item.id;
+    quickPlay.title = `Play ${itemCardTitle(item)}`;
+    quickPlay.setAttribute("aria-label", `Play ${itemCardTitle(item)}`);
+    quickPlay.textContent = "▶";
+    quickPlay.addEventListener("click", () => { void playItem(item); });
+    shell.append(quickPlay);
+  }
+  return shell;
 }
 
 function renderDetails(item: MediaItem): void {
@@ -854,6 +935,8 @@ function returnFromDetails(): void {
 
 async function loadSeriesSeasons(series: MediaItem, requestId: number, preferredSeasonId?: string | null): Promise<void> {
   episodeSection.classList.remove("is-hidden");
+  state.selectedEpisodeIds.clear();
+  updateEpisodeSelectionControls();
   seasonSelect.disabled = true;
   episodeList.innerHTML = '<li class="empty-state">Loading episodes...</li>';
   const result = await window.jellyfin.shows.getSeasons({ itemId: series.id });
@@ -880,6 +963,8 @@ async function loadSeriesSeasons(series: MediaItem, requestId: number, preferred
 }
 
 async function loadEpisodes(seriesId: string, seasonId: string, requestId = state.detailsRequestId): Promise<void> {
+  state.selectedEpisodeIds.clear();
+  updateEpisodeSelectionControls();
   episodeList.innerHTML = '<li class="empty-state">Loading episodes...</li>';
   const result = await window.jellyfin.shows.getEpisodes({ seriesId, seasonId });
   if (requestId !== state.detailsRequestId) return;
@@ -913,6 +998,8 @@ function renderEpisodes(): void {
     const meta = document.createElement("span");
     const overview = document.createElement("p");
     const actions = document.createElement("span");
+    const selection = document.createElement("label");
+    const checkbox = document.createElement("input");
     const play = document.createElement("button");
     const download = document.createElement("button");
     const watched = document.createElement("button");
@@ -923,7 +1010,17 @@ function renderEpisodes(): void {
     image.loading = "lazy";
     fallback.className = "art-fallback";
     fallback.textContent = episode.indexNumber == null ? "E" : `E${episode.indexNumber}`;
-    thumb.append(image, fallback);
+    selection.className = "episode-selector";
+    checkbox.type = "checkbox";
+    checkbox.dataset.episodeSelect = episode.id;
+    checkbox.setAttribute("aria-label", `Select ${episode.name || `episode ${episode.indexNumber || ""}`} for download`);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.selectedEpisodeIds.add(episode.id);
+      else state.selectedEpisodeIds.delete(episode.id);
+      updateEpisodeSelectionControls();
+    });
+    selection.append(checkbox);
+    thumb.append(image, fallback, selection);
     setImage(image, fallback, episode, preferredArtwork(episode, "landscape"), { width: 720, height: 405 });
 
     const percentage = Number(episode.userData?.playedPercentage || 0);
@@ -962,6 +1059,55 @@ function renderEpisodes(): void {
   syncVisibleDownloadButtons();
 }
 
+function updateEpisodeSelectionControls(): void {
+  const eligibleIds = state.episodes
+    .filter((episode) => !downloadForItem(episode.id))
+    .map((episode) => episode.id);
+  const eligible = new Set(eligibleIds);
+  for (const itemId of [...state.selectedEpisodeIds]) {
+    if (!eligible.has(itemId)) state.selectedEpisodeIds.delete(itemId);
+  }
+  for (const checkbox of document.querySelectorAll<HTMLInputElement>("[data-episode-select]")) {
+    const itemId = checkbox.dataset.episodeSelect || "";
+    checkbox.disabled = !eligible.has(itemId);
+    checkbox.checked = !checkbox.disabled && state.selectedEpisodeIds.has(itemId);
+  }
+  const selectedCount = state.selectedEpisodeIds.size;
+  selectSeasonEpisodes.disabled = eligibleIds.length === 0;
+  selectSeasonEpisodes.checked = eligibleIds.length > 0 && selectedCount === eligibleIds.length;
+  selectSeasonEpisodes.indeterminate = selectedCount > 0 && selectedCount < eligibleIds.length;
+  downloadSelectedEpisodes.disabled = selectedCount === 0;
+  downloadSelectedEpisodes.textContent = selectedCount > 0
+    ? `Download selected (${selectedCount})`
+    : "Download selected";
+}
+
+async function startSelectedEpisodeDownloads(): Promise<void> {
+  const selected = state.episodes.filter((episode) => state.selectedEpisodeIds.has(episode.id) && !downloadForItem(episode.id));
+  if (!selected.length) {
+    updateEpisodeSelectionControls();
+    return;
+  }
+  downloadSelectedEpisodes.disabled = true;
+  let started = 0;
+  let failed = 0;
+  for (const episode of selected) {
+    try {
+      const download = await window.jellyfin.downloads.start({ itemId: episode.id });
+      state.downloads = [download, ...state.downloads.filter((entry) => entry.downloadId !== download.downloadId)];
+      state.selectedEpisodeIds.delete(episode.id);
+      started += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  renderDownloads();
+  syncVisibleDownloadButtons();
+  updateEpisodeSelectionControls();
+  if (started > 0) openDownloads();
+  if (failed > 0) showToast(`${failed} selected ${failed === 1 ? "episode" : "episodes"} could not be queued.`);
+}
+
 async function openLibraryCategory(type: "Movie" | "Series"): Promise<void> {
   state.libraryType = type;
   libraryTitle.textContent = type === "Movie" ? "Movies" : "Shows";
@@ -989,14 +1135,31 @@ async function openLibraryCategory(type: "Movie" | "Series"): Promise<void> {
 
 function renderLibraryGrid(items: MediaItem[]): void {
   libraryGrid.innerHTML = "";
-  if (!items.length) {
+  const filtered = items.filter((item) => {
+    if (state.libraryFilter === "watched") return item.userData.played;
+    if (state.libraryFilter === "unwatched") return !item.userData.played;
+    if (state.libraryFilter === "downloaded") return downloadForItem(item.id)?.state === "downloaded";
+    return true;
+  });
+  const titleCompare = (left: MediaItem, right: MediaItem): number => left.name.localeCompare(right.name, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  filtered.sort((left, right) => {
+    if (state.librarySort === "title-descending") return -titleCompare(left, right);
+    if (state.librarySort === "year-descending") return (itemYear(right) || 0) - (itemYear(left) || 0) || titleCompare(left, right);
+    if (state.librarySort === "year-ascending") return (itemYear(left) || Number.MAX_SAFE_INTEGER) - (itemYear(right) || Number.MAX_SAFE_INTEGER) || titleCompare(left, right);
+    if (state.librarySort === "rating-descending") return (right.communityRating || 0) - (left.communityRating || 0) || titleCompare(left, right);
+    return titleCompare(left, right);
+  });
+  if (!filtered.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No titles found.";
+    empty.textContent = items.length ? "No titles match this filter." : "No titles found.";
     libraryGrid.append(empty);
     return;
   }
-  for (const item of items) libraryGrid.append(createMediaCard(item, "poster"));
+  for (const item of filtered) libraryGrid.append(createMediaCard(item, "poster"));
 }
 
 async function runSearch(query: string): Promise<void> {
@@ -1071,6 +1234,7 @@ function syncVisibleDownloadButtons(): void {
     const downloaded = downloadForItem(card.dataset.mediaItem || "")?.state === "downloaded";
     card.querySelector(".local-availability-badge")?.classList.toggle("is-hidden", !downloaded);
   }
+  updateEpisodeSelectionControls();
 }
 
 function openDownloads(): void {
@@ -1318,6 +1482,8 @@ function resetSignedInState(): void {
   state.searchReturnRoute = "home";
   state.searchReturnScrollTop = 0;
   state.libraryType = "Movie";
+  state.libraryFilter = "all";
+  state.librarySort = "title-ascending";
   state.libraryCache = { Movie: null, Series: null };
   state.detailItem = null;
   state.detailPlayItem = null;
@@ -1326,6 +1492,7 @@ function resetSignedInState(): void {
   detailSeriesButton.onclick = null;
   state.seasons = [];
   state.episodes = [];
+  state.selectedEpisodeIds.clear();
   state.playbackItem = null;
   state.playbackId = null;
   state.lastFocusElement = null;
@@ -1340,9 +1507,16 @@ function resetSignedInState(): void {
   episodeList.replaceChildren();
   seasonSelect.replaceChildren();
   seasonSelect.disabled = true;
+  selectSeasonEpisodes.checked = false;
+  selectSeasonEpisodes.indeterminate = false;
+  selectSeasonEpisodes.disabled = true;
+  downloadSelectedEpisodes.disabled = true;
+  downloadSelectedEpisodes.textContent = "Download selected";
   episodeSection.classList.add("is-hidden");
 
   libraryTitle.textContent = "Movies";
+  libraryFilter.value = "all";
+  librarySort.value = "title-ascending";
   searchTitle.textContent = "Search";
   detailEyebrow.textContent = "";
   detailTitle.textContent = "";
@@ -1439,10 +1613,26 @@ navMoviesButton.addEventListener("click", () => openLibraryCategory("Movie"));
 navShowsButton.addEventListener("click", () => openLibraryCategory("Series"));
 libraryMoviesButton.addEventListener("click", () => openLibraryCategory("Movie"));
 libraryShowsButton.addEventListener("click", () => openLibraryCategory("Series"));
+libraryFilter.addEventListener("change", () => {
+  state.libraryFilter = libraryFilter.value as LibraryFilter;
+  renderLibraryGrid(state.libraryCache[state.libraryType] || []);
+});
+librarySort.addEventListener("change", () => {
+  state.librarySort = librarySort.value as LibrarySort;
+  renderLibraryGrid(state.libraryCache[state.libraryType] || []);
+});
 detailsBackButton.addEventListener("click", returnFromDetails);
 seasonSelect.addEventListener("change", () => {
   if (state.detailItem?.type === "Series") loadEpisodes(state.detailItem.id, seasonSelect.value);
 });
+selectSeasonEpisodes.addEventListener("change", () => {
+  state.selectedEpisodeIds.clear();
+  if (selectSeasonEpisodes.checked) {
+    for (const episode of state.episodes) if (!downloadForItem(episode.id)) state.selectedEpisodeIds.add(episode.id);
+  }
+  updateEpisodeSelectionControls();
+});
+downloadSelectedEpisodes.addEventListener("click", () => { void startSelectedEpisodeDownloads(); });
 
 mobileHomeButton.addEventListener("click", () => setRoute("home"));
 mobileSearchButton.addEventListener("click", () => {
@@ -1515,6 +1705,7 @@ window.jellyfin.downloads.subscribe((downloads) => {
   state.downloads = downloads;
   renderDownloads();
   syncVisibleDownloadButtons();
+  if (state.currentRoute === "library") renderLibraryGrid(state.libraryCache[state.libraryType] || []);
 });
 
 void bootstrap();

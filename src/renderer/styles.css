@@ -630,6 +630,14 @@ select option {
   grid-auto-columns: 310px;
 }
 
+.media-card-shell {
+  align-self: start;
+  display: block;
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
 .media-card {
   align-self: start;
   align-items: stretch;
@@ -658,6 +666,30 @@ select option {
   border-color: rgba(167, 67, 255, 0.78);
   box-shadow: 0 15px 36px rgba(0, 0, 0, 0.58);
   transform: translateY(-2px);
+}
+
+.media-card-shell:focus-within .media-art {
+  border-color: rgba(167, 67, 255, 0.78);
+}
+
+.media-card-quick-play {
+  background: rgba(8, 8, 10, 0.9);
+  border-color: rgba(255, 255, 255, 0.42);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  width: 36px;
+  z-index: 5;
+}
+
+.media-card-quick-play:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .media-art {
@@ -740,6 +772,22 @@ select option {
   position: absolute;
   text-transform: uppercase;
   top: 8px;
+  z-index: 4;
+}
+
+.media-card-action {
+  background: rgba(8, 8, 10, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  bottom: 10px;
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 850;
+  left: 50%;
+  padding: 7px 11px;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
   z-index: 4;
 }
 
@@ -871,6 +919,24 @@ select option {
 .segmented-control button.is-active {
   background: rgba(167, 67, 255, 0.18);
   color: var(--text);
+}
+
+.library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.library-controls label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.library-controls select {
+  min-height: 40px;
+  min-width: 150px;
+  width: auto;
 }
 
 .poster-grid-view {
@@ -1076,6 +1142,30 @@ select option {
   width: auto;
 }
 
+.episode-heading-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.episode-select-all {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.84rem;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.episode-select-all input,
+.episode-selector input {
+  accent-color: var(--accent);
+  min-height: 18px;
+  width: 18px;
+}
+
 .episode-list {
   list-style: none;
   margin: 0;
@@ -1102,6 +1192,19 @@ select option {
   justify-content: center;
   overflow: hidden;
   position: relative;
+}
+
+.episode-selector {
+  align-items: center;
+  background: rgba(8, 8, 10, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 5px;
+  display: flex;
+  left: 8px;
+  padding: 5px;
+  position: absolute;
+  top: 8px;
+  z-index: 4;
 }
 
 .episode-copy {

@@ -131,6 +131,27 @@
                 <button id="libraryMoviesButton" class="is-active" type="button">Movies</button>
                 <button id="libraryShowsButton" type="button">Shows</button>
               </div>
+              <div class="library-controls" aria-label="Library view options">
+                <label>
+                  <span>Filter</span>
+                  <select id="libraryFilter">
+                    <option value="all">All titles</option>
+                    <option value="unwatched">Unwatched</option>
+                    <option value="watched">Watched</option>
+                    <option value="downloaded">Downloaded</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Sort</span>
+                  <select id="librarySort">
+                    <option value="title-ascending">Title A–Z</option>
+                    <option value="title-descending">Title Z–A</option>
+                    <option value="year-descending">Newest year</option>
+                    <option value="year-ascending">Oldest year</option>
+                    <option value="rating-descending">Highest rated</option>
+                  </select>
+                </label>
+              </div>
             </header>
             <div id="libraryGrid" class="poster-grid-view" aria-live="polite"></div>
           </section>
@@ -191,7 +212,14 @@
             <section id="episodeSection" class="episode-section is-hidden">
               <div class="episode-heading">
                 <h2>Episodes</h2>
-                <select id="seasonSelect" aria-label="Season"></select>
+                <div class="episode-heading-actions">
+                  <select id="seasonSelect" aria-label="Season"></select>
+                  <label class="episode-select-all">
+                    <input id="selectSeasonEpisodes" type="checkbox" />
+                    Select season
+                  </label>
+                  <button id="downloadSelectedEpisodes" type="button" disabled>Download selected</button>
+                </div>
               </div>
               <ol id="episodeList" class="episode-list"></ol>
             </section>

@@ -29,11 +29,11 @@ Startup converts an interrupted Downloading job to Paused. A finalized file left
 
 ## User actions
 
-- Download is available on movie details and individual episode rows.
+- Download is available on movie details and individual episode rows. A season view can select all or any subset of its episodes and queues each selection through the same validated item-ID-only action.
 - The account menu opens the download manager.
 - Queued or active transfers can pause or cancel.
 - Paused transfers can resume; failed transfers can retry.
 - Completed copies can be explicitly deleted.
 - Keep Downloaded is durable metadata for future smart-download policy; Milestone 5 never auto-deletes either kept or ordinary downloads.
 
-Normal Play actions now select an exact verified downloaded copy before falling back to Jellyfin. Completed entries also expose Play directly in the Downloads panel, including while the server is unreachable. See [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md).
+Normal Play actions now select an exact verified downloaded copy before falling back to Jellyfin. Completed entries expose Play directly in the Downloads panel and in a Downloaded Media row on Home while the server is unreachable. See [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md).

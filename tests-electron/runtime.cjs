@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 14;
+const EXPECTED_TESTS = 17;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -109,6 +109,7 @@ async function runElectronChild() {
     let artworkFetchCount = 0;
     let connectionCount = 0;
     let downloadStartCount = 0;
+    const downloadStartItems = [];
     const watchedActions = [];
     let expireHome = false;
     let homeUnavailable = false;
@@ -194,6 +195,29 @@ async function runElectronChild() {
       parentIndexNumber: 2,
       userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
     };
+    const runtimeEpisodeTwo = {
+      ...runtimeEpisode,
+      id: "runtime-episode-two-id",
+      name: "Runtime episode two",
+      indexNumber: 4,
+    };
+    const runtimeWatchedMovie = {
+      ...runtimeItem,
+      id: "runtime-alpha-movie-id",
+      name: "Alpha movie",
+      productionYear: 1999,
+      premiereYear: 1999,
+      communityRating: 9.1,
+      userData: { played: true, playbackPositionTicks: 0, playedPercentage: 100 },
+    };
+    const runtimeOtherMovie = {
+      ...runtimeItem,
+      id: "runtime-zulu-movie-id",
+      name: "Zulu movie",
+      productionYear: 2010,
+      premiereYear: 2010,
+      communityRating: 6.5,
+    };
     const api = {
       async connect(url) {
         connectionCount += 1;
@@ -208,6 +232,9 @@ async function runElectronChild() {
       async restore() { return safeSession; },
       getSafeSession() { return safeSession; },
       async getLibraries() { return []; },
+      async getLibraryItems(type) {
+        return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
+      },
       async getHome() {
         homeGetCount += 1;
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
@@ -266,7 +293,7 @@ async function runElectronChild() {
       },
       async getEpisodes(seriesId, seasonId) {
         episodeRequests.push({ seriesId, seasonId });
-        return seriesId === runtimeSeries.id && seasonId === runtimeSeasonTwo.id ? [runtimeEpisode] : [];
+        return seriesId === runtimeSeries.id && seasonId === runtimeSeasonTwo.id ? [runtimeEpisode, runtimeEpisodeTwo] : [];
       },
       async fetchStaticStream(itemId, mediaSourceId, range, signal) {
         streamRequests.push({ itemId, mediaSourceId, range, signal });
@@ -300,11 +327,35 @@ async function runElectronChild() {
       canCancel: false,
       canDelete: true,
     };
+    const downloadedMovie = {
+      ...downloadedItem,
+      downloadId: "runtime-downloaded-movie-id",
+      itemId: runtimeItem.id,
+      name: runtimeItem.name,
+      itemType: "Movie",
+    };
     const downloads = {
       async activate() {},
       async deactivate() {},
-      async list() { return [downloadedItem]; },
-      async start() { downloadStartCount += 1; throw new Error("not used"); },
+      async list() { return [downloadedItem, downloadedMovie]; },
+      async start(itemId) {
+        downloadStartCount += 1;
+        downloadStartItems.push(itemId);
+        const source = itemId === runtimeEpisodeTwo.id ? runtimeEpisodeTwo : runtimeEpisode;
+        return {
+          ...downloadedItem,
+          downloadId: `queued-${downloadStartCount}`,
+          itemId,
+          name: source.name,
+          state: "queued",
+          bytesDownloaded: 0,
+          expectedSize: null,
+          progressPercent: null,
+          keepDownloaded: false,
+          canCancel: true,
+          canDelete: false,
+        };
+      },
       async pause() { throw new Error("not used"); },
       async resume() { throw new Error("not used"); },
       async retry() { throw new Error("not used"); },
@@ -664,6 +715,117 @@ async function runElectronChild() {
       assert.equal(cancelled.detailsHidden, true);
     });
 
+    await test("season view selects and queues multiple episode downloads", async () => {
+      const startsBefore = downloadStartCount;
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('[data-media-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime episode") break;
+          await delay(20);
+        }
+        document.getElementById("detailSeriesButton").click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime series"
+            && document.getElementById("seasonSelect").value === "runtime-season-two-id"
+            && document.querySelectorAll(".episode-row").length === 2
+            && !document.getElementById("selectSeasonEpisodes").disabled) break;
+          await delay(20);
+        }
+        const selectAll = document.getElementById("selectSeasonEpisodes");
+        selectAll.checked = true;
+        selectAll.dispatchEvent(new Event("change", { bubbles: true }));
+        const batch = document.getElementById("downloadSelectedEpisodes");
+        const selectedLabel = batch.textContent.trim();
+        batch.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (!document.getElementById("downloadsPanel").classList.contains("is-hidden")
+            && batch.textContent.trim() === "Download selected") break;
+          await delay(20);
+        }
+        const value = {
+          episodeRows: document.querySelectorAll(".episode-row").length,
+          episodeSelectors: document.querySelectorAll("[data-episode-select]").length,
+          selectedLabel,
+          panelVisible: !document.getElementById("downloadsPanel").classList.contains("is-hidden"),
+          batchDisabled: batch.disabled,
+        };
+        document.getElementById("closeDownloadsButton").click();
+        document.getElementById("detailsBackButton").click();
+        return value;
+      })()`);
+
+      assert.equal(result.episodeRows, 2);
+      assert.equal(result.episodeSelectors, 2);
+      assert.equal(result.selectedLabel, "Download selected (2)");
+      assert.equal(result.panelVisible, true);
+      assert.equal(result.batchDisabled, true);
+      assert.equal(downloadStartCount, startsBefore + 2);
+      assert.deepEqual(downloadStartItems.slice(-2), [runtimeEpisode.id, runtimeEpisodeTwo.id]);
+    });
+
+    await test("library filtering and sorting operate on the loaded Jellyfin library", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        const titles = () => [...document.querySelectorAll("#libraryGrid .media-card strong")]
+          .map((entry) => entry.textContent.trim());
+        document.getElementById("navMoviesButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelectorAll("#libraryGrid .media-card").length === 3) break;
+          await delay(20);
+        }
+        const filter = document.getElementById("libraryFilter");
+        const sort = document.getElementById("librarySort");
+        sort.value = "title-descending";
+        sort.dispatchEvent(new Event("change", { bubbles: true }));
+        const descending = titles();
+        filter.value = "unwatched";
+        filter.dispatchEvent(new Event("change", { bubbles: true }));
+        const unwatched = titles();
+        filter.value = "watched";
+        filter.dispatchEvent(new Event("change", { bubbles: true }));
+        const watched = titles();
+        filter.value = "downloaded";
+        filter.dispatchEvent(new Event("change", { bubbles: true }));
+        const downloaded = titles();
+        filter.value = "all";
+        filter.dispatchEvent(new Event("change", { bubbles: true }));
+        return { descending, unwatched, watched, downloaded };
+      })()`);
+
+      assert.deepEqual(result.descending, ["Zulu movie", "Runtime movie", "Alpha movie"]);
+      assert.deepEqual(result.unwatched, ["Zulu movie", "Runtime movie"]);
+      assert.deepEqual(result.watched, ["Alpha movie"]);
+      assert.deepEqual(result.downloaded, ["Runtime movie"]);
+    });
+
+    await test("Home and library cards expose narrow quick Play without replacing details navigation", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        const card = document.querySelector('#libraryGrid [data-media-item="runtime-zulu-movie-id"]');
+        const quickPlay = document.querySelector('#libraryGrid [data-quick-play-item="runtime-zulu-movie-id"]');
+        quickPlay?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("playerTitle").textContent === "Zulu movie") break;
+          await delay(20);
+        }
+        return {
+          detailsCardPresent: Boolean(card),
+          quickPlayPresent: Boolean(quickPlay),
+          quickPlayLabel: quickPlay?.getAttribute("aria-label"),
+          playerTitle: document.getElementById("playerTitle").textContent,
+        };
+      })()`);
+
+      assert.equal(result.detailsCardPresent, true);
+      assert.equal(result.quickPlayPresent, true);
+      assert.equal(result.quickPlayLabel, "Play Zulu movie");
+      assert.equal(result.playerTitle, "Zulu movie");
+      const playbackState = playback.getState();
+      assert.equal(playbackState.itemId, runtimeOtherMovie.id);
+      playback.stop(playbackState.playbackId);
+    });
+
     await test("downloaded media exposes Play and invokes only the narrow playback action", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -769,12 +931,14 @@ async function runElectronChild() {
       homeUnavailable = true;
       const failed = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("closeDownloadsButton").click();
         document.getElementById("refreshButton").click();
         for (let attempt = 0; attempt < 150; attempt += 1) {
           if (document.querySelector("[data-retry-connection]")) break;
           await delay(20);
         }
         const retry = document.querySelector("[data-retry-connection]");
+        const offlineCard = document.querySelector('[aria-label="Play offline: Runtime offline episode"]');
         return {
           retryVisible: Boolean(retry) && !retry.disabled,
           retryLabel: retry?.textContent.trim(),
@@ -782,6 +946,10 @@ async function runElectronChild() {
           loginHidden: document.getElementById("loginView").classList.contains("is-hidden"),
           mainVisible: !document.getElementById("mainView").classList.contains("is-hidden"),
           homeVisible: !document.getElementById("homeView").classList.contains("is-hidden"),
+          offlineCardVisible: Boolean(offlineCard),
+          offlineRowTitle: [...document.querySelectorAll("#homeRows .row-heading h2")]
+            .map((heading) => heading.textContent.trim()).find((title) => title === "Downloaded Media"),
+          downloadsPanelHidden: document.getElementById("downloadsPanel").classList.contains("is-hidden"),
         };
       })()`);
 
@@ -791,6 +959,9 @@ async function runElectronChild() {
       assert.equal(failed.loginHidden, true);
       assert.equal(failed.mainVisible, true);
       assert.equal(failed.homeVisible, true);
+      assert.equal(failed.offlineCardVisible, true);
+      assert.equal(failed.offlineRowTitle, "Downloaded Media");
+      assert.equal(failed.downloadsPanelHidden, true);
       assert.equal(logoutCount, 0);
 
       homeUnavailable = false;
@@ -798,11 +969,13 @@ async function runElectronChild() {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         document.querySelector("[data-retry-connection]")?.click();
         for (let attempt = 0; attempt < 150; attempt += 1) {
-          if (document.querySelector('[data-media-item="runtime-movie-id"]') && !document.querySelector("[data-retry-connection]")) break;
+          if (document.querySelector('#homeRows [data-media-item="runtime-movie-id"]')
+            && !document.querySelector("[data-retry-connection]")
+            && document.getElementById("featureTitle").textContent === "Runtime movie") break;
           await delay(20);
         }
         return {
-          homeCardRestored: Boolean(document.querySelector('[data-media-item="runtime-movie-id"]')),
+          homeCardRestored: Boolean(document.querySelector('#homeRows [data-media-item="runtime-movie-id"]')),
           failureRemoved: !document.querySelector("[data-retry-connection]"),
           featureTitle: document.getElementById("featureTitle").textContent,
         };
@@ -960,6 +1133,7 @@ async function runElectronChild() {
       assert.equal(connectionCount, 1);
       assert.doesNotMatch(rejected.message, /Authorization|must-not-cross/);
 
+      const startsBeforeRejectedDownload = downloadStartCount;
       const rejectedDownload = await mainWindow.webContents.executeJavaScript(`window.jellyfin.downloads.start({
         itemId: "movie-1",
         mediaSourceId: "private-source",
@@ -972,7 +1146,7 @@ async function runElectronChild() {
       assert.equal(rejectedDownload.accepted, false);
       assert.equal(rejectedDownload.code, "INVALID_INPUT");
       assert.equal(rejectedDownload.retryable, false);
-      assert.equal(downloadStartCount, 0);
+      assert.equal(downloadStartCount, startsBeforeRejectedDownload);
       assert.doesNotMatch(rejectedDownload.message, /private-source|ipc-runtime|Sensitive|must-not-cross/);
     });
 

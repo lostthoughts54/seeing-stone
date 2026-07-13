@@ -10,6 +10,7 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Finds Jellyfin servers on the local network using Jellyfin's UDP discovery protocol.
 - Remembers Jellyfin sessions only through OS-protected storage; unavailable protection means signing in again.
 - Loads the signed-in user's libraries.
+- Filters libraries by watched or local availability and sorts by title, year, or rating.
 - Builds a Plex-style home from Continue Watching, Next Up, and recently added library rows.
 - Opens dedicated movie, show, and episode detail views.
 - Loads show seasons and episode rows.
@@ -24,10 +25,13 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
 - Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
 - Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.
+- Selects an entire season or any combination of episodes and queues them through the same item-ID-only download boundary.
 - Shows transfer progress with pause, resume, retry, cancel, explicit delete, and Keep Downloaded controls.
 - Verifies path containment, expected size when available, finalized-file state, existence, and mpv media probing before marking a copy downloaded.
 - Pauses for manual cleanup when storage is insufficient and never auto-deletes media.
 - Resolves every normal Play action through a main-only local-first boundary: an exact verified download is used first, otherwise Jellyfin direct streaming or transcoding is used.
+- Exposes quick Play on Home, library, and search cards while retaining the existing details action.
+- Shows completed downloads directly on Home when Jellyfin is unreachable, so offline playback does not require entering the Downloads panel.
 - Revalidates the authorized root, path containment, existence, size, and media probe before every local playback.
 - Keeps source resolution behind the Play action so the future local-first choice does not clutter browsing.
 - Produces a branded x64 Windows installer with the sandboxed application and pinned mpv runtime packaged together.
