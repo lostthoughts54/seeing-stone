@@ -622,6 +622,8 @@ async function runElectronChild() {
           title: document.getElementById("detailTitle").textContent,
           episodeSectionVisible: !document.getElementById("episodeSection").classList.contains("is-hidden"),
           seasonId: document.getElementById("seasonSelect").value,
+          optionBackground: getComputedStyle(document.getElementById("seasonSelect").options[1]).backgroundColor,
+          optionColor: getComputedStyle(document.getElementById("seasonSelect").options[1]).color,
           seriesButtonHidden: document.getElementById("detailSeriesButton").classList.contains("is-hidden"),
         };
         document.getElementById("detailsBackButton").click();
@@ -633,6 +635,8 @@ async function runElectronChild() {
       assert.equal(result.title, runtimeSeries.name);
       assert.equal(result.episodeSectionVisible, true);
       assert.equal(result.seasonId, runtimeSeasonTwo.id);
+      assert.equal(result.optionBackground, "rgb(27, 27, 31)");
+      assert.equal(result.optionColor, "rgb(247, 247, 248)");
       assert.equal(result.seriesButtonHidden, true);
       assert.deepEqual(detailRequests.slice(-2), [runtimeEpisode.id, runtimeSeries.id]);
       assert.equal(seasonRequests.at(-1), runtimeSeries.id);
