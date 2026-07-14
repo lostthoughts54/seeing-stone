@@ -8,6 +8,7 @@ The abstraction deliberately contains no mpv command arrays, executable argument
 
 - resolve and load an exact Jellyfin item through the existing `PlaybackSessionService`;
 - play/pause, seek, stop, fullscreen, audio/subtitle selection;
+- discover embedded mpv tracks and authenticated Jellyfin-managed external text subtitles for both local and server video;
 - read sanitized position, duration, buffering, seekability, track, completion, error, source-kind, and item-transition state;
 - apply bounded playback-rate correction from `0.9` through `1.1` and restore normal `1.0` speed;
 - preserve current native mpv window behavior and authoritative Jellyfin reporting.
@@ -36,4 +37,4 @@ Native mpv OSC/key actions remain observable: unprompted pause/play, meaningful 
 
 ## Verification
 
-`tests/playerController.test.ts` covers remote-origin preservation, native-control origin detection, monotonic controller revisions, bounded rate correction, buffering, and absence of media locations from emitted state. Existing completion, IPC, security, authenticated playback, local playback, and mpv runtime suites remain the regression authority.
+`tests/playerController.test.ts` covers remote-origin preservation, native-control origin detection, monotonic controller revisions, bounded rate correction, buffering, and absence of media locations from emitted state. Playback-session, proxy, API-boundary, and native mpv completion acceptance additionally cover sanitized external-subtitle discovery, exact media-source matching, opaque authenticated delivery, selectable track attachment, local playback, and server playback.

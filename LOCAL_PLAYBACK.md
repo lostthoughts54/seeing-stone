@@ -8,7 +8,8 @@ Milestone 6 keeps one Play action throughout Home, libraries, search, details, s
 2. Prefer the newest protected verified version when more than one exists.
 3. Revalidate the configured download root, path containment, file existence, recorded actual size, expected size when available, and media usability through a fresh hidden mpv probe.
 4. Give the validated path directly to the main-controlled mpv process.
-5. If no candidate passes, use the existing Jellyfin Direct Stream or transcode resolver.
+5. When Jellyfin is reachable, attach matching external text subtitles from the selected Jellyfin media source through a separate authenticated main-process proxy. Subtitle lookup failure never disqualifies the verified local video.
+6. If no local candidate passes, use the existing Jellyfin Direct Stream or transcode resolver and attach its matching external Jellyfin subtitles through the same proxy.
 
 Titles and filenames are never used to substitute a different item. Missing, changed, path-escaped, or probe-invalid copies are marked unusable but never deleted automatically.
 
@@ -16,6 +17,7 @@ Titles and filenames are never used to substitute a different item. Missing, cha
 
 - Absolute paths remain in Electron main and the SQLite worker.
 - The local path is never returned through IPC, preload, renderer state, logs, or a tokenized URL.
+- Jellyfin subtitle paths, delivery URLs, required headers, and tokens remain main-only. Native mpv receives only a random loopback capability for each validated subtitle stream.
 - The renderer cannot choose a local file, media source, executable, or mpv argument.
 - The same controlled mpv window, seeking, tracks, fullscreen, completion, and Jellyfin Next Up behavior apply to local and server playback.
 

@@ -25,12 +25,13 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 ## Verification performed on 2026-07-13
 
 - TypeScript main, preload, and renderer typechecks passed.
-- Unit suite: 22 files and 107 tests passed.
+- Unit suite: 22 files and 109 tests passed.
 - Main-process security, persistence, download, offline-sync, reporting, and networking suite: 18 tests passed.
 - Electron runtime: 19 tests passed, including the real sandboxed preload bridge, visible per-computer delivery status, watch-party UI, strict IPC, sender validation, and renderer network denial.
 - Live SyncPlay acceptance against Jellyfin 10.11.11: 12 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover/join after access was granted, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, local-only manual resync, leave, and empty-group removal.
 - Authenticated application acceptance: 18 tests passed. It exercised real protected-session restoration, UI navigation, native mpv, a verified downloaded item using the local file, an undownloaded item falling back to Jellyfin streaming, and authoritative main-owned reporting.
-- Native mpv runtime and completion acceptance passed with mpv `v0.41.0-dev-ge5486b96d`, including movie completion, the existing 10-second Next Up flow, and cancellation.
+- A focused authenticated rerun against Jellyfin 10.11.11 found a real server-managed external subtitle and exposed it as a selectable native mpv track. The expanded 19-scenario run passed 17 scenarios; its two download-dependent legacy checks could not run because the current protected profile no longer contains a verified completed app download.
+- Native mpv runtime and completion acceptance passed with mpv `v0.41.0-dev-ge5486b96d`, including a local video with an authenticated external Jellyfin subtitle, movie completion, the existing 10-second Next Up flow, and cancellation.
 - Persistence runtime and media-probe acceptance passed.
 - The complete Windows NSIS installer was rebuilt and accepted. The test installed it, launched the packaged UI, verified hardened Electron fuses and packaged resources (including `ws` and mpv), checked stable device identity across restart, ran packaged mpv, uninstalled it, and verified cleanup.
 
@@ -38,7 +39,7 @@ Installer artifact:
 
 ```text
 D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: ed23a172e716ff5f34f05195b37b6bedf186a415677efd1d02a7b3e9909794e9
+SHA-256: b132f100258f32167a9038a5520bee5b0554c8c329c29f8ef5653612132008f2
 ```
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.

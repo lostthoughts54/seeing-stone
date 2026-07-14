@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { existsSync, readFileSync } = require("node:fs");
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const { join, resolve } = require("node:path");
 const { MpvPlayerService } = require("../dist/main/services/mpvPlayer.js");
@@ -16,17 +16,35 @@ const runtime = {
 const fixtures = {
   movie: join(root, ".runtime", "mpv-completion-movie.mp4"),
   episode: join(root, ".runtime", "mpv-completion-episode.mkv"),
+  subtitle: join(root, ".runtime", "mpv-completion-external.srt"),
 };
 
 async function run() {
   assert.equal(existsSync(runtime.executable), true, "Run pnpm setup:mpv first.");
   createFixture(fixtures.movie);
   createFixture(fixtures.episode);
+  if (!existsSync(fixtures.subtitle)) {
+    writeFileSync(fixtures.subtitle, "1\n00:00:00,000 --> 00:00:02,500\nExternal subtitle acceptance\n", "utf8");
+  }
 
+  await verifyLocalExternalSubtitle();
   await verifyMovieCompletion();
   await verifyEpisodeAutoplay();
   await verifyCountdownCancellation();
-  process.stdout.write("mpv completion acceptance passed (MP4 movie close, MKV 10-second autoplay, cancellation).\n");
+  process.stdout.write("mpv completion acceptance passed (local external subtitle, MP4 movie close, MKV 10-second autoplay, cancellation).\n");
+}
+
+async function verifyLocalExternalSubtitle() {
+  const harness = createHarness(fixtures);
+  const playback = await harness.player.start("subtitle-local", "start-over");
+  await waitFor(() => harness.player.getState().subtitleTracks.some((track) => track.title === "English - Jellyfin external"), 10000);
+  const state = harness.player.getState();
+  const subtitle = state.subtitleTracks.find((track) => track.title === "English - Jellyfin external");
+  assert.ok(subtitle, "The Jellyfin external subtitle was not added to local playback.");
+  assert.equal(state.source, "local");
+  await harness.player.selectSubtitle(playback.playbackId, subtitle.id);
+  assert.equal(harness.playback.subtitleFetches, 1);
+  await harness.player.stop(playback.playbackId);
 }
 
 async function verifyMovieCompletion() {
@@ -107,10 +125,12 @@ class FixturePlayback {
     this.sequence = 0;
     this.current = null;
     this.nextUpQueries = 0;
+    this.subtitleFetches = 0;
   }
 
   async start(itemId) {
-    const itemType = itemId.startsWith("movie") ? "Movie" : "Episode";
+    const localSubtitle = itemId === "subtitle-local";
+    const itemType = itemId.startsWith("movie") || localSubtitle ? "Movie" : "Episode";
     const playbackId = `playback-${++this.sequence}`;
     this.current = { playbackId, itemId, itemType };
     return {
@@ -119,11 +139,19 @@ class FixturePlayback {
       itemType,
       seriesId: itemType === "Episode" ? "series-1" : null,
       mediaSourceId: `source-${itemId}`,
-      mediaUrl: `jellyfin-media://stream/${playbackId}`,
-      delivery: "direct",
+      mediaUrl: localSubtitle ? this.paths.movie : `jellyfin-media://stream/${playbackId}`,
+      delivery: localSubtitle ? "local" : "direct",
       resumePositionTicks: 0,
       durationTicks: 3 * TICKS_PER_SECOND,
-      source: "server",
+      source: localSubtitle ? "local" : "server",
+      externalSubtitles: localSubtitle ? [{
+        streamIndex: 4,
+        format: "srt",
+        title: "English - Jellyfin external",
+        language: "eng",
+        isDefault: false,
+        isForced: false,
+      }] : [],
       initialAction: "progress",
     };
   }
@@ -167,6 +195,17 @@ class FixturePlayback {
         "Content-Range": `bytes ${start}-${end}/${bytes.length}`,
         "Accept-Ranges": "bytes",
       },
+    });
+  }
+
+  async fetchExternalSubtitle(playbackId, subtitle) {
+    if (!this.current || this.current.playbackId !== playbackId || subtitle.streamIndex !== 4) {
+      return new Response(null, { status: 404 });
+    }
+    this.subtitleFetches += 1;
+    const bytes = readFileSync(this.paths.subtitle);
+    return new Response(bytes, {
+      headers: { "Content-Type": "application/x-subrip", "Content-Length": String(bytes.length) },
     });
   }
 }

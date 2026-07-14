@@ -7,7 +7,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--authenticated-parity-child";
 const PARENT_ENV = "JELLYFIN_PARITY_PARENT";
-const REQUIRED_TESTS = 18;
+const REQUIRED_TESTS = 19;
 
 if (!process.versions.electron) {
   try {
@@ -183,6 +183,7 @@ async function runElectronChild() {
     await test("media-source capabilities are sanitized", () => requireScenario(live, "mediaSources"));
     await test("UI Play launches main-owned mpv without exposing a source", () => requireScenario(live, "mpvStart"));
     await test("typed mpv pause and seek controls use authoritative state", () => requireScenario(live, "mpvTransport"));
+    await test("Jellyfin external subtitles are attached to native mpv", () => requireScenario(live, "externalSubtitle"));
     await test("typed mpv track selection remains allowlisted", () => requireScenario(live, "mpvTracks"));
     await test("main-controlled native mpv fullscreen toggles through typed IPC", () => requireScenario(live, "mpvFullscreen"));
     await test("native mpv output follows a main-controlled window scale change", async () => {
@@ -545,12 +546,13 @@ async function runRendererScenarios(window) {
       let fallback = null;
       let browserFallback = null;
       let mkvTranscode = null;
+      let externalSubtitleCandidate = null;
       const orderedItems = [
         ...context.candidates.filter((entry) => entry.type === "Movie"),
         ...context.candidates.filter((entry) => entry.type !== "Movie"),
         ...context.episodes,
       ];
-      for (const item of orderedItems.filter((entry) => entry.playable).slice(0, 40)) {
+      for (const item of orderedItems.filter((entry) => entry.playable).slice(0, 80)) {
         let capabilities;
         try {
           capabilities = await window.jellyfin.mediaSources.getCapabilities({ itemId: item.id });
@@ -559,19 +561,18 @@ async function runRendererScenarios(window) {
         if (hasForbiddenKey(capabilities)) throw coded("MEDIA_SOURCE_PRIVILEGED_FIELD");
         const selectedSource = capabilities.sources.find((source) => source.supportsDirectStream || source.supportsDirectPlay) || capabilities.sources[0];
         const container = String(selectedSource.container || "unknown").replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, 16) || "unknown";
-        const candidate = { item, capabilities, container };
+        const candidate = { item, capabilities, container, selectedSource };
         if (!fallback) fallback = candidate;
-        if (container === "mkv" && selectedSource.supportsTranscoding) {
-          mkvTranscode = candidate;
-          break;
-        }
+        if (Array.isArray(selectedSource.externalSubtitles) && selectedSource.externalSubtitles.length > 0 && !externalSubtitleCandidate) externalSubtitleCandidate = candidate;
+        if (container === "mkv" && selectedSource.supportsTranscoding && !mkvTranscode) mkvTranscode = candidate;
         if (browserContainers.has(container) && !browserFallback) browserFallback = candidate;
       }
-      const selected = mkvTranscode || browserFallback || fallback;
+      const selected = externalSubtitleCandidate || mkvTranscode || browserFallback || fallback;
       if (!selected) throw coded("MEDIA_SOURCE_MISSING");
       context.mediaItem = selected.item;
       context.capabilities = selected.capabilities;
       context.mediaContainer = selected.container.toUpperCase();
+      context.externalSubtitle = selected.selectedSource.externalSubtitles?.[0] || null;
       return {};
     });
 
@@ -636,6 +637,22 @@ async function runRendererScenarios(window) {
       const subtitle = state.subtitleTracks.find((track) => track.selected) || state.subtitleTracks[0] || null;
       await window.jellyfin.playback.selectAudio({ playbackId, trackId: audio?.id || null });
       await window.jellyfin.playback.selectSubtitle({ playbackId, trackId: subtitle?.id || null });
+      return {};
+    });
+
+    await run("externalSubtitle", async () => {
+      if (!context.playback) throw coded("MPV_START_DEPENDENCY");
+      if (!context.externalSubtitle) throw coded("EXTERNAL_SUBTITLE_ITEM_MISSING");
+      let state = null;
+      const attached = await waitFor(async () => {
+        state = await window.jellyfin.playback.getState();
+        return state.subtitleTracks.some((track) => {
+          const titleMatches = context.externalSubtitle.title && track.title === context.externalSubtitle.title;
+          const languageMatches = context.externalSubtitle.language && track.language === context.externalSubtitle.language;
+          return Boolean(titleMatches || languageMatches);
+        });
+      }, 30000);
+      if (!attached || !state) throw coded("EXTERNAL_SUBTITLE_NOT_ATTACHED");
       return {};
     });
 
