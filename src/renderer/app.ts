@@ -520,7 +520,10 @@ function renderWatchParties(): void {
       : state.playbackSource === "server"
         ? "This computer: Jellyfin stream"
         : "This computer: Waiting for shared media";
-    joinedWatchParty.append(heading, participants, shared, delivery);
+    const resyncAccess = document.createElement("p");
+    resyncAccess.className = "watch-party-delivery-note";
+    resyncAccess.textContent = "During playback, restore LocalFirst Jellyfin from the taskbar or press Ctrl+R in the player to resync this computer.";
+    joinedWatchParty.append(heading, participants, shared, delivery, resyncAccess);
   }
 
   if (!available) {

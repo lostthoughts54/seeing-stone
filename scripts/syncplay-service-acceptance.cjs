@@ -264,11 +264,20 @@ async function runChild() {
       const peerSeekCount = peerPlayer.count("seek");
       await primaryPlayer.seek(primaryPlayer.getState().playbackId, target + 100_000_000);
       assert.notEqual(primaryPlayer.getState().positionTicks, target);
-      const corrected = await primaryService.resyncLocal();
-      assert.equal(corrected.positionTicks, target);
+      await primaryService.handlePlayerEvent({
+        action: "resync-request",
+        origin: "local-user",
+        commandRevision: null,
+        commandId: null,
+        controllerRevision: primaryPlayer.getControllerRevision(),
+        monotonicTimestampMs: performance.now(),
+        state: primaryPlayer.getState(),
+      });
       assert.equal(primaryPlayer.getState().positionTicks, target);
       assert.equal(peerPlayer.getState().positionTicks, target);
       assert.equal(peerPlayer.count("seek"), peerSeekCount);
+      assert.equal(primaryPlayer.count("show-message"), 1);
+      assert.equal(peerPlayer.count("show-message"), 0);
     });
 
     await test("leaving restores independent state and the empty group disappears", async () => {
@@ -330,6 +339,7 @@ function createPlayer(source) {
     async selectAudio() { return snapshot(); },
     async selectSubtitle() { return snapshot(); },
     async setFullscreen(_playbackId, fullscreen) { state = { ...state, fullscreen }; return snapshot(); },
+    async showMessage() { actions.push("show-message"); },
     async stop() { revision += 1; state = { ...state, playbackId: null, itemId: null, phase: "stopped", source: null, paused: true }; actions.push("stop"); return snapshot(); },
     async clear() { state = { ...state, playbackId: null, itemId: null, phase: "idle", source: null, paused: true }; },
   };

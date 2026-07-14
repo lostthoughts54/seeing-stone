@@ -6,7 +6,7 @@ Use this sheet with the exact installer below. Check each item only after observ
 
 ```text
 D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: b132f100258f32167a9038a5520bee5b0554c8c329c29f8ef5653612132008f2
+SHA-256: 4cc12534a0393705434363458d2979a99d7efff2ca7281df16dfc4181bbe0827
 Jellyfin server: 10.11.11 only
 ```
 
@@ -44,6 +44,7 @@ Party name: ________________________________
 
 - [ ] Either participant opens the chosen first episode and presses Play.
 - [ ] Both native player windows open the same episode.
+- [ ] LocalFirst Jellyfin remains present on the Windows taskbar while each native player is open.
 - [ ] Kayla's joined-party card says `This computer: Local download`.
 - [ ] Adam's joined-party card says `This computer: Jellyfin stream`.
 - [ ] Audio and video play normally on both computers.
@@ -65,7 +66,8 @@ Party name: ________________________________
 - [ ] Restore Kayla's network within 15 seconds.
 - [ ] Kayla automatically reconnects to the same party, or receives the documented actionable failure if the server removed it.
 - [ ] After recovery, one pause and one seek converge on both computers.
-- [ ] If either player remains visibly out of position, press `Resync This Computer` on that client and confirm only that player jumps back into alignment.
+- [ ] If either player remains visibly out of position, press `Ctrl+R` inside that player and confirm only that computer jumps back into alignment and shows a resync confirmation.
+- [ ] Restore LocalFirst Jellyfin from the taskbar, press `Resync This Computer`, and confirm the same local-only correction remains accessible during playback.
 
 ### 5. Cross-season Next Up
 

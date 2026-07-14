@@ -88,7 +88,14 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     clear: vi.fn(),
     getNextUpForSeries: vi.fn(async () => options.nextId === null ? null : nextEpisode(options.nextId || "episode-2")),
   };
-  const window = { isDestroyed: () => false, hide: vi.fn(), show: vi.fn(), focus: vi.fn() };
+  const window = {
+    isDestroyed: () => false,
+    minimize: vi.fn(),
+    isMinimized: () => false,
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+  };
   const listeners = new Set<(message: Record<string, unknown>) => void>();
   const commands: unknown[][] = [];
   const ipc = {

@@ -37,6 +37,7 @@ async function run() {
 async function verifyLocalExternalSubtitle() {
   const harness = createHarness(fixtures);
   const playback = await harness.player.start("subtitle-local", "start-over");
+  assert.equal(harness.window.minimized, true, "The main app should remain reachable as a minimized taskbar window.");
   await waitFor(() => harness.player.getState().subtitleTracks.some((track) => track.title === "English - Jellyfin external"), 10000);
   const state = harness.player.getState();
   const subtitle = state.subtitleTracks.find((track) => track.title === "English - Jellyfin external");
@@ -45,6 +46,7 @@ async function verifyLocalExternalSubtitle() {
   await harness.player.selectSubtitle(playback.playbackId, subtitle.id);
   assert.equal(harness.playback.subtitleFetches, 1);
   await harness.player.stop(playback.playbackId);
+  assert.equal(harness.window.minimized, false, "Stopping playback should restore the main app window.");
 }
 
 async function verifyMovieCompletion() {
@@ -101,11 +103,13 @@ async function verifyCountdownCancellation() {
 function createHarness(paths) {
   const reports = [];
   const window = {
-    hidden: false,
+    minimized: false,
     showCount: 0,
     isDestroyed: () => false,
-    hide() { this.hidden = true; },
-    show() { this.hidden = false; this.showCount += 1; },
+    minimize() { this.minimized = true; },
+    isMinimized() { return this.minimized; },
+    restore() { this.minimized = false; },
+    show() { this.showCount += 1; },
     focus() {},
   };
   const playback = new FixturePlayback(paths);

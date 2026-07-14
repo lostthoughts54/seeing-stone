@@ -5,7 +5,7 @@ import type { PlayerControllerEvent } from "../src/main/services/playerControlle
 function harness() {
   const commands: unknown[][] = [];
   const player = new MpvPlayerService(
-    { isDestroyed: () => false, hide: vi.fn(), show: vi.fn(), focus: vi.fn() } as never,
+    { isDestroyed: () => false, minimize: vi.fn(), isMinimized: () => false, restore: vi.fn(), show: vi.fn(), focus: vi.fn() } as never,
     { clear: vi.fn(), stop: vi.fn() } as never,
     { acceptAuthoritativeEvent: vi.fn(async () => undefined) } as never,
     { get: async () => ({ windowMaximized: true }), setWindowMaximized: async () => undefined },
@@ -93,6 +93,15 @@ describe("PlayerController mpv adapter", () => {
     expect(h.player.getPlaybackRate()).toBe(1.05);
     expect(h.commands).toContainEqual(["set_property", "speed", 1.05]);
     await expect(h.player.setPlaybackRate("playback-1", 1.5)).rejects.toMatchObject({ code: "INVALID_PLAYBACK_RATE" });
+  });
+
+  it("turns the native Ctrl+R message into a local resync request and can show safe feedback", async () => {
+    const h = harness();
+    h.message({ event: "client-message", args: ["jellyfin-resync"] });
+    await h.player.showMessage("playback-1", "Resynced\nthis computer", 25_000);
+
+    expect(h.events.at(-1)).toMatchObject({ action: "resync-request", origin: "local-user" });
+    expect(h.commands).toContainEqual(["show-text", "Resynced this computer", 5000]);
   });
 
   it("tracks buffering and item-independent state without exposing mpv internals", () => {

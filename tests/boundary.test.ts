@@ -109,12 +109,16 @@ describe("renderer and preload security boundary", () => {
 
   it("uses a main-controlled native mpv window without failed Electron HWND embedding", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
+    const input = await readFile("assets/mpv/input.conf", "utf8");
     expect(player).toContain('"--force-window=immediate"');
     expect(player).toContain('"--title=LocalFirst Jellyfin Player"');
     expect(player).toContain('"--geometry=1280x720"');
-    expect(player).toContain("this.mainWindow.hide()");
+    expect(player).toContain("this.mainWindow.minimize()");
+    expect(player).toContain("this.mainWindow.restore()");
     expect(player).toContain("this.mainWindow.show()");
+    expect(player).not.toContain("this.mainWindow.hide()");
     expect(player).not.toMatch(/--wid|new BaseWindow\s*\(|const host = new BrowserWindow\s*\(/);
+    expect(input).toContain("Ctrl+r script-message jellyfin-resync");
   });
 
   it("pins hardened BrowserWindow settings and renderer network denial", async () => {

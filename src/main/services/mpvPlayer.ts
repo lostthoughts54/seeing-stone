@@ -165,7 +165,7 @@ export class MpvPlayerService implements PlayerController {
       const playbackTargets = await this.openPlaybackTarget(source);
       this.playbackTarget = playbackTargets;
       await this.launchProcess(playbackTargets, source.resumePositionTicks, false, this.windowMaximized);
-      this.mainWindow.hide();
+      if (!this.mainWindow.isDestroyed()) this.mainWindow.minimize();
       await this.report("start");
       this.update({ ...this.state, phase: this.state.paused ? "paused" : "playing" });
       this.startReportingTimer();
@@ -256,6 +256,13 @@ export class MpvPlayerService implements PlayerController {
     return this.getState();
   }
 
+  async showMessage(playbackId: string, message: string, durationMilliseconds = 2500): Promise<void> {
+    this.assertPlayback(playbackId);
+    const safeMessage = message.replace(/[\r\n]+/g, " ").slice(0, 160);
+    const safeDuration = Math.max(500, Math.min(5000, Math.floor(durationMilliseconds)));
+    await this.command(["show-text", safeMessage, safeDuration]);
+  }
+
   async setWindowScale(scale: number): Promise<{ width: number; height: number }> {
     const safeScale = Math.max(0.25, Math.min(3, scale));
     await this.command(["set_property", "window-scale", safeScale]);
@@ -313,6 +320,7 @@ export class MpvPlayerService implements PlayerController {
       this.pendingFullscreen = null;
       this.update(emptyState({ phase }), phase === "ended" ? "completed" : "stop", context);
       if (!this.mainWindow.isDestroyed()) {
+        if (this.mainWindow.isMinimized()) this.mainWindow.restore();
         this.mainWindow.show();
         this.mainWindow.focus();
       }
@@ -596,6 +604,10 @@ export class MpvPlayerService implements PlayerController {
     }
     if (message.event === "client-message" && message.args?.[0] === "jellyfin-fullscreen" && this.source) {
       void this.setFullscreen(this.source.playbackId, !this.state.fullscreen, { origin: "local-user" }).catch(() => undefined);
+      return;
+    }
+    if (message.event === "client-message" && message.args?.[0] === "jellyfin-resync" && this.source) {
+      this.emitEvent("resync-request", { origin: "local-user" });
       return;
     }
     if (message.event === "end-file" && this.source) {

@@ -154,6 +154,7 @@ export class SyncPlayService {
   private transitionItemInFlight: string | null = null;
   private lastPublishedTransitionItemId: string | null = null;
   private viewVisible = false;
+  private localResyncInFlight: Promise<PlaybackState> | null = null;
 
   constructor(
     private readonly api: JellyfinApi,
@@ -338,6 +339,17 @@ export class SyncPlayService {
   }
 
   async resyncLocal(): Promise<PlaybackState> {
+    if (this.localResyncInFlight) return this.localResyncInFlight;
+    const operation = this.performLocalResync();
+    this.localResyncInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.localResyncInFlight === operation) this.localResyncInFlight = null;
+    }
+  }
+
+  private async performLocalResync(): Promise<PlaybackState> {
     const joined = this.requireJoined();
     const anchor = this.syncAnchor;
     const itemId = joined.currentItemId;
@@ -564,6 +576,21 @@ export class SyncPlayService {
   }
 
   private async handlePlayerEvent(event: PlayerControllerEvent): Promise<void> {
+    if (event.action === "resync-request" && event.origin === "local-user") {
+      try {
+        const state = await this.resyncLocal();
+        if (state.playbackId) {
+          await this.player.showMessage(state.playbackId, "Resynced this computer to the watch party.", 2500).catch(() => undefined);
+        }
+      } catch (error) {
+        this.setState({ ...this.state, error: publicError(error) });
+        const state = this.player.getState();
+        if (state.playbackId) {
+          await this.player.showMessage(state.playbackId, "Resync unavailable. Restore the app for details.", 3000).catch(() => undefined);
+        }
+      }
+      return;
+    }
     if (!this.state.joinedGroup || !this.currentPlaylistItemId) return;
     if (event.action === "buffering") {
       if (event.state.buffering) await this.restoreNormalRate().catch(() => undefined);

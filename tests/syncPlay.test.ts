@@ -71,6 +71,7 @@ function harness() {
     selectAudio: vi.fn(async () => state),
     selectSubtitle: vi.fn(async () => state),
     setFullscreen: vi.fn(async () => state),
+    showMessage: vi.fn(async () => undefined),
     stop: vi.fn(async () => { state = playbackState({ playbackId: null, itemId: null, phase: "stopped", source: null }); return state; }),
     clear: vi.fn(async () => undefined),
   };
@@ -249,6 +250,31 @@ describe("SyncPlayService", () => {
       path: "/SyncPlay/Ready",
       body: { PositionTicks: 80_000_000, IsPlaying: false, PlaylistItemId: playlistItemId },
     });
+  });
+
+  it("handles the in-player resync shortcut locally and shows confirmation", async () => {
+    const h = harness();
+    h.internals.syncAnchor = {
+      membershipRevision: h.internals.membershipRevision,
+      playlistItemId,
+      positionTicks: 90_000_000,
+      playing: false,
+      monotonicTimestampMs: performance.now(),
+    };
+
+    await h.internals.handlePlayerEvent({
+      action: "resync-request",
+      origin: "local-user",
+      commandRevision: null,
+      commandId: null,
+      controllerRevision: 4,
+      monotonicTimestampMs: performance.now(),
+      state: h.player.getState(),
+    });
+
+    expect(h.player.seek).toHaveBeenCalledWith(expect.any(String), 90_000_000, expect.objectContaining({ origin: "remote-sync" }));
+    expect(h.player.showMessage).toHaveBeenCalledWith(expect.any(String), "Resynced this computer to the watch party.", 2500);
+    expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
   });
 
   it("rejects manual resync before the group has an authoritative item anchor", async () => {
