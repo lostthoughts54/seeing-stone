@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
+  ExternalSubtitleFormat,
+  ExternalSubtitleTrack,
   HomePayload,
   LibrarySummary,
   MediaItem,
@@ -55,6 +57,42 @@ function nullableString(value: unknown): string | null {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function externalSubtitleFormat(value: unknown): ExternalSubtitleFormat {
+  const codec = asString(value).trim().toLocaleLowerCase("en-US");
+  if (codec === "ass") return "ass";
+  if (codec === "ssa") return "ssa";
+  if (codec === "vtt" || codec === "webvtt") return "vtt";
+  return "srt";
+}
+
+function externalSubtitles(value: unknown): ExternalSubtitleTrack[] {
+  const result: ExternalSubtitleTrack[] = [];
+  const seen = new Set<number>();
+  for (const entry of Array.isArray(value) ? value : []) {
+    const stream = asRecord(entry);
+    const streamType = typeof stream.Type === "string" ? stream.Type.toLocaleLowerCase("en-US") : stream.Type;
+    const streamIndex = stream.Index;
+    if ((streamType !== 2 && streamType !== "subtitle")
+      || stream.IsExternal !== true
+      || stream.IsTextSubtitleStream === false
+      || stream.SupportsExternalStream === false
+      || !Number.isSafeInteger(streamIndex)
+      || (streamIndex as number) < 0
+      || seen.has(streamIndex as number)) continue;
+    seen.add(streamIndex as number);
+    result.push({
+      streamIndex: streamIndex as number,
+      format: externalSubtitleFormat(stream.Codec),
+      title: (nullableString(stream.DisplayTitle) ?? nullableString(stream.Title))?.slice(0, 256) ?? null,
+      language: nullableString(stream.Language)?.slice(0, 32) ?? null,
+      isDefault: stream.IsDefault === true,
+      isForced: stream.IsForced === true,
+    });
+    if (result.length === 32) break;
+  }
+  return result;
 }
 
 function premiereYear(value: unknown): number | null {
@@ -436,11 +474,11 @@ export class JellyfinApi {
     return this.items(result).map(sanitizeMediaItem);
   }
 
-  async getMediaSourceCapabilities(itemId: string): Promise<MediaSourceCapabilities> {
+  async getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<MediaSourceCapabilities> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Items/${encodeURIComponent(itemId)}/PlaybackInfo`, {
       UserId: session.userId,
-    }, { method: "POST", body: JSON.stringify({ UserId: session.userId }) }));
+    }, { method: "POST", body: JSON.stringify({ UserId: session.userId }), signal }));
     const sources = Array.isArray(result.MediaSources) ? result.MediaSources : [];
     return {
       itemId,
@@ -453,6 +491,7 @@ export class JellyfinApi {
           supportsDirectPlay: source.SupportsDirectPlay === true,
           supportsDirectStream: source.SupportsDirectStream === true,
           supportsTranscoding: source.SupportsTranscoding === true,
+          externalSubtitles: externalSubtitles(source.MediaStreams),
         };
       }).filter((source) => source.id),
     };
@@ -512,6 +551,26 @@ export class JellyfinApi {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchExternalSubtitle(
+    itemId: string,
+    mediaSourceId: string,
+    streamIndex: number,
+    format: ExternalSubtitleFormat,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) {
+      throw new AppError("INVALID_SUBTITLE_STREAM", "That subtitle stream is unavailable.", 422);
+    }
+    if (!["srt", "ass", "ssa", "vtt"].includes(format)) {
+      throw new AppError("INVALID_SUBTITLE_FORMAT", "That subtitle format is unavailable.", 422);
+    }
+    return this.fetchAuthenticated(
+      `/Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(mediaSourceId)}/Subtitles/${streamIndex}/Stream.${format}`,
+      {},
+      { signal },
+    );
   }
 
   async fetchTranscodedStream(

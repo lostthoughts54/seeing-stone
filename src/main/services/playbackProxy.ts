@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import type { ExternalSubtitleTrack } from "../../shared/contracts";
 import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackSession";
+
+export interface PlaybackTargets {
+  media: string;
+  subtitles: Array<{
+    url: string;
+    title: string | null;
+    language: string | null;
+    isDefault: boolean;
+  }>;
+}
 
 /**
  * Main-owned loopback capability used only by the spawned mpv process.
@@ -10,15 +21,23 @@ import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackS
  */
 export class PlaybackProxy {
   private server: Server | null = null;
-  private capabilityPath: string | null = null;
+  private mediaCapabilityPath: string | null = null;
+  private readonly subtitleCapabilities = new Map<string, ExternalSubtitleTrack>();
   private source: ResolvedPlaybackSource | null = null;
 
   constructor(private readonly playback: PlaybackSessionService) {}
 
-  async open(source: ResolvedPlaybackSource): Promise<string> {
+  async open(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
     await this.close();
     this.source = source;
-    this.capabilityPath = `/${randomUUID()}`;
+    const externalSubtitles = source.externalSubtitles ?? [];
+    if (source.source === "local" && externalSubtitles.length === 0) {
+      return { media: source.mediaUrl, subtitles: [] };
+    }
+    this.mediaCapabilityPath = source.source === "server" ? `/${randomUUID()}` : null;
+    for (const subtitle of externalSubtitles) {
+      this.subtitleCapabilities.set(`/${randomUUID()}.${subtitle.format}`, subtitle);
+    }
     this.server = createServer((request, response) => { void this.handle(request, response); });
     this.server.on("clientError", (_error, socket) => socket.destroy());
     await new Promise<void>((resolve, reject) => {
@@ -27,13 +46,23 @@ export class PlaybackProxy {
     });
     const address = this.server.address();
     if (!address || typeof address === "string") throw new Error("Playback proxy did not bind to loopback.");
-    return `http://127.0.0.1:${address.port}${this.capabilityPath}`;
+    const origin = `http://127.0.0.1:${address.port}`;
+    return {
+      media: this.mediaCapabilityPath ? `${origin}${this.mediaCapabilityPath}` : source.mediaUrl,
+      subtitles: [...this.subtitleCapabilities].map(([path, subtitle]) => ({
+        url: `${origin}${path}`,
+        title: subtitle.title,
+        language: subtitle.language,
+        isDefault: subtitle.isDefault,
+      })),
+    };
   }
 
   async close(): Promise<void> {
     const server = this.server;
     this.server = null;
-    this.capabilityPath = null;
+    this.mediaCapabilityPath = null;
+    this.subtitleCapabilities.clear();
     this.source = null;
     if (!server) return;
     server.closeAllConnections();
@@ -43,7 +72,9 @@ export class PlaybackProxy {
   private async handle(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
     const source = this.source;
     const method = request.method;
-    if (!source || (method !== "GET" && method !== "HEAD") || request.url !== this.capabilityPath) {
+    const mediaRequest = Boolean(source && source.source === "server" && request.url === this.mediaCapabilityPath);
+    const subtitle = request.url ? this.subtitleCapabilities.get(request.url) : undefined;
+    if (!source || (method !== "GET" && method !== "HEAD") || (!mediaRequest && !subtitle)) {
       response.writeHead(method === "GET" || method === "HEAD" ? 404 : 405, { "Cache-Control": "no-store" });
       response.end();
       return;
@@ -55,7 +86,9 @@ export class PlaybackProxy {
     if (request.headers.range) headers.set("Range", request.headers.range);
     let upstream: Response;
     try {
-      upstream = await this.playback.handle(new Request(source.mediaUrl, { headers, signal: controller.signal }));
+      upstream = mediaRequest
+        ? await this.playback.handle(new Request(source.mediaUrl, { headers, signal: controller.signal }))
+        : await this.playback.fetchExternalSubtitle(source.playbackId, subtitle!, controller.signal);
     } catch {
       if (!response.headersSent) response.writeHead(502, { "Cache-Control": "no-store" });
       response.end();

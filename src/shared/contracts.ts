@@ -80,7 +80,19 @@ export interface MediaSourceCapabilities {
     supportsDirectPlay: boolean;
     supportsDirectStream: boolean;
     supportsTranscoding: boolean;
+    externalSubtitles?: ExternalSubtitleTrack[];
   }>;
+}
+
+export type ExternalSubtitleFormat = "srt" | "ass" | "ssa" | "vtt";
+
+export interface ExternalSubtitleTrack {
+  streamIndex: number;
+  format: ExternalSubtitleFormat;
+  title: string | null;
+  language: string | null;
+  isDefault: boolean;
+  isForced: boolean;
 }
 
 export interface PlaybackStartResult {

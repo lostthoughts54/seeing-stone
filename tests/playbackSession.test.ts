@@ -29,12 +29,24 @@ const item: MediaItem = {
 };
 
 describe("PlaybackSessionService", () => {
-  it("prefers a verified local source before any Jellyfin playback-info request", async () => {
+  it("keeps verified local video first while adding best-effort Jellyfin external subtitles", async () => {
     const api = {
       getDetails: vi.fn(),
-      getMediaSourceCapabilities: vi.fn(),
+      getMediaSourceCapabilities: vi.fn(async () => ({
+        itemId: "movie-1",
+        sources: [{
+          id: "source-1",
+          container: "mkv",
+          size: 5,
+          supportsDirectPlay: true,
+          supportsDirectStream: true,
+          supportsTranscoding: true,
+          externalSubtitles: [{ streamIndex: 4, format: "srt" as const, title: "English", language: "eng", isDefault: false, isForced: false }],
+        }],
+      })),
       fetchStaticStream: vi.fn(),
       fetchTranscodedStream: vi.fn(),
+      fetchExternalSubtitle: vi.fn(),
     };
     const local = {
       resolve: vi.fn(async () => ({
@@ -48,6 +60,7 @@ describe("PlaybackSessionService", () => {
         durationTicks: 100000000,
         source: "local" as const,
         delivery: "local" as const,
+        externalSubtitles: [],
         initialAction: "progress" as const,
       })),
     };
@@ -55,10 +68,11 @@ describe("PlaybackSessionService", () => {
     const started = await service.start("movie-1", "resume");
     expect(started.source).toBe("local");
     expect(started.delivery).toBe("local");
+    expect(started.externalSubtitles).toEqual([expect.objectContaining({ streamIndex: 4, title: "English" })]);
     expect(started.initialAction).toBe("progress");
     expect(local.resolve).toHaveBeenCalledWith("movie-1", "resume");
     expect(api.getDetails).not.toHaveBeenCalled();
-    expect(api.getMediaSourceCapabilities).not.toHaveBeenCalled();
+    expect(api.getMediaSourceCapabilities).toHaveBeenCalledWith("movie-1", expect.any(AbortSignal));
     expect((await service.handle(new Request("jellyfin-media://stream/11111111-1111-4111-8111-111111111111"))).status).toBe(404);
   });
 
@@ -85,13 +99,16 @@ describe("PlaybackSessionService", () => {
   it("keeps the authenticated source main-only and resolves an opaque internal stream", async () => {
     const fetchStaticStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const fetchTranscodedStream = vi.fn();
+    const fetchExternalSubtitle = vi.fn(async () => new Response("subtitle", { headers: { "Content-Type": "application/x-subrip" } }));
+    const subtitle = { streamIndex: 4, format: "srt" as const, title: "English", language: "eng", isDefault: false, isForced: false };
     const service = new PlaybackSessionService({
       async getDetails() { return item; },
       async getMediaSourceCapabilities() {
-        return { itemId: item.id, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }] };
+        return { itemId: item.id, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true, externalSubtitles: [subtitle] }] };
       },
       fetchStaticStream,
       fetchTranscodedStream,
+      fetchExternalSubtitle,
     });
     const started = await service.start(item.id, "resume");
     expect(started.mediaUrl).toBe(`jellyfin-media://stream/${started.playbackId}`);
@@ -105,6 +122,11 @@ describe("PlaybackSessionService", () => {
     expect((await service.handle(new Request(started.mediaUrl))).headers.get("Accept-Ranges")).toBe("bytes");
     expect(fetchStaticStream).toHaveBeenCalledWith("movie-1", "source-1", undefined, expect.any(AbortSignal));
     expect(fetchTranscodedStream).not.toHaveBeenCalled();
+    expect(started.externalSubtitles).toEqual([subtitle]);
+    const subtitleResponse = await service.fetchExternalSubtitle(started.playbackId, subtitle);
+    expect(await subtitleResponse.text()).toBe("subtitle");
+    expect(fetchExternalSubtitle).toHaveBeenCalledWith("movie-1", "source-1", 4, "srt", expect.any(AbortSignal));
+    expect((await service.fetchExternalSubtitle(started.playbackId, { ...subtitle, streamIndex: 99 })).status).toBe(404);
 
     const firstSignal = fetchStaticStream.mock.calls[0]?.[3] as AbortSignal;
     service.stop(started.playbackId);

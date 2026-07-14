@@ -48,6 +48,20 @@ const unsafeItem = {
     SupportsTranscoding: true,
     TranscodingUrl: "/transcode?api_key=SECRET_TOKEN_SENTINEL",
     RequiredHttpHeaders: { Authorization: "SECRET_TOKEN_SENTINEL" },
+    MediaStreams: [{
+      Type: 2,
+      Index: 4,
+      Codec: "subrip",
+      Language: "eng",
+      DisplayTitle: "English - SRT - External",
+      IsExternal: true,
+      IsTextSubtitleStream: true,
+      SupportsExternalStream: true,
+      IsDefault: false,
+      IsForced: false,
+      Path: "D:\\Sensitive\\movie.eng.srt",
+      DeliveryUrl: "/subtitle?api_key=SECRET_TOKEN_SENTINEL",
+    }],
   }],
   ImageTags: { Primary: "tag" },
   UserData: { Played: false, PlaybackPositionTicks: 1234, PlayedPercentage: 5 },
@@ -100,6 +114,9 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname.endsWith("/Items") && url.searchParams.get("SearchTerm")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("IncludeItemTypes")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({ MediaSources: unsafeItem.MediaSources });
+      if (url.pathname === "/Videos/movie-1/source-1/Subtitles/4/Stream.srt") {
+        return new Response("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n", { headers: { "Content-Type": "application/x-subrip" } });
+      }
       if (url.pathname === "/Items/movie-1/Images/Primary") return new Response("image", { headers: { "Content-Type": "image/jpeg" } });
       if (url.pathname.endsWith("/Videos/movie-1/stream")) {
         streamSignal = init?.signal ?? undefined;
@@ -130,6 +147,8 @@ describe("JellyfinApi main-side boundary", () => {
     const episodes = await api.getEpisodes("series-1", "season-1");
     const nextUp = await api.getNextUpForSeries("series-1");
     const capabilities = await api.getMediaSourceCapabilities("movie-1");
+    const externalSubtitle = await api.fetchExternalSubtitle("movie-1", "source-1", 4, "srt");
+    expect(await externalSubtitle.text()).toContain("Subtitle");
     const artwork = await api.fetchArtwork("movie-1", "Primary", { maxWidth: "500" });
     expect(await artwork.text()).toBe("image");
     expect(await api.openTrailer("movie-1")).toBe(true);
@@ -217,6 +236,14 @@ describe("JellyfinApi main-side boundary", () => {
       supportsDirectPlay: true,
       supportsDirectStream: true,
       supportsTranscoding: true,
+      externalSubtitles: [{
+        streamIndex: 4,
+        format: "srt",
+        title: "English - SRT - External",
+        language: "eng",
+        isDefault: false,
+        isForced: false,
+      }],
     });
     expect(observedHeaders.length).toBeGreaterThan(2);
     expect(new Set(observedHeaders.map((value) => value.match(/DeviceId="([^"]+)"/)?.[1])).size).toBe(1);
@@ -233,6 +260,7 @@ describe("JellyfinApi main-side boundary", () => {
       "/Shows/series-1/Seasons",
       "/Shows/series-1/Episodes",
       "/Items/movie-1/PlaybackInfo",
+      "/Videos/movie-1/source-1/Subtitles/4/Stream.srt",
       "/Items/movie-1/Images/Primary",
       "/Sessions/Playing/Progress",
     ]) expect(requestedPaths).toContain(expected);

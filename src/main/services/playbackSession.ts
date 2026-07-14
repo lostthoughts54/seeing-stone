@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
-import type { PlaybackStartResult, PlaybackState } from "../../shared/contracts";
+import type {
+  ExternalSubtitleFormat,
+  ExternalSubtitleTrack,
+  PlaybackStartResult,
+  PlaybackState,
+} from "../../shared/contracts";
 import { AppError } from "./errors";
 import type { SqlitePersistenceService } from "./persistence";
 interface PlaybackApi {
   getAuthenticatedContext?(): { serverId: string; userId: string };
   getDetails(itemId: string): Promise<import("../../shared/contracts").MediaItem>;
   getNextUpForSeries?(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null>;
-  getMediaSourceCapabilities(itemId: string): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
+  getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
   fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response>;
   fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response>;
+  fetchExternalSubtitle(itemId: string, mediaSourceId: string, streamIndex: number, format: ExternalSubtitleFormat, signal?: AbortSignal): Promise<Response>;
 }
 
 interface PlaybackRecord {
@@ -16,6 +22,7 @@ interface PlaybackRecord {
   itemId: string;
   mediaSourceId: string;
   delivery: "direct" | "transcode" | "local";
+  externalSubtitles: ExternalSubtitleTrack[];
   requests: Set<AbortController>;
 }
 
@@ -26,6 +33,7 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   mediaSourceId: string;
   mediaUrl: string;
   delivery: "direct" | "transcode" | "local";
+  externalSubtitles: ExternalSubtitleTrack[];
   initialAction: "progress" | "start_over" | "replay";
 }
 
@@ -82,21 +90,31 @@ export class PlaybackSessionService {
     const local = await this.localResolver?.resolve(itemId, resumeMode).catch(() => null) ?? null;
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     if (local) {
+      let externalSubtitleTracks: ExternalSubtitleTrack[] = [];
+      try {
+        const capabilities = await this.api.getMediaSourceCapabilities(itemId, AbortSignal.timeout(1500));
+        externalSubtitleTracks = capabilities.sources.find((source) => source.id === local.mediaSourceId)?.externalSubtitles ?? [];
+      } catch {
+        // A verified local video remains playable when Jellyfin is offline or subtitle metadata is unavailable.
+      }
+      if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
+      const resolvedLocal = { ...local, externalSubtitles: structuredClone(externalSubtitleTracks) };
       this.current = {
-        id: local.playbackId,
+        id: resolvedLocal.playbackId,
         itemId,
-        mediaSourceId: local.mediaSourceId,
+        mediaSourceId: resolvedLocal.mediaSourceId,
         delivery: "local",
+        externalSubtitles: resolvedLocal.externalSubtitles,
         requests: new Set(),
       };
       this.state = state({
-        playbackId: local.playbackId,
+        playbackId: resolvedLocal.playbackId,
         itemId,
         phase: "loading",
         source: "local",
-        durationTicks: local.durationTicks,
+        durationTicks: resolvedLocal.durationTicks,
       });
-      return local;
+      return resolvedLocal;
     }
     let details: Awaited<ReturnType<PlaybackApi["getDetails"]>>;
     let capabilities: Awaited<ReturnType<PlaybackApi["getMediaSourceCapabilities"]>>;
@@ -149,7 +167,15 @@ export class PlaybackSessionService {
       });
     }
     const playbackId = randomUUID();
-    this.current = { id: playbackId, itemId, mediaSourceId: source.id, delivery, requests: new Set() };
+    const externalSubtitleTracks = structuredClone(source.externalSubtitles ?? []);
+    this.current = {
+      id: playbackId,
+      itemId,
+      mediaSourceId: source.id,
+      delivery,
+      externalSubtitles: externalSubtitleTracks,
+      requests: new Set(),
+    };
     this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks: details.runTimeTicks });
     return {
       playbackId,
@@ -162,6 +188,7 @@ export class PlaybackSessionService {
       durationTicks: details.runTimeTicks,
       source: "server",
       delivery,
+      externalSubtitles: externalSubtitleTracks,
       initialAction: initialAction(resumeMode, details.userData.played, details.userData.playbackPositionTicks),
     };
   }
@@ -238,6 +265,53 @@ export class PlaybackSessionService {
       headers.delete("Accept-Ranges");
     } else {
       headers.set("Accept-Ranges", "bytes");
+    }
+    const body = upstream.body
+      ? this.trackBody(upstream.body, requestController, playback)
+      : null;
+    if (!body) playback.requests.delete(requestController);
+    return new Response(body, { status: upstream.status, headers });
+  }
+
+  async fetchExternalSubtitle(
+    playbackId: string,
+    subtitle: ExternalSubtitleTrack,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const playback = this.current;
+    if (!playback || playback.id !== playbackId) return new Response(null, { status: 404 });
+    const authorized = playback.externalSubtitles.find((candidate) => candidate.streamIndex === subtitle.streamIndex
+      && candidate.format === subtitle.format);
+    if (!authorized) return new Response(null, { status: 404 });
+    const requestController = new AbortController();
+    playback.requests.add(requestController);
+    const requestSignal = signal
+      ? AbortSignal.any([signal, requestController.signal])
+      : requestController.signal;
+    let upstream: Response;
+    try {
+      upstream = await this.api.fetchExternalSubtitle(
+        playback.itemId,
+        playback.mediaSourceId,
+        authorized.streamIndex,
+        authorized.format,
+        requestSignal,
+      );
+    } catch (error) {
+      playback.requests.delete(requestController);
+      if (requestController.signal.aborted || signal?.aborted) return new Response(null, { status: 404 });
+      throw error;
+    }
+    if (this.current !== playback) {
+      requestController.abort();
+      playback.requests.delete(requestController);
+      void upstream.body?.cancel().catch(() => undefined);
+      return new Response(null, { status: 404 });
+    }
+    const headers = new Headers({ "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+    for (const name of ["content-type", "content-length"]) {
+      const value = upstream.headers.get(name);
+      if (value) headers.set(name, value);
     }
     const body = upstream.body
       ? this.trackBody(upstream.body, requestController, playback)

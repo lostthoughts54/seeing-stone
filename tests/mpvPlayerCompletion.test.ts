@@ -21,6 +21,7 @@ function source(
     resumePositionTicks: 0,
     durationTicks: 60 * ticks,
     source: "server",
+    externalSubtitles: [],
     initialAction: "progress",
   };
 }
@@ -53,13 +54,23 @@ function nextEpisode(itemId: string) {
   };
 }
 
-function harness(options: { nextId?: string | null; failNextStart?: boolean; localNext?: boolean } = {}) {
+function harness(options: { nextId?: string | null; failNextStart?: boolean; localNext?: boolean; externalSubtitleNext?: boolean } = {}) {
   const current = source("episode-1", "playback-1");
   const replacement = source(options.nextId || "episode-2", "playback-2");
   if (options.localNext) {
     replacement.source = "local";
     replacement.delivery = "local";
     replacement.mediaUrl = "D:\\Authorized Downloads\\episode-2\\media.mkv";
+  }
+  if (options.externalSubtitleNext) {
+    replacement.externalSubtitles = [{
+      streamIndex: 4,
+      format: "srt",
+      title: "English - External",
+      language: "eng",
+      isDefault: false,
+      isForced: false,
+    }];
   }
   const reports: Array<{ kind: string; itemId: string }> = [];
   const reportedEvents: Array<Record<string, unknown>> = [];
@@ -126,9 +137,17 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     error: null,
   };
   internals.ipc = ipc;
-  const proxy = { close: vi.fn(async () => undefined), open: vi.fn(async () => "http://127.0.0.1/next") };
+  const proxy = {
+    close: vi.fn(async () => undefined),
+    open: vi.fn(async () => ({
+      media: "http://127.0.0.1/next",
+      subtitles: options.externalSubtitleNext
+        ? [{ url: "http://127.0.0.1/subtitle.srt", title: "English - External", language: "eng", isDefault: false }]
+        : [],
+    })),
+  };
   internals.proxy = proxy;
-  internals.playbackTarget = "http://127.0.0.1/current";
+  internals.playbackTarget = { media: "http://127.0.0.1/current", subtitles: [] };
   internals.reportingActive = true;
   internals.playbackRevision = 1;
   internals.completion = new PlaybackCompletionCoordinator(10, 3, async () => undefined);
@@ -197,6 +216,21 @@ describe("MpvPlayerService natural completion", () => {
       itemId: "episode-2",
       playMethod: "DirectPlay",
     });
+  });
+
+  it("attaches Jellyfin external subtitles after replacing the file for Next Up", async () => {
+    const h = harness({ nextId: "episode-2", externalSubtitleNext: true });
+
+    (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
+    await waitFor(() => h.player.getState().itemId === "episode-2" && h.player.getState().phase === "playing");
+
+    expect(h.commands).toContainEqual([
+      "sub-add",
+      "http://127.0.0.1/subtitle.srt",
+      "auto",
+      "English - External",
+      "eng",
+    ]);
   });
 
   it("suppresses solo Next Up when a watch-party coordinator assigns another participant", async () => {

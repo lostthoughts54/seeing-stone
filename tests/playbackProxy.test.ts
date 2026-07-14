@@ -11,6 +11,7 @@ const source: ResolvedPlaybackSource = {
   durationTicks: 100000000,
   source: "server",
   delivery: "direct",
+  externalSubtitles: [],
   initialAction: "progress",
 };
 
@@ -27,8 +28,10 @@ describe("PlaybackProxy", () => {
       },
     }));
     const proxy = new PlaybackProxy({ handle } as never);
-    const url = await proxy.open(source);
+    const targets = await proxy.open(source);
+    const url = targets.media;
     try {
+      expect(targets.subtitles).toEqual([]);
       expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}$/);
       expect(url).not.toContain(source.itemId);
       expect(url).not.toContain(source.mediaSourceId);
@@ -48,5 +51,35 @@ describe("PlaybackProxy", () => {
       await proxy.close();
     }
     await expect(fetch(url)).rejects.toThrow();
+  });
+
+  it("serves authenticated external subtitles through separate opaque capabilities for local video", async () => {
+    const subtitle = { streamIndex: 4, format: "srt" as const, title: "English", language: "eng", isDefault: false, isForced: false };
+    const localSource: ResolvedPlaybackSource = {
+      ...source,
+      source: "local",
+      delivery: "local",
+      mediaUrl: "D:\\Authorized Downloads\\movie\\media.mkv",
+      externalSubtitles: [subtitle],
+    };
+    const fetchExternalSubtitle = vi.fn(async () => new Response("subtitle", {
+      headers: { "Content-Type": "application/x-subrip", "Content-Length": "8" },
+    }));
+    const handle = vi.fn();
+    const proxy = new PlaybackProxy({ handle, fetchExternalSubtitle } as never);
+    const targets = await proxy.open(localSource);
+    try {
+      expect(targets.media).toBe(localSource.mediaUrl);
+      expect(targets.subtitles).toHaveLength(1);
+      const subtitleUrl = targets.subtitles[0]!.url;
+      expect(subtitleUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}\.srt$/);
+      expect(subtitleUrl).not.toContain(localSource.itemId);
+      expect(subtitleUrl).not.toContain(localSource.mediaSourceId);
+      expect(await (await fetch(subtitleUrl)).text()).toBe("subtitle");
+      expect(fetchExternalSubtitle).toHaveBeenCalledWith(localSource.playbackId, subtitle, expect.any(AbortSignal));
+      expect(handle).not.toHaveBeenCalled();
+    } finally {
+      await proxy.close();
+    }
   });
 });

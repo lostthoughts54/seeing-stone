@@ -10,7 +10,7 @@ import { AppError } from "./errors";
 import { MpvIpcClient, type MpvMessage } from "./mpvIpc";
 import type { MpvRuntimePaths } from "./mpvRuntime";
 import { PlaybackCompletionCoordinator } from "./playbackCompletion";
-import { PlaybackProxy } from "./playbackProxy";
+import { PlaybackProxy, type PlaybackTargets } from "./playbackProxy";
 import type { PlayerPreferencesStore } from "./playerPreferences";
 import type {
   PlayerAction,
@@ -67,7 +67,7 @@ export class MpvPlayerService implements PlayerController {
   private process: ChildProcess | null = null;
   private ipc: MpvIpcClient | null = null;
   private source: ResolvedPlaybackSource | null = null;
-  private playbackTarget: string | null = null;
+  private playbackTarget: PlaybackTargets | null = null;
   private proxy: PlaybackProxy;
   private listeners = new Set<(state: PlaybackState) => void>();
   private eventListeners = new Set<(event: PlayerControllerEvent) => void>();
@@ -162,9 +162,9 @@ export class MpvPlayerService implements PlayerController {
       durationTicks: source.durationTicks,
     }));
     try {
-      const playbackTarget = await this.openPlaybackTarget(source);
-      this.playbackTarget = playbackTarget;
-      await this.launchProcess(playbackTarget, source.resumePositionTicks, false, this.windowMaximized);
+      const playbackTargets = await this.openPlaybackTarget(source);
+      this.playbackTarget = playbackTargets;
+      await this.launchProcess(playbackTargets, source.resumePositionTicks, false, this.windowMaximized);
       this.mainWindow.hide();
       await this.report("start");
       this.update({ ...this.state, phase: this.state.paused ? "paused" : "playing" });
@@ -332,12 +332,15 @@ export class MpvPlayerService implements PlayerController {
     }
   }
 
-  private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<string> {
+  private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
     await this.proxy.close();
-    return source.source === "local" ? source.mediaUrl : this.proxy.open(source);
+    if (source.source === "local" && (source.externalSubtitles?.length ?? 0) === 0) {
+      return { media: source.mediaUrl, subtitles: [] };
+    }
+    return this.proxy.open(source);
   }
 
-  private async launchProcess(playbackTarget: string, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
+  private async launchProcess(playbackTargets: PlaybackTargets, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
     this.eofArmed = false;
     const pipePath = `\\\\.\\pipe\\localfirst-jellyfin-${randomUUID()}`;
     const args = [
@@ -356,7 +359,7 @@ export class MpvPlayerService implements PlayerController {
       `--start=${positionTicks / TICKS_PER_SECOND}`,
       ...(paused ? ["--pause=yes"] : []),
       "--",
-      playbackTarget,
+      playbackTargets.media,
     ];
     const child = spawn(this.runtime.executable, args, { windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
     this.process = child;
@@ -381,6 +384,7 @@ export class MpvPlayerService implements PlayerController {
       ipc.observe(9, "eof-reached"),
     ]);
     const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
+    await this.addExternalSubtitles(ipc, playbackTargets);
     this.update({
       ...this.state,
       positionTicks: Math.max(0, Math.round(authoritativePosition * TICKS_PER_SECOND)),
@@ -390,8 +394,8 @@ export class MpvPlayerService implements PlayerController {
   }
 
   private async restartAt(positionTicks: number): Promise<void> {
-    const playbackTarget = this.playbackTarget;
-    if (!playbackTarget) throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this media.", 422);
+    const playbackTargets = this.playbackTarget;
+    if (!playbackTargets) throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this media.", 422);
     const paused = this.state.paused;
     const oldProcess = this.process;
     const oldIpc = this.ipc;
@@ -402,7 +406,7 @@ export class MpvPlayerService implements PlayerController {
     if (oldProcess && !oldProcess.killed) oldProcess.kill();
     this.update({ ...this.state, phase: "loading", buffering: true });
     try {
-      await this.launchProcess(playbackTarget, positionTicks, paused, this.windowMaximized);
+      await this.launchProcess(playbackTargets, positionTicks, paused, this.windowMaximized);
       await this.report("progress");
     } catch {
       throw new AppError("SEEK_UNAVAILABLE", "Seeking is unavailable for this stream.", 422);
@@ -472,7 +476,7 @@ export class MpvPlayerService implements PlayerController {
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
       return;
     }
-    const playbackTarget = await this.openPlaybackTarget(nextSource);
+    const playbackTargets = await this.openPlaybackTarget(nextSource);
     if (!this.isCurrent(completedRevision, completedSource)) {
       await this.proxy.close();
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
@@ -481,7 +485,7 @@ export class MpvPlayerService implements PlayerController {
 
     const revision = ++this.playbackRevision;
     this.source = nextSource;
-    this.playbackTarget = playbackTarget;
+    this.playbackTarget = playbackTargets;
     this.reportingActive = false;
     this.update(emptyState({
       playbackId: nextSource.playbackId,
@@ -497,12 +501,13 @@ export class MpvPlayerService implements PlayerController {
       try {
         const fileLoaded = this.waitForEvent(ipc, "file-loaded", 15000);
         void fileLoaded.catch(() => undefined);
-        await ipc.command(["loadfile", playbackTarget, "replace"]);
+        await ipc.command(["loadfile", playbackTargets.media, "replace"]);
         await fileLoaded;
       } finally {
         this.replacingFile = false;
       }
       if (!this.isCurrent(revision, nextSource)) return;
+      await this.addExternalSubtitles(ipc, playbackTargets);
       const position = await this.waitForPropertyNumber(ipc, "time-pos");
       this.update({
         ...this.state,
@@ -540,6 +545,18 @@ export class MpvPlayerService implements PlayerController {
         resolve();
       });
     });
+  }
+
+  private async addExternalSubtitles(ipc: MpvIpcClient, targets: PlaybackTargets): Promise<void> {
+    for (const subtitle of targets.subtitles) {
+      await ipc.command([
+        "sub-add",
+        subtitle.url,
+        subtitle.isDefault ? "select" : "auto",
+        subtitle.title ?? "Jellyfin subtitle",
+        subtitle.language ?? "",
+      ]).catch(() => undefined);
+    }
   }
 
   private startReportingTimer(): void {

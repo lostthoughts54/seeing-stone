@@ -125,6 +125,7 @@ export class LocalPlaybackResolver {
         durationTicks,
         source: "local",
         delivery: "local",
+        externalSubtitles: [],
         initialAction: resumeMode !== "start-over"
           ? "progress"
           : previouslyWatched ? "replay" : previousPositionTicks > 0 ? "start_over" : "progress",
