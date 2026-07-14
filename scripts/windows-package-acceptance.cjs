@@ -206,13 +206,10 @@ async function launchAndVerifyInstalledApp(checkSecondInstance) {
     mainPid = windowState.pid;
     assert.equal(windowState.title, expectedTitle);
     assert.equal(windowState.responding, true);
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 750));
-    const rendererPixels = measureRendererPixels(windowState.handle);
-    assert.ok(rendererPixels.nonBlackRatio >= 0.15, `Packaged renderer capture was black: ${JSON.stringify(rendererPixels)}`);
-    assert.ok(rendererPixels.uniqueColors >= 32, `Packaged renderer capture lacked visible UI detail: ${JSON.stringify(rendererPixels)}`);
     await waitFor(() => existsSync(join(userDataRoot, "device-identity.json")), 15000, "device identity creation");
     await waitFor(() => existsSync(join(userDataRoot, "localfirst.sqlite3")), 15000, "SQLite database creation");
     assertSqliteHeader(join(userDataRoot, "localfirst.sqlite3"));
+    await waitForRenderedInterface(windowState.handle, 30000);
     const identity = readDeviceId();
 
     if (checkSecondInstance) {
@@ -415,6 +412,17 @@ $bitmap.Dispose()
 } | ConvertTo-Json -Compress
 `;
   return JSON.parse(runPowerShell(script, [String(handle), capturePath], 30000));
+}
+
+async function waitForRenderedInterface(handle, timeout) {
+  const deadline = Date.now() + timeout;
+  let pixels = null;
+  while (Date.now() < deadline) {
+    pixels = measureRendererPixels(handle);
+    if (pixels.nonBlackRatio >= 0.15 && pixels.uniqueColors >= 32) return pixels;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+  }
+  assert.fail(`Packaged renderer did not leave its startup frame: ${JSON.stringify(pixels)}`);
 }
 
 function stopInstalledProcesses() {

@@ -272,8 +272,7 @@ export class SyncPlayService {
     this.requireAvailable();
     const from = this.messageHistory.length;
     await this.api.syncPlayRequest("/SyncPlay/New", { GroupName: name }, "POST");
-    const update = await this.waitForGroupUpdate("GroupJoined", from);
-    this.applyJoinedGroup(update);
+    await this.waitForGroupUpdate("GroupJoined", from);
     await this.refreshGroups();
     return this.getState();
   }
@@ -282,8 +281,7 @@ export class SyncPlayService {
     this.requireAvailable();
     const from = this.messageHistory.length;
     await this.api.syncPlayRequest("/SyncPlay/Join", { GroupId: groupId }, "POST");
-    const update = await this.waitForGroupUpdate("GroupJoined", from, groupId);
-    this.applyJoinedGroup(update);
+    await this.waitForGroupUpdate("GroupJoined", from, groupId);
     await this.refreshGroups();
     return this.getState();
   }
@@ -380,6 +378,7 @@ export class SyncPlayService {
     if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) {
       throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
     }
+    state = await this.waitForPlayerTarget(itemId, targetTicks, !anchor.playing, 15000);
     this.setSyncAnchor(targetTicks, anchor.playing);
     await this.sendReady(anchor.playing);
     this.setState({ ...this.state, error: null });
@@ -480,7 +479,14 @@ export class SyncPlayService {
       if (value.success) this.setJoined({ ...joined, playbackState: value.data.State as WatchPartyPlaybackState });
     } else if (update.Type === "PlayQueue") {
       const queue = playQueueSchema.safeParse(update.Data);
-      if (!queue.success || queue.data.PlayingItemIndex >= queue.data.Playlist.length) return;
+      if (!queue.success || queue.data.PlayingItemIndex >= queue.data.Playlist.length) {
+        this.logger.warn("SyncPlay queue update rejected.", { code: "SYNCPLAY_PROTOCOL_INVALID" });
+        this.setState({
+          ...this.state,
+          error: { code: "SYNCPLAY_PROTOCOL_INVALID", message: "Jellyfin sent an invalid shared playlist. Leave and rejoin the watch party." },
+        });
+        return;
+      }
       const membershipRevision = this.membershipRevision;
       this.queueTask = this.queueTask.then(() => this.applyPlayQueue(queue.data, membershipRevision)).catch((error) => {
         this.logger.warn("SyncPlay queue application failed.", { code: error instanceof AppError ? error.code : "SYNCPLAY_QUEUE_FAILED" });
@@ -529,6 +535,8 @@ export class SyncPlayService {
       });
     }
     if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) return;
+    loaded = await this.waitForPlayerTarget(selected.ItemId, queue.StartPositionTicks, true, 15000);
+    if (!loaded.playbackId) return;
     await this.sendReady(false);
   }
 
@@ -567,8 +575,10 @@ export class SyncPlayService {
       this.setSyncAnchor(targetPosition, true);
       await this.correctDrift();
     } else if (command.Command === "Seek" && command.PositionTicks !== null) {
-      await this.player.seek(state.playbackId, command.PositionTicks, context);
-      this.setSyncAnchor(command.PositionTicks, !state.paused);
+      const sought = await this.player.seek(state.playbackId, command.PositionTicks, context);
+      const settled = await this.waitForPlayerTarget(state.itemId!, command.PositionTicks, sought.paused, 15000);
+      this.setSyncAnchor(command.PositionTicks, !settled.paused);
+      await this.sendReady(!settled.paused);
     } else if (command.Command === "Stop") {
       this.syncAnchor = null;
       await this.player.stop(state.playbackId, "stopped", context);
@@ -669,7 +679,18 @@ export class SyncPlayService {
     if (!parsed.success || parsed.data.GroupId !== update.GroupId) return;
     const group = safeGroup(parsed.data);
     this.rememberedGroupId = group.groupId;
-    if (this.state.joinedGroup?.groupId !== group.groupId) this.membershipRevision += 1;
+    const existing = this.state.joinedGroup?.groupId === group.groupId ? this.state.joinedGroup : null;
+    if (existing && !this.reconciling) {
+      this.setJoined({
+        ...group,
+        playbackState: existing.currentItemId ? existing.playbackState : group.playbackState,
+        currentItemId: existing.currentItemId,
+        playlistItemId: existing.playlistItemId,
+      });
+      void this.reportPing().catch(() => undefined);
+      return;
+    }
+    this.membershipRevision += 1;
     this.currentPlaylistItemId = null;
     this.lastPublishedTransitionItemId = null;
     this.syncAnchor = null;
@@ -805,8 +826,7 @@ export class SyncPlayService {
         if (this.state.groups.some((group) => group.groupId === rememberedGroupId)) {
           const from = this.messageHistory.length;
           await this.api.syncPlayRequest("/SyncPlay/Join", { GroupId: rememberedGroupId }, "POST");
-          const update = await this.waitForGroupUpdate("GroupJoined", from, rememberedGroupId);
-          this.applyJoinedGroup(update);
+          await this.waitForGroupUpdate("GroupJoined", from, rememberedGroupId);
         } else {
           this.clearJoinedGroup();
           reconciliationError = { code: "SYNCPLAY_GROUP_ENDED", message: "The watch party ended while this computer was disconnected." };
@@ -949,6 +969,25 @@ export class SyncPlayService {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new AppError("SYNCPLAY_PLAYBACK_TIMEOUT", "The shared item did not start in time.", 504);
+  }
+
+  private async waitForPlayerTarget(
+    itemId: string,
+    positionTicks: number,
+    paused: boolean,
+    timeoutMs: number,
+  ): Promise<PlaybackState> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = this.player.getState();
+      if (state.itemId === itemId && state.playbackId && state.paused === paused
+        && Math.abs(state.positionTicks - positionTicks) <= DRIFT_TOLERANCE_TICKS) return state;
+      if (state.itemId === itemId && state.phase === "error") {
+        throw new AppError("SYNCPLAY_PLAYBACK_FAILED", state.error || "The shared position could not be applied.");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new AppError("SYNCPLAY_PLAYER_NOT_READY", "The player did not reach the shared position in time.", 504);
   }
 
   private async waitForPlayerItemReady(itemId: string, timeoutMs: number): Promise<PlaybackState> {

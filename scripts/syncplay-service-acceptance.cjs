@@ -149,15 +149,43 @@ async function runChild() {
 
     const groupName = `LocalFirst W3 ${suffix}`;
     let groupId;
-    await test("a created group is discoverable and joinable by the second service", async () => {
+    await test("a created group is discoverable by the second service", async () => {
       const createdState = await primaryService.create(groupName);
       groupId = createdState.joinedGroup?.groupId;
       assert.ok(groupId);
       const discovered = await peerService.list();
       assert.ok(discovered.groups.some((group) => group.groupId === groupId && group.name === groupName));
+    });
+
+    let selectedItem;
+    let playableMovies;
+    await test("a late join loads the active item and converges on its playing position", async () => {
+      playableMovies = await primaryApi.getLibraryItems("Movie", 25);
+      selectedItem = playableMovies.find((item) => item.id);
+      assert.ok(selectedItem, "A playable movie is required for live SyncPlay acceptance.");
+      const selected = await primaryService.selectItem(selectedItem.id, "start-over");
+      assert.equal(selected.source, "local");
+      await waitFor(() => primaryPlayer.getState().itemId === selectedItem.id && !primaryPlayer.getState().paused, 30000);
+      const target = 90_000_000;
+      await primaryService.requestSeek(target);
+      await waitFor(() => primaryPlayer.getState().positionTicks === target, 30000);
+
       const joined = await peerService.join(groupId);
       assert.equal(joined.joinedGroup?.groupId, groupId);
-      await waitFor(() => primaryService.getState().joinedGroup?.participantCount === 2);
+      await waitFor(() => (
+        primaryService.getState().joinedGroup?.participantCount === 2
+        && primaryPlayer.getState().itemId === selectedItem.id
+        && peerPlayer.getState().itemId === selectedItem.id
+        && primaryPlayer.getState().positionTicks >= target
+        && peerPlayer.getState().positionTicks >= target
+        && Math.abs(primaryPlayer.getState().positionTicks - peerPlayer.getState().positionTicks) <= 10_000_000
+        && !primaryPlayer.getState().paused
+        && !peerPlayer.getState().paused
+      ), 30000);
+      assert.equal(primaryPlayer.getState().source, "local");
+      assert.equal(peerPlayer.getState().source, "server");
+      assert.equal(primaryService.getState().joinedGroup?.currentItemId, selectedItem.id);
+      assert.equal(peerService.getState().joinedGroup?.currentItemId, selectedItem.id);
     });
 
     await test("a dropped peer socket reconnects and restores the same group membership", async () => {
@@ -166,20 +194,6 @@ async function runChild() {
       await waitFor(() => peerService.getState().connection !== "connected");
       await waitFor(() => peerService.getState().connection === "connected" && peerService.getState().joinedGroup?.groupId === groupId, 30000);
       await waitFor(() => primaryService.getState().joinedGroup?.participantCount === 2, 30000);
-    });
-
-    let selectedItem;
-    let playableMovies;
-    await test("the exact item ID resolves independently to local and server playback", async () => {
-      playableMovies = await primaryApi.getLibraryItems("Movie", 25);
-      selectedItem = playableMovies.find((item) => item.id);
-      assert.ok(selectedItem, "A playable movie is required for live SyncPlay acceptance.");
-      const selected = await primaryService.selectItem(selectedItem.id, "start-over");
-      assert.equal(selected.source, "local");
-      await waitFor(() => peerPlayer.getState().itemId === selectedItem.id);
-      assert.equal(primaryPlayer.getState().source, "local");
-      assert.equal(peerPlayer.getState().source, "server");
-      assert.equal(peerService.getState().joinedGroup?.currentItemId, selectedItem.id);
     });
 
     await test("the deterministic participant publishes one exact automatic item transition", async () => {
@@ -232,31 +246,41 @@ async function runChild() {
 
     await test("pause initiated by the peer converges without a feedback loop", async () => {
       await peerService.requestPaused(false);
-      await waitFor(() => (
-        !primaryPlayer.getState().paused
-        && !peerPlayer.getState().paused
-        && primaryService.getState().joinedGroup?.playbackState === "Playing"
-        && peerService.getState().joinedGroup?.playbackState === "Playing"
-      ), 30000);
+      try {
+        await waitFor(() => (
+          !primaryPlayer.getState().paused
+          && !peerPlayer.getState().paused
+          && primaryService.getState().joinedGroup?.playbackState === "Playing"
+          && peerService.getState().joinedGroup?.playbackState === "Playing"
+        ), 30000);
+      } catch {
+        throw coded(`UNPAUSE_TIMEOUT_${primaryPlayer.getState().paused}_${peerPlayer.getState().paused}_${primaryService.getState().joinedGroup?.playbackState}_${peerService.getState().joinedGroup?.playbackState}`);
+      }
       const primaryPauseCount = primaryPlayer.count("pause");
       const peerPauseCount = peerPlayer.count("pause");
       await peerService.requestPaused(true);
-      await waitFor(() => (
-        primaryPlayer.getState().paused
-        && peerPlayer.getState().paused
-        && primaryService.getState().joinedGroup?.playbackState === "Paused"
-        && peerService.getState().joinedGroup?.playbackState === "Paused"
-      ), 30000);
+      try {
+        await waitFor(() => (
+          primaryPlayer.getState().paused
+          && peerPlayer.getState().paused
+          && primaryService.getState().joinedGroup?.playbackState === "Paused"
+          && peerService.getState().joinedGroup?.playbackState === "Paused"
+        ), 30000);
+      } catch {
+        throw coded(`PAUSE_TIMEOUT_${primaryPlayer.getState().paused}_${peerPlayer.getState().paused}_${primaryService.getState().joinedGroup?.playbackState}_${peerService.getState().joinedGroup?.playbackState}`);
+      }
       assert.equal(primaryPlayer.count("pause"), primaryPauseCount + 1);
       assert.equal(peerPlayer.count("pause"), peerPauseCount + 1);
     });
 
     await test("seek initiated by the creator converges on both players", async () => {
-      const target = 90_000_000;
+      const target = 120_000_000;
+      const primarySeekCount = primaryPlayer.count("seek");
+      const peerSeekCount = peerPlayer.count("seek");
       await primaryService.requestSeek(target);
       await waitFor(() => primaryPlayer.getState().positionTicks === target && peerPlayer.getState().positionTicks === target);
-      assert.equal(primaryPlayer.count("seek"), 1);
-      assert.equal(peerPlayer.count("seek"), 1);
+      assert.equal(primaryPlayer.count("seek"), primarySeekCount + 1);
+      assert.equal(peerPlayer.count("seek"), peerSeekCount + 1);
     });
 
     await test("manual resync corrects only the requesting player", async () => {

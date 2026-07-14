@@ -1,6 +1,6 @@
 # LocalFirst Jellyfin
 
-Current application version: `0.4.0`.
+Current application version: `0.4.1`.
 
 This repository contains the Windows Electron client built from the accepted `0.3.0` interface baseline.
 
@@ -62,7 +62,7 @@ Build the current unsigned Windows installer:
 pnpm package:windows
 ```
 
-The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
+The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.1-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
 
 Example server URLs:
 
@@ -87,4 +87,4 @@ The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified so
 
 ## Milestone boundary
 
-The functional SyncPlay W3 milestone is implemented. Reconnect, coordinated episode transitions, packaged Windows acceptance, and the real Adam/Kayla two-computer run remain W4 work and are not yet claimed as complete.
+The SyncPlay W4 implementation, automated regressions, live two-service Jellyfin acceptance, and packaged Windows acceptance are complete. The final physical two-computer run remains the acceptance gate and is not yet claimed as complete; use [SYNCPLAY_PHYSICAL_ACCEPTANCE.md](SYNCPLAY_PHYSICAL_ACCEPTANCE.md) with the exact accepted installer.

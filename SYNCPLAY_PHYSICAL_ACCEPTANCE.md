@@ -5,8 +5,9 @@ Use this sheet with the exact installer below. Check each item only after observ
 ## Test build
 
 ```text
-D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: 4cc12534a0393705434363458d2979a99d7efff2ca7281df16dfc4181bbe0827
+D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.1-x64.exe
+Bytes: 120488672
+SHA-256: 22b36581d863a3d7bdb4676a3d8ff2a0b7f7e0a209601959efbfe648db3c7dbe
 Jellyfin server: 10.11.11 only
 ```
 
@@ -35,15 +36,18 @@ Expected cross-season Next Up episode: _____________________________
 - [ ] After both sign in, both open Active Watch Parties.
 - [ ] Adam creates a clearly named party.
 - [ ] Without pressing Refresh, the party appears on Kayla's computer within about five seconds.
-- [ ] Kayla joins it.
-- [ ] Both joined-party cards list Adam and Kayla and say controls are shared.
+- [ ] Leave the second participant outside the party briefly so the active-room join path can be tested below.
 
 Party name: ________________________________
 
 ### 2. Exact item and local-first delivery
 
-- [ ] Either participant opens the chosen first episode and presses Play.
+- [ ] Adam opens the chosen first episode and presses Play while he is the only participant in the party.
+- [ ] Adam seeks at least one minute into the episode and confirms it is playing.
+- [ ] The second participant joins the already-playing party.
 - [ ] Both native player windows open the same episode.
+- [ ] The joining player lands near Adam's current position and begins playing without requiring a separate Play press.
+- [ ] Both joined-party cards list both participants and say controls are shared.
 - [ ] LocalFirst Jellyfin remains present on the Windows taskbar while each native player is open.
 - [ ] Kayla's joined-party card says `This computer: Local download`.
 - [ ] Adam's joined-party card says `This computer: Jellyfin stream`.

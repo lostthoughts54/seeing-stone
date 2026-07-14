@@ -13,6 +13,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - The joined-party card visibly reports `This computer: Local download` or `This computer: Jellyfin stream` from the existing sanitized playback state, so the physical local-versus-streamed condition can be verified without exposing a path or URL.
 - `Resync This Computer` reloads the validated shared item through that computer's local-first resolver when needed, restores normal speed, and aligns only that player to the last authoritative group item, position, and play/pause state. It never sends a group-wide seek.
 - During native playback the main app is minimized, not hidden, so the same button remains reachable from the Windows taskbar. `Ctrl+R` inside mpv performs the identical local-only correction without leaving the player and shows its result on the video.
+- Repeated `GroupJoined` processing cannot erase an already-received shared playlist or position anchor. A participant joining an active room now loads the exact active item, waits for mpv to reach the commanded position before reporting readiness, and then follows shared play, pause, and seek commands.
 - Incoming group state, queue, command, and envelope messages use exact strict schemas pinned to Jellyfin 10.11.11. Extra media URLs, paths, fields, malformed IDs, stale commands, duplicate commands, wrong-group messages, and wrong-item messages are rejected.
 
 ## Episode transitions
@@ -26,21 +27,22 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 ## Verification performed through 2026-07-14
 
 - TypeScript main, preload, and renderer typechecks passed.
-- Unit suite: 22 files and 111 tests passed, including the native `Ctrl+R` event, local-only routing, bounded on-video feedback, and taskbar window boundary.
+- Unit suite: 22 files and 112 tests passed, including the active-room join race, native `Ctrl+R` event, local-only routing, bounded on-video feedback, and taskbar window boundary.
 - Main-process security, persistence, download, offline-sync, reporting, and networking suite: 18 tests passed.
 - Electron runtime: 19 tests passed, including the real sandboxed preload bridge, visible per-computer delivery status, watch-party UI, strict IPC, sender validation, and renderer network denial.
-- Live SyncPlay acceptance against Jellyfin 10.11.11: 12 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover/join after access was granted, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, the in-player local-only resync request, leave, and empty-group removal.
+- Live SyncPlay acceptance against Jellyfin 10.11.11: 12 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover after access was granted, a second participant joining after the first was already playing and seeking, exact active-item and position convergence with independent local/server source selection, forced socket loss and membership restoration, one exact automatic transition, buffering wait/readiness recovery, peer play/pause, creator seek, the in-player local-only resync request, leave, and empty-group removal.
 - Authenticated application acceptance: 18 tests passed. It exercised real protected-session restoration, UI navigation, native mpv, a verified downloaded item using the local file, an undownloaded item falling back to Jellyfin streaming, and authoritative main-owned reporting.
 - A focused authenticated rerun against Jellyfin 10.11.11 found a real server-managed external subtitle and exposed it as a selectable native mpv track. The expanded 19-scenario run passed 17 scenarios; its two download-dependent legacy checks could not run because the current protected profile no longer contains a verified completed app download.
 - Native mpv runtime and completion acceptance passed with mpv `v0.41.0-dev-ge5486b96d`, including keeping the main app reachable as a minimized taskbar window, restoring it after playback, a local video with an authenticated external Jellyfin subtitle, movie completion, the existing 10-second Next Up flow, and cancellation.
 - Persistence runtime and media-probe acceptance passed.
-- The complete Windows NSIS installer was rebuilt and accepted. The test installed it, launched the packaged UI, verified hardened Electron fuses and packaged resources (including `ws` and mpv), checked stable device identity across restart, ran packaged mpv, uninstalled it, and verified cleanup.
+- The complete Windows NSIS installer was rebuilt and accepted. The test installed it, waited through the bounded startup frame and required the finished packaged UI to render, verified hardened Electron fuses and packaged resources (including `ws` and mpv), checked stable device identity across restart, ran packaged mpv, uninstalled it, and verified cleanup.
 
 Installer artifact:
 
 ```text
-D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: 4cc12534a0393705434363458d2979a99d7efff2ca7281df16dfc4181bbe0827
+D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.1-x64.exe
+Bytes: 120488672
+SHA-256: 22b36581d863a3d7bdb4676a3d8ff2a0b7f7e0a209601959efbfe648db3c7dbe
 ```
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.

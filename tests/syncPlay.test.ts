@@ -151,6 +151,50 @@ describe("SyncPlayService", () => {
     expect(h.service.getState().joinedGroup).toMatchObject({ currentItemId: nextItem, playlistItemId: nextPlaylist });
   });
 
+  it("does not erase an active queue and resync anchor when GroupJoined is handled twice", async () => {
+    const h = harness();
+    const nextItem = "66666666666646668666666666666666";
+    const nextPlaylist = "77777777777747778777777777777777";
+    h.receive(envelope("88888888888848888888888888888889", "SyncPlayGroupUpdate", {
+      GroupId: groupId,
+      Type: "PlayQueue",
+      Data: {
+        Reason: "NewPlaylist",
+        LastUpdate: "2026-07-13T20:01:00.000Z",
+        Playlist: [{ ItemId: nextItem, PlaylistItemId: nextPlaylist }],
+        PlayingItemIndex: 0,
+        StartPositionTicks: 30_000_000,
+        IsPlaying: false,
+        ShuffleMode: "Sorted",
+        RepeatMode: "RepeatNone",
+      },
+    }));
+    await h.internals.queueTask;
+    const playbackStateBeforeDuplicate = h.service.getState().joinedGroup?.playbackState;
+
+    h.internals.applyJoinedGroup({
+      GroupId: groupId,
+      Type: "GroupJoined",
+      Data: {
+        GroupId: groupId,
+        GroupName: "Movie night",
+        State: "Waiting",
+        Participants: ["Adam", "Noah"],
+        LastUpdatedAt: "2026-07-13T20:01:01.000Z",
+      },
+    });
+
+    expect(h.internals.currentPlaylistItemId).toBe(nextPlaylist);
+    expect(h.internals.syncAnchor).toMatchObject({ playlistItemId: nextPlaylist, positionTicks: 30_000_000 });
+    expect(h.service.getState().joinedGroup).toMatchObject({
+      participants: ["Adam", "Noah"],
+      currentItemId: nextItem,
+      playlistItemId: nextPlaylist,
+      playbackState: playbackStateBeforeDuplicate,
+    });
+    await expect(h.service.resyncLocal()).resolves.toMatchObject({ itemId: nextItem });
+  });
+
   it("rejects queue payloads containing unpinned media locations", async () => {
     const h = harness();
     h.receive(envelope("89898989898949898989898989898989", "SyncPlayGroupUpdate", {
@@ -209,6 +253,10 @@ describe("SyncPlayService", () => {
 
     expect(h.player.seek).toHaveBeenCalledTimes(1);
     expect(h.player.seek).toHaveBeenCalledWith(expect.any(String), 20_000_000, expect.objectContaining({ origin: "remote-sync" }));
+    expect(h.requests.at(-1)).toMatchObject({
+      path: "/SyncPlay/Ready",
+      body: { PositionTicks: 20_000_000, IsPlaying: true, PlaylistItemId: playlistItemId },
+    });
   });
 
   it("does not rebroadcast remote player actions but forwards native local controls", async () => {
