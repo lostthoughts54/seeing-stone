@@ -146,6 +146,11 @@ export interface DownloadSummary {
   canDelete: boolean;
 }
 
+export interface DownloadLocationSummary {
+  mode: "default" | "custom";
+  label: string;
+}
+
 export type RpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
@@ -236,6 +241,10 @@ export interface JellyfinBridge {
   };
   downloads: {
     list(): Promise<DownloadSummary[]>;
+    getLocation(): Promise<DownloadLocationSummary>;
+    chooseLocation(): Promise<DownloadLocationSummary | null>;
+    useDefaultLocation(): Promise<DownloadLocationSummary>;
+    openLocation(): Promise<{ opened: boolean }>;
     start(input: DownloadStartInput): Promise<DownloadSummary>;
     pause(input: DownloadIdInput): Promise<DownloadSummary>;
     resume(input: DownloadIdInput): Promise<DownloadSummary>;
@@ -287,6 +296,10 @@ export const IPC = {
   artworkGetUrl: "artwork:get-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
   downloadsList: "downloads:list",
+  downloadsGetLocation: "downloads:get-location",
+  downloadsChooseLocation: "downloads:choose-location",
+  downloadsUseDefaultLocation: "downloads:use-default-location",
+  downloadsOpenLocation: "downloads:open-location",
   downloadsStart: "downloads:start",
   downloadsPause: "downloads:pause",
   downloadsResume: "downloads:resume",

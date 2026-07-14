@@ -5,6 +5,7 @@ import {
   type DiscoveredServer,
   type DownloadIdInput,
   type DownloadKeepInput,
+  type DownloadLocationSummary,
   type DownloadStartInput,
   type DownloadSummary,
   type EpisodesInput,
@@ -84,6 +85,10 @@ const bridge: JellyfinBridge = {
   },
   downloads: {
     list: () => invoke<DownloadSummary[]>(IPC.downloadsList),
+    getLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsGetLocation),
+    chooseLocation: () => invoke<DownloadLocationSummary | null>(IPC.downloadsChooseLocation),
+    useDefaultLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsUseDefaultLocation),
+    openLocation: () => invoke<{ opened: boolean }>(IPC.downloadsOpenLocation),
     start: (input: DownloadStartInput) => invoke<DownloadSummary>(IPC.downloadsStart, input),
     pause: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsPause, input),
     resume: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsResume, input),

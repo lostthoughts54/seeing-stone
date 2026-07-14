@@ -1,5 +1,6 @@
 import type {
   DiscoveredServer,
+  DownloadLocationSummary,
   DownloadSummary,
   ImageKind,
   LibrarySummary,
@@ -117,6 +118,10 @@ const closePlayerButton = byId<HTMLButtonElement>("closePlayerButton");
 const downloadsScrim = byId<HTMLElement>("downloadsScrim");
 const downloadsPanel = byId<HTMLElement>("downloadsPanel");
 const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
+const downloadLocationLabel = byId<HTMLElement>("downloadLocationLabel");
+const chooseDownloadLocationButton = byId<HTMLButtonElement>("chooseDownloadLocationButton");
+const openDownloadLocationButton = byId<HTMLButtonElement>("openDownloadLocationButton");
+const defaultDownloadLocationButton = byId<HTMLButtonElement>("defaultDownloadLocationButton");
 const downloadsList = byId<HTMLElement>("downloadsList");
 const toast = byId<HTMLElement>("toast");
 
@@ -149,6 +154,7 @@ interface RendererState {
   playbackSource: "server" | "local" | null;
   playbackRequestId: number;
   downloads: DownloadSummary[];
+  downloadLocation: DownloadLocationSummary | null;
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
   searchRequestId: number;
@@ -185,6 +191,7 @@ const state: RendererState = {
   playbackSource: null,
   playbackRequestId: 0,
   downloads: [],
+  downloadLocation: null,
   lastFocusElement: null,
   searchTimer: null,
   searchRequestId: 0,
@@ -1450,6 +1457,7 @@ function openDownloads(): void {
   profileButton.setAttribute("aria-expanded", "false");
   downloadsScrim.classList.remove("is-hidden");
   downloadsPanel.classList.remove("is-hidden");
+  void refreshDownloadLocation().catch((error) => showToast(errorMessage(error, "The download location could not be loaded.")));
   closeDownloadsButton.focus();
 }
 
@@ -1464,6 +1472,55 @@ async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<
   state.downloads = downloads;
   renderDownloads();
   syncVisibleDownloadButtons();
+}
+
+function renderDownloadLocation(): void {
+  downloadLocationLabel.textContent = state.downloadLocation?.label ?? "Loading download location...";
+  defaultDownloadLocationButton.classList.toggle("is-hidden", state.downloadLocation?.mode !== "custom");
+}
+
+async function refreshDownloadLocation(): Promise<void> {
+  state.downloadLocation = await window.jellyfin.downloads.getLocation();
+  renderDownloadLocation();
+}
+
+async function chooseDownloadLocation(): Promise<void> {
+  chooseDownloadLocationButton.disabled = true;
+  try {
+    const location = await window.jellyfin.downloads.chooseLocation();
+    if (!location) return;
+    state.downloadLocation = location;
+    renderDownloadLocation();
+    showToast("New downloads will use the selected location.");
+  } catch (error) {
+    showToast(errorMessage(error, "The download location could not be changed."));
+  } finally {
+    chooseDownloadLocationButton.disabled = false;
+  }
+}
+
+async function useDefaultDownloadLocation(): Promise<void> {
+  defaultDownloadLocationButton.disabled = true;
+  try {
+    state.downloadLocation = await window.jellyfin.downloads.useDefaultLocation();
+    renderDownloadLocation();
+    showToast("New downloads will use your Windows Videos folder.");
+  } catch (error) {
+    showToast(errorMessage(error, "The default download location could not be restored."));
+  } finally {
+    defaultDownloadLocationButton.disabled = false;
+  }
+}
+
+async function openDownloadLocation(): Promise<void> {
+  openDownloadLocationButton.disabled = true;
+  try {
+    await window.jellyfin.downloads.openLocation();
+  } catch (error) {
+    showToast(errorMessage(error, "The download folder could not be opened."));
+  } finally {
+    openDownloadLocationButton.disabled = false;
+  }
 }
 
 async function startDownload(item: MediaItem): Promise<void> {
@@ -1662,6 +1719,8 @@ async function closePlayer(): Promise<void> {
   state.playbackId = null;
   state.playbackSource = null;
   state.downloads = [];
+  state.downloadLocation = null;
+  renderDownloadLocation();
   state.lastFocusElement?.focus?.();
   if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
@@ -1901,6 +1960,9 @@ refreshButton.addEventListener("click", () => { void retryConnection(refreshButt
 downloadsButton.addEventListener("click", () => openDownloads());
 closeDownloadsButton.addEventListener("click", closeDownloads);
 downloadsScrim.addEventListener("click", closeDownloads);
+chooseDownloadLocationButton.addEventListener("click", () => { void chooseDownloadLocation(); });
+openDownloadLocationButton.addEventListener("click", () => { void openDownloadLocation(); });
+defaultDownloadLocationButton.addEventListener("click", () => { void useDefaultDownloadLocation(); });
 
 logoutButton.addEventListener("click", async () => {
   await closePlayer();

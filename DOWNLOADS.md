@@ -12,7 +12,11 @@ Milestone 5 downloads individual Jellyfin movies and episodes. Series-level rota
 
 ## Storage
 
-Downloads live under `LocalFirst Jellyfin Downloads` in the current Windows user's Videos known folder. Each download receives an opaque folder and a single finalized media file. The exact path is main-only.
+Downloads initially live under `LocalFirst Jellyfin Downloads` in the current Windows user's Videos known folder. The Downloads panel can open a native Windows folder picker to place future downloads on another drive, open the active folder in Explorer, or return to the default Videos folder. The app creates or reuses a `LocalFirst Jellyfin Downloads` child folder at the chosen location.
+
+Changing the active location does not move or invalidate existing media. Each queued, paused, or completed copy retains its original main-owned storage root, and only roots selected through the native picker remain authorized after restart. New downloads use the newly selected root. The renderer receives only a summary such as `Custom folder on D:`; exact paths and filesystem operations remain main-only.
+
+Each download receives an opaque folder and a single finalized media file. The exact path is main-only.
 
 The queue reserves free space before a transfer. If capacity is insufficient or Windows reports `ENOSPC`, the transfer becomes Paused with a manual-cleanup message. No existing file is selected or deleted automatically.
 

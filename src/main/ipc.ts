@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 import {
   IPC,
+  type DownloadLocationSummary,
   type RpcResult,
 } from "../shared/contracts";
 import {
@@ -8,6 +9,7 @@ import {
   downloadIdSchema,
   downloadKeepSchema,
   downloadStartSchema,
+  emptySchema,
   episodesSchema,
   itemIdSchema,
   libraryItemsSchema,
@@ -35,6 +37,13 @@ import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
+
+export interface DownloadLocationController {
+  getSummary(): Promise<DownloadLocationSummary>;
+  choose(): Promise<DownloadLocationSummary | null>;
+  useDefault(): Promise<DownloadLocationSummary>;
+  open(): Promise<{ opened: boolean }>;
+}
 
 function safeResult<T>(handler: Handler<T>): Handler<RpcResult<T>> {
   return async (input) => {
@@ -73,6 +82,7 @@ export function registerIpcHandlers(
   downloads: DownloadManager,
   synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched">,
   syncPlay?: SyncPlayService,
+  downloadLocation?: DownloadLocationController,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -145,6 +155,26 @@ export function registerIpcHandlers(
   register(IPC.artworkGetUrl, (input) => artwork.getUrl(artworkSchema.strict().parse(input)));
   register(IPC.mediaSourcesGetCapabilities, (input) => api.getMediaSourceCapabilities(itemIdSchema.strict().parse(input).itemId));
   register(IPC.downloadsList, () => downloads.list());
+  register(IPC.downloadsGetLocation, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
+    return downloadLocation.getSummary();
+  });
+  register(IPC.downloadsChooseLocation, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
+    return downloadLocation.choose();
+  });
+  register(IPC.downloadsUseDefaultLocation, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
+    return downloadLocation.useDefault();
+  });
+  register(IPC.downloadsOpenLocation, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
+    return downloadLocation.open();
+  });
   register(IPC.downloadsStart, (input) => downloads.start(downloadStartSchema.strict().parse(input).itemId));
   register(IPC.downloadsPause, (input) => downloads.pause(downloadIdSchema.strict().parse(input).downloadId));
   register(IPC.downloadsResume, (input) => downloads.resume(downloadIdSchema.strict().parse(input).downloadId));

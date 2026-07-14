@@ -50,6 +50,12 @@ function createHarness() {
     deactivate: vi.fn(),
     setWatched: vi.fn(async (itemId: string, watched: boolean) => ({ itemId, watched, synchronization: "synchronized" })),
   };
+  const downloadLocation = {
+    getSummary: vi.fn(async () => ({ mode: "default" as const, label: "Windows Videos folder" })),
+    choose: vi.fn(async () => ({ mode: "custom" as const, label: "Custom folder on D:" })),
+    useDefault: vi.fn(async () => ({ mode: "default" as const, label: "Windows Videos folder" })),
+    open: vi.fn(async () => ({ opened: true })),
+  };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -58,9 +64,11 @@ function createHarness() {
     playback as never,
     downloads as never,
     synchronization as never,
+    undefined,
+    downloadLocation,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
@@ -129,6 +137,25 @@ describe("IPC authorization and allowlist", () => {
     expect(JSON.stringify(result)).not.toContain("SECRET_TOKEN_SENTINEL");
     expect(JSON.stringify(result)).not.toContain("Sensitive Folder");
     expect(downloads.start).not.toHaveBeenCalled();
+  });
+
+  it("changes download location only through the main-owned picker action", async () => {
+    const { handlers, validEvent, downloadLocation } = createHarness();
+    await expect(handlers.get(IPC.downloadsGetLocation)?.(validEvent)).resolves.toEqual({
+      ok: true,
+      data: { mode: "default", label: "Windows Videos folder" },
+    });
+    await expect(handlers.get(IPC.downloadsChooseLocation)?.(validEvent)).resolves.toEqual({
+      ok: true,
+      data: { mode: "custom", label: "Custom folder on D:" },
+    });
+    const rejected = await handlers.get(IPC.downloadsChooseLocation)?.(validEvent, {
+      path: "D:\\Sensitive Folder",
+      command: "explorer.exe",
+    }) as { ok: boolean; error?: { message: string } };
+    expect(rejected.ok).toBe(false);
+    expect(JSON.stringify(rejected)).not.toContain("Sensitive Folder");
+    expect(downloadLocation.choose).toHaveBeenCalledTimes(1);
   });
 
   it("allows only a boolean explicit watched action without renderer-authored playback data", async () => {

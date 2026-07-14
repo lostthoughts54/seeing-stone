@@ -1,6 +1,6 @@
 # LocalFirst Jellyfin
 
-Current application version: `0.4.1`.
+Current application version: `0.4.2`.
 
 This repository contains the Windows Electron client built from the accepted `0.3.0` interface baseline.
 
@@ -27,6 +27,7 @@ This repository contains the Windows Electron client built from the accepted `0.
 - Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.
 - Selects an entire season or any combination of episodes and queues them through the same item-ID-only download boundary.
 - Shows transfer progress with pause, resume, retry, cancel, explicit delete, and Keep Downloaded controls.
+- Lets the user choose a larger drive for future downloads, open the active folder in Windows, or return to the default Videos folder without orphaning existing copies.
 - Verifies path containment, expected size when available, finalized-file state, existence, and mpv media probing before marking a copy downloaded.
 - Pauses for manual cleanup when storage is insufficient and never auto-deletes media.
 - Resolves every normal Play action through a main-only local-first boundary: an exact verified download is used first, otherwise Jellyfin direct streaming or transcoding is used.
@@ -62,7 +63,7 @@ Build the current unsigned Windows installer:
 pnpm package:windows
 ```
 
-The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.1-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
+The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.2-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
 
 Example server URLs:
 

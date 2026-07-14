@@ -290,6 +290,18 @@
           <button id="closeDownloadsButton" type="button" aria-label="Close downloads" title="Close downloads">×</button>
         </header>
         <p class="downloads-note">Downloads are kept until you delete them. If storage fills up, transfers pause for manual cleanup.</p>
+        <section class="download-location" aria-labelledby="downloadLocationTitle">
+          <div class="download-location-copy">
+            <strong id="downloadLocationTitle">Download location</strong>
+            <span id="downloadLocationLabel">Windows Videos folder</span>
+            <small>New downloads use this folder. Existing downloads stay where they are.</small>
+          </div>
+          <div class="download-location-actions">
+            <button id="chooseDownloadLocationButton" class="primary" type="button">Change Location</button>
+            <button id="openDownloadLocationButton" type="button">Open Folder</button>
+            <button id="defaultDownloadLocationButton" type="button">Use Videos Folder</button>
+          </div>
+        </section>
         <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
       </section>
 

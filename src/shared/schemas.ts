@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const emptySchema = z.object({});
+
 export const serverUrlSchema = z.object({ url: z.string().trim().url().max(2048) });
 
 export const loginSchema = z.object({

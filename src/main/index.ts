@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import {
   app,
+  dialog,
   type BrowserWindow,
   ipcMain,
   shell,
@@ -18,6 +19,8 @@ import { registerIpcHandlers } from "./ipc";
 import { ArtworkService } from "./services/artwork";
 import { DeviceIdentityService } from "./services/deviceIdentity";
 import { DownloadManager } from "./services/downloadManager";
+import { DownloadLocationService } from "./services/downloadLocation";
+import { AppError } from "./services/errors";
 import { JellyfinApi } from "./services/jellyfinApi";
 import { LocalPlaybackResolver } from "./services/localPlaybackResolver";
 import { PlaybackSessionService } from "./services/playbackSession";
@@ -104,8 +107,11 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     moduleDirectory: __dirname,
   });
   const mediaProbe = new MediaProbeService(runtime);
-  const downloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
-  const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, [downloadStorageRoot]);
+  const defaultDownloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
+  const downloadLocation = new DownloadLocationService(app.getPath("userData"), defaultDownloadStorageRoot);
+  const downloadStorageRoot = await downloadLocation.getActiveRoot();
+  const downloadStorageRoots = await downloadLocation.getAuthorizedRoots();
+  const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, downloadStorageRoots);
   const playbackSource = new PlaybackSessionService(api, localPlayback, persistence);
   offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
   offlineSynchronization.activate();
@@ -116,6 +122,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     mediaProbe,
     downloadStorageRoot,
     logger,
+    { authorizedRoots: downloadStorageRoots },
   );
   downloadManager.onChanged((downloads) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
@@ -128,7 +135,47 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   activeSyncPlay.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
   });
-  registerIpcHandlers(ipcMain, mainWindow, api, artwork, playback, downloadManager, offlineSynchronization, activeSyncPlay);
+  const downloadLocationController = {
+    getSummary: () => downloadLocation.getSummary(),
+    choose: async () => {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: "Choose where LocalFirst Jellyfin stores downloads",
+        buttonLabel: "Use This Location",
+        defaultPath: await downloadLocation.getActiveRoot(),
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled || !result.filePaths[0]) return null;
+      const summary = await downloadLocation.chooseParent(result.filePaths[0]);
+      const root = await downloadLocation.getActiveRoot();
+      downloadManager!.setStorageRoot(root);
+      localPlayback.addAuthorizedRoot(root);
+      return summary;
+    },
+    useDefault: async () => {
+      const summary = await downloadLocation.useDefault();
+      const root = await downloadLocation.getActiveRoot();
+      downloadManager!.setStorageRoot(root);
+      localPlayback.addAuthorizedRoot(root);
+      return summary;
+    },
+    open: async () => {
+      const root = await downloadLocation.ensureActiveFolder();
+      const error = await shell.openPath(root);
+      if (error) throw new AppError("DOWNLOAD_LOCATION_OPEN_FAILED", "Windows could not open the download folder.", 500);
+      return { opened: true };
+    },
+  };
+  registerIpcHandlers(
+    ipcMain,
+    mainWindow,
+    api,
+    artwork,
+    playback,
+    downloadManager,
+    offlineSynchronization,
+    activeSyncPlay,
+    downloadLocationController,
+  );
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {
   logger.error("Application startup failed.", error);

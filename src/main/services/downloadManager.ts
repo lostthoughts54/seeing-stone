@@ -23,6 +23,7 @@ interface DownloadManagerOptions {
   concurrency?: number;
   storageReserveBytes?: number;
   availableBytes?: (storageRoot: string) => Promise<number>;
+  authorizedRoots?: string[];
 }
 
 const DEFAULT_STORAGE_RESERVE = 1024 * 1024 * 1024;
@@ -63,17 +64,21 @@ export class DownloadManager {
   private readonly transfers = new Map<string, ActiveTransfer>();
   private readonly stopIntents = new Map<string, StopIntent>();
   private readonly listeners = new Set<(downloads: DownloadSummary[]) => void>();
+  private readonly authorizedRoots = new Map<string, string>();
+  private storageRoot: string;
 
   constructor(
     private readonly api: DownloadApi,
     private readonly persistence: SqlitePersistenceService,
     private readonly probe: MediaProbeService,
-    private readonly storageRoot: string,
+    storageRoot: string,
     private readonly logger: AppLogger,
     options: DownloadManagerOptions = {},
   ) {
     if (!isAbsolute(storageRoot)) throw new AppError("INVALID_DOWNLOAD_STORAGE", "Download storage must use an absolute path.", 500);
     this.storageRoot = resolve(storageRoot);
+    this.addAuthorizedRoot(this.storageRoot);
+    for (const root of options.authorizedRoots ?? []) this.addAuthorizedRoot(root);
     this.concurrency = Math.max(1, Math.min(4, options.concurrency ?? 2));
     this.storageReserveBytes = Math.max(0, options.storageReserveBytes ?? DEFAULT_STORAGE_RESERVE);
     this.availableBytes = options.availableBytes ?? (async (root) => {
@@ -81,6 +86,19 @@ export class DownloadManager {
       const available = value.bavail * value.bsize;
       return available > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(available);
     });
+  }
+
+  setStorageRoot(storageRoot: string): void {
+    if (!isAbsolute(storageRoot)) throw new AppError("INVALID_DOWNLOAD_STORAGE", "Download storage must use an absolute path.", 500);
+    this.storageRoot = resolve(storageRoot);
+    this.addAuthorizedRoot(this.storageRoot);
+  }
+
+  addAuthorizedRoot(storageRoot: string): void {
+    if (!isAbsolute(storageRoot)) throw new AppError("INVALID_DOWNLOAD_STORAGE", "Download storage must use an absolute path.", 500);
+    const normalized = resolve(storageRoot);
+    const key = process.platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+    this.authorizedRoots.set(key, normalized);
   }
 
   onChanged(listener: (downloads: DownloadSummary[]) => void): () => void {
@@ -134,6 +152,7 @@ export class DownloadManager {
 
   async start(itemId: string): Promise<DownloadSummary> {
     const identity = this.requireIdentity();
+    const storageRoot = this.storageRoot;
     const existing = (await this.persistence.listDownloadBundles(identity.serverId, identity.userId))
       .find((bundle) => bundle.job.itemId === itemId
         && bundle.job.state !== "cancelled"
@@ -149,7 +168,7 @@ export class DownloadManager {
     const expectedSize = safeExpectedSize(source.size);
     const container = safeContainer(source.container);
     const downloadId = crypto.randomUUID();
-    const localPath = join(this.storageRoot, downloadId, `media.${container}`);
+    const localPath = join(storageRoot, downloadId, `media.${container}`);
 
     await this.persistence.upsertMediaItem({
       serverId: identity.serverId,
@@ -186,7 +205,7 @@ export class DownloadManager {
       itemId: item.id,
       mediaSourceId: source.id,
       downloadId,
-      storageRoot: this.storageRoot,
+      storageRoot,
       localPath,
       origin: "manual",
       smartManaged: false,
@@ -344,9 +363,10 @@ export class DownloadManager {
       this.assertRevision(initial.job, revision);
       const local = initial.localVersion;
       if (!local) throw new AppError("DOWNLOAD_RECORD_INVALID", "The download has no authorized local destination.", 500);
-      const finalPath = this.authorizedPath(local.localPath);
+      const storageRoot = resolve(local.storageRoot);
+      const finalPath = this.authorizedPath(storageRoot, local.localPath);
       const folder = dirname(finalPath);
-      const partialPath = this.authorizedPath(join(folder, "media.part"));
+      const partialPath = this.authorizedPath(storageRoot, join(folder, "media.part"));
       await mkdir(folder, { recursive: true });
 
       const finalFile = await stat(finalPath).catch(() => null);
@@ -354,7 +374,7 @@ export class DownloadManager {
         const expected = initial.job.expectedSize;
         if (expected === null || finalFile.size === expected) {
           await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: finalFile.size });
-          const result = await this.probe.probe(this.storageRoot, finalPath, signal);
+          const result = await this.probe.probe(storageRoot, finalPath, signal);
           await this.persistence.updateLocalVersion({
             localVersionId: local.localVersionId,
             fileState: "finalized",
@@ -376,7 +396,7 @@ export class DownloadManager {
       if (initial.job.expectedSize !== null && offset === initial.job.expectedSize && offset > 0) {
         await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: offset });
         await rename(partialPath, finalPath);
-        const result = await this.probe.probe(this.storageRoot, finalPath, signal);
+        const result = await this.probe.probe(storageRoot, finalPath, signal);
         await this.persistence.updateLocalVersion({
           localVersionId: local.localVersionId,
           fileState: "finalized",
@@ -386,7 +406,7 @@ export class DownloadManager {
         await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
         return;
       }
-      await this.assertStorage(initial.job.expectedSize === null ? null : initial.job.expectedSize - offset);
+      await this.assertStorage(storageRoot, initial.job.expectedSize === null ? null : initial.job.expectedSize - offset);
       this.assertRevision(initial.job, revision);
 
       const response = await this.api.fetchStaticStream(
@@ -412,7 +432,7 @@ export class DownloadManager {
         expectedSize = headerSize;
         await this.persistence.setDownloadExpectedSize(downloadId, expectedSize);
       }
-      await this.assertStorage(expectedSize === null ? null : expectedSize - offset);
+      await this.assertStorage(storageRoot, expectedSize === null ? null : expectedSize - offset);
       await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: offset });
       await this.notify();
 
@@ -446,7 +466,7 @@ export class DownloadManager {
       }
       await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: bytes });
       await rename(partialPath, finalPath);
-      const result = await this.probe.probe(this.storageRoot, finalPath, signal);
+      const result = await this.probe.probe(storageRoot, finalPath, signal);
       if (result.actualSize !== bytes) throw new AppError("DOWNLOAD_SIZE_MISMATCH", "The finalized file size changed unexpectedly.", 422);
       await this.persistence.updateLocalVersion({
         localVersionId: local.localVersionId,
@@ -514,17 +534,25 @@ export class DownloadManager {
     }
   }
 
-  private async assertStorage(remainingBytes: number | null): Promise<void> {
-    const available = await this.availableBytes(this.storageRoot);
+  private async assertStorage(storageRoot: string, remainingBytes: number | null): Promise<void> {
+    const available = await this.availableBytes(storageRoot);
     const required = this.storageReserveBytes + Math.max(0, remainingBytes ?? 0);
     if (!Number.isFinite(available) || available < required) {
       throw new AppError("STORAGE_LIMIT", "Download paused because storage is full. Free space manually, then resume it.", 507);
     }
   }
 
-  private authorizedPath(candidate: string): string {
+  private authorizedPath(storageRoot: string, candidate: string): string {
+    if (!isAbsolute(storageRoot)) {
+      throw new AppError("INVALID_LOCAL_PATH", "A download path failed its storage-boundary check.", 400);
+    }
+    const root = resolve(storageRoot);
+    const key = process.platform === "win32" ? root.toLocaleLowerCase("en-US") : root;
+    if (!this.authorizedRoots.has(key)) {
+      throw new AppError("INVALID_LOCAL_PATH", "A download path failed its storage-boundary check.", 400);
+    }
     const target = resolve(candidate);
-    const child = relative(this.storageRoot, target);
+    const child = relative(root, target);
     if (!child || child.startsWith("..") || isAbsolute(child)) {
       throw new AppError("INVALID_LOCAL_PATH", "A download path failed its storage-boundary check.", 400);
     }
@@ -533,9 +561,9 @@ export class DownloadManager {
 
   private async cleanup(local: LocalVersionRecord | null): Promise<void> {
     if (!local) return;
-    const target = this.authorizedPath(local.localPath);
+    const target = this.authorizedPath(local.storageRoot, local.localPath);
     const folder = dirname(target);
-    this.authorizedPath(folder);
+    this.authorizedPath(local.storageRoot, folder);
     await rm(folder, { recursive: true, force: true });
   }
 
@@ -551,7 +579,7 @@ export class DownloadManager {
     let file: Awaited<ReturnType<typeof stat>> | null = null;
     let invalidPath = false;
     try {
-      file = await stat(this.authorizedPath(local.localPath));
+      file = await stat(this.authorizedPath(local.storageRoot, local.localPath));
     } catch (error) {
       invalidPath = error instanceof AppError && error.code === "INVALID_LOCAL_PATH";
     }

@@ -46,6 +46,7 @@ describe("renderer and preload security boundary", () => {
       "src/main/ipc.ts",
       "src/main/services/artwork.ts",
       "src/main/services/deviceIdentity.ts",
+      "src/main/services/downloadLocation.ts",
       "src/main/services/secureSession.ts",
       "src/main/services/jellyfinApi.ts",
       "src/main/services/mpvIpc.ts",
@@ -148,8 +149,8 @@ describe("renderer and preload security boundary", () => {
       "const rendererSession = hardenSession()",
       'rendererSession.protocol.handle("app"',
       'rendererSession.protocol.handle("jellyfin-artwork"',
-      "registerIpcHandlers(ipcMain, mainWindow",
     ]) expect(main).toContain(wiring);
+    expect(main).toMatch(/registerIpcHandlers\(\s*ipcMain,\s*mainWindow/);
     expect(main).not.toContain('rendererSession.protocol.handle("jellyfin-media"');
     expect(main).toContain('"media-src \'none\'"');
   });

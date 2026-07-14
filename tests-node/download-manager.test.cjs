@@ -204,3 +204,76 @@ test("storage exhaustion pauses for manual cleanup and never removes unrelated m
     await closeFixture(value);
   }
 });
+
+test("changing the download root preserves paused and completed copies in earlier roots", async () => {
+  const content = Buffer.alloc(384 * 1024, 17);
+  const probe = {
+    async probe(root, target) {
+      const relativeTarget = path.relative(root, target);
+      assert.ok(relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget));
+      return { actualSize: (await fs.stat(target)).size, container: "mkv" };
+    },
+  };
+  const value = await fixture(createApi(content, { slow: true }), probe);
+  const secondRoot = path.join(value.directory, "larger-drive");
+  try {
+    const first = await value.manager.start("episode-old-root");
+    await waitForState(value.manager, "episode-old-root", "downloading");
+    await value.manager.pause(first.downloadId);
+
+    value.manager.setStorageRoot(secondRoot);
+    await value.manager.resume(first.downloadId);
+    await waitForState(value.manager, "episode-old-root", "downloaded");
+    const firstBundle = await value.persistence.getDownloadBundle(first.downloadId);
+    assert.equal(path.relative(value.storageRoot, firstBundle.localVersion.localPath).startsWith(".."), false);
+
+    const second = await value.manager.start("episode-new-root");
+    await waitForState(value.manager, "episode-new-root", "downloaded");
+    const secondBundle = await value.persistence.getDownloadBundle(second.downloadId);
+    assert.equal(path.relative(secondRoot, secondBundle.localVersion.localPath).startsWith(".."), false);
+
+    const listed = await value.manager.list();
+    assert.equal(listed.find((entry) => entry.downloadId === first.downloadId).state, "downloaded");
+    assert.equal(listed.find((entry) => entry.downloadId === second.downloadId).state, "downloaded");
+
+    const localPlayback = new LocalPlaybackResolver(
+      createApi(content),
+      value.persistence,
+      probe,
+      [value.storageRoot, secondRoot],
+      10,
+    );
+    assert.equal((await localPlayback.resolve("episode-old-root", "start-over")).source, "local");
+    assert.equal((await localPlayback.resolve("episode-new-root", "start-over")).source, "local");
+
+    await value.manager.shutdown();
+    const unauthorized = new DownloadManager(
+      createApi(content),
+      value.persistence,
+      probe,
+      path.join(value.directory, "unrelated-root"),
+      logger,
+      { storageReserveBytes: 0 },
+    );
+    await unauthorized.activate();
+    await assert.rejects(unauthorized.delete(first.downloadId), (error) => error.code === "INVALID_LOCAL_PATH");
+    assert.equal((await fs.stat(firstBundle.localVersion.localPath)).isFile(), true);
+    await unauthorized.shutdown();
+
+    const restarted = new DownloadManager(
+      createApi(content),
+      value.persistence,
+      probe,
+      secondRoot,
+      logger,
+      { storageReserveBytes: 0, authorizedRoots: [value.storageRoot, secondRoot] },
+    );
+    await restarted.activate();
+    value.manager = restarted;
+    const afterRestart = await restarted.list();
+    assert.equal(afterRestart.find((entry) => entry.downloadId === first.downloadId).state, "downloaded");
+    assert.equal(afterRestart.find((entry) => entry.downloadId === second.downloadId).state, "downloaded");
+  } finally {
+    await closeFixture(value);
+  }
+});

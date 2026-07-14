@@ -35,12 +35,15 @@ export class LocalPlaybackResolver {
     authorizedRoots: string[],
     private readonly detailsTimeoutMilliseconds = 1500,
   ) {
-    this.authorizedRoots = new Map(authorizedRoots.map((root) => {
-      if (!isAbsolute(root)) throw new AppError("INVALID_LOCAL_PLAYBACK_ROOT", "Local playback storage must use an absolute path.", 500);
-      const normalized = resolve(root);
-      return [pathKey(normalized), normalized];
-    }));
+    this.authorizedRoots = new Map();
+    for (const root of authorizedRoots) this.addAuthorizedRoot(root);
     if (!this.authorizedRoots.size) throw new AppError("INVALID_LOCAL_PLAYBACK_ROOT", "At least one local playback storage root is required.", 500);
+  }
+
+  addAuthorizedRoot(root: string): void {
+    if (!isAbsolute(root)) throw new AppError("INVALID_LOCAL_PLAYBACK_ROOT", "Local playback storage must use an absolute path.", 500);
+    const normalized = resolve(root);
+    this.authorizedRoots.set(pathKey(normalized), normalized);
   }
 
   async resolve(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource | null> {

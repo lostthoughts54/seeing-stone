@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 19;
+const EXPECTED_TESTS = 20;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -109,6 +109,9 @@ async function runElectronChild() {
     let artworkFetchCount = 0;
     let connectionCount = 0;
     let downloadStartCount = 0;
+    let chooseDownloadLocationCount = 0;
+    let openDownloadLocationCount = 0;
+    let defaultDownloadLocationCount = 0;
     const downloadStartItems = [];
     const watchedActions = [];
     let expireHome = false;
@@ -364,6 +367,24 @@ async function runElectronChild() {
       async delete() { throw new Error("not used"); },
       async setKeep() { throw new Error("not used"); },
     };
+    let downloadLocationSummary = { mode: "default", label: "Windows Videos folder" };
+    const downloadLocation = {
+      async getSummary() { return structuredClone(downloadLocationSummary); },
+      async choose() {
+        chooseDownloadLocationCount += 1;
+        downloadLocationSummary = { mode: "custom", label: "Custom folder on D:" };
+        return structuredClone(downloadLocationSummary);
+      },
+      async useDefault() {
+        defaultDownloadLocationCount += 1;
+        downloadLocationSummary = { mode: "default", label: "Windows Videos folder" };
+        return structuredClone(downloadLocationSummary);
+      },
+      async open() {
+        openDownloadLocationCount += 1;
+        return { opened: true };
+      },
+    };
     const synchronization = {
       activate() {},
       deactivate() {},
@@ -526,7 +547,7 @@ async function runElectronChild() {
       },
       async setViewVisible() { return structuredClone(watchPartyState); },
     };
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization, syncPlay);
+    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization, syncPlay, downloadLocation);
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });
@@ -633,7 +654,7 @@ async function runElectronChild() {
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
-        downloads: ["cancel", "delete", "list", "pause", "resume", "retry", "setKeep", "start", "subscribe"],
+        downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
         playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
         watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
       };
@@ -653,6 +674,46 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("download settings use narrow native actions without exposing a path", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("downloadsButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("downloadLocationLabel").textContent === "Windows Videos folder") break;
+          await delay(20);
+        }
+        document.getElementById("chooseDownloadLocationButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("downloadLocationLabel").textContent === "Custom folder on D:") break;
+          await delay(20);
+        }
+        const custom = {
+          label: document.getElementById("downloadLocationLabel").textContent,
+          defaultVisible: !document.getElementById("defaultDownloadLocationButton").classList.contains("is-hidden"),
+          panelText: document.getElementById("downloadsPanel").textContent,
+        };
+        document.getElementById("openDownloadLocationButton").click();
+        document.getElementById("defaultDownloadLocationButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("downloadLocationLabel").textContent === "Windows Videos folder") break;
+          await delay(20);
+        }
+        return {
+          custom,
+          resetLabel: document.getElementById("downloadLocationLabel").textContent,
+          defaultHidden: document.getElementById("defaultDownloadLocationButton").classList.contains("is-hidden"),
+        };
+      })()`);
+      assert.equal(result.custom.label, "Custom folder on D:");
+      assert.equal(result.custom.defaultVisible, true);
+      assert.doesNotMatch(result.custom.panelText, /D:\\\\|Sensitive|localPath|storageRoot/);
+      assert.equal(result.resetLabel, "Windows Videos folder");
+      assert.equal(result.defaultHidden, true);
+      assert.equal(chooseDownloadLocationCount, 1);
+      assert.equal(openDownloadLocationCount, 1);
+      assert.equal(defaultDownloadLocationCount, 1);
     });
 
     await test("watch-party UI lists, joins, leaves, and creates through the narrow bridge", async () => {

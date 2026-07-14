@@ -1301,7 +1301,43 @@ select option {
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.45;
-  margin: 14px 0 18px;
+  margin: 14px 0;
+}
+
+.download-location {
+  background: #19191d;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px;
+}
+
+.download-location-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.download-location-copy > span {
+  color: var(--accent-soft);
+  font-size: 0.9rem;
+}
+
+.download-location-copy > small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.download-location-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.download-location-actions button {
+  flex: 1 1 auto;
+  min-width: 112px;
 }
 
 .downloads-list {
