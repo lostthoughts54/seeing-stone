@@ -499,6 +499,7 @@ async function runElectronChild() {
       sharedControls: true,
       error: null,
     };
+    let watchPartyResyncCount = 0;
     const syncPlay = {
       async activate() { return watchPartyState; },
       async deactivate() {},
@@ -518,6 +519,10 @@ async function runElectronChild() {
       async leave() {
         watchPartyState = { ...watchPartyState, joinedGroup: null };
         return structuredClone(watchPartyState);
+      },
+      async resyncLocal() {
+        watchPartyResyncCount += 1;
+        return playback.getState();
       },
       async setViewVisible() { return structuredClone(watchPartyState); },
     };
@@ -630,7 +635,7 @@ async function runElectronChild() {
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "delete", "list", "pause", "resume", "retry", "setKeep", "start", "subscribe"],
         playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
-        watchParties: ["create", "getState", "join", "leave", "list", "setVisible", "subscribe"],
+        watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -678,7 +683,11 @@ async function runElectronChild() {
           shared: document.querySelector("#joinedWatchParty .shared-control-note")?.textContent,
         };
 
-        document.querySelector("#joinedWatchParty button").click();
+        document.querySelector('[data-watch-party-action="resync"]').click();
+        await waitFor(() => document.getElementById("toast").textContent === "This computer was resynced to the party.");
+        const resyncToast = document.getElementById("toast").textContent;
+
+        document.querySelector('[data-watch-party-action="leave"]').click();
         await waitFor(() => document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
         const independentToast = document.getElementById("toast").textContent;
 
@@ -688,10 +697,10 @@ async function runElectronChild() {
         await waitFor(() => document.querySelector("#joinedWatchParty strong")?.textContent === "Runtime created party");
         const createdName = document.querySelector("#joinedWatchParty strong")?.textContent;
 
-        document.querySelector("#joinedWatchParty button").click();
+        document.querySelector('[data-watch-party-action="leave"]').click();
         await waitFor(() => document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
         document.getElementById("navHomeButton").click();
-        return { listed, joined, independentToast, createdName };
+        return { listed, joined, resyncToast, independentToast, createdName };
       })()`);
 
       assert.deepEqual(result.listed, {
@@ -700,6 +709,8 @@ async function runElectronChild() {
         group: "Runtime movie night",
         status: "Parties are visible only to signed-in users on this Jellyfin server.",
       });
+      assert.equal(result.resyncToast, "This computer was resynced to the party.");
+      assert.equal(watchPartyResyncCount, 1);
       assert.deepEqual(result.joined, {
         name: "Runtime movie night",
         participants: "Watching with: Runtime Viewer",
@@ -762,7 +773,7 @@ async function runElectronChild() {
       })()`);
       assert.equal(server, "This computer: Jellyfin stream");
 
-      await mainWindow.webContents.executeJavaScript(`document.querySelector("#joinedWatchParty button")?.click()`);
+      await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-watch-party-action="leave"]')?.click()`);
     });
 
     await test("movie details toggle explicit watched state through only the narrow item action", async () => {

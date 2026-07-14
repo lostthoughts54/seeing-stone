@@ -250,6 +250,7 @@ export interface JellyfinBridge {
     create(input: WatchPartyCreateInput): Promise<WatchPartyViewState>;
     join(input: WatchPartyGroupInput): Promise<WatchPartyViewState>;
     leave(): Promise<WatchPartyViewState>;
+    resync(): Promise<PlaybackState>;
     setVisible(input: WatchPartyVisibilityInput): Promise<WatchPartyViewState>;
     subscribe(listener: (state: WatchPartyViewState) => void): () => void;
   };
@@ -296,6 +297,7 @@ export const IPC = {
   watchPartiesCreate: "watch-parties:create",
   watchPartiesJoin: "watch-parties:join",
   watchPartiesLeave: "watch-parties:leave",
+  watchPartiesResync: "watch-parties:resync",
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",
 } as const;

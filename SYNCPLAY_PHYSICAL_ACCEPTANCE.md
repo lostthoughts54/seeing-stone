@@ -6,7 +6,7 @@ Use this sheet with the exact installer below. Check each item only after observ
 
 ```text
 D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: 51d93edd46033c4dab9aba9452cf9c4d47106bacfbe8243679f89fd776703a8c
+SHA-256: ed23a172e716ff5f34f05195b37b6bedf186a415677efd1d02a7b3e9909794e9
 Jellyfin server: 10.11.11 only
 ```
 
@@ -65,6 +65,7 @@ Party name: ________________________________
 - [ ] Restore Kayla's network within 15 seconds.
 - [ ] Kayla automatically reconnects to the same party, or receives the documented actionable failure if the server removed it.
 - [ ] After recovery, one pause and one seek converge on both computers.
+- [ ] If either player remains visibly out of position, press `Resync This Computer` on that client and confirm only that player jumps back into alignment.
 
 ### 5. Cross-season Next Up
 

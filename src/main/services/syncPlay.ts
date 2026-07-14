@@ -337,6 +337,43 @@ export class SyncPlayService {
     return this.player.getState();
   }
 
+  async resyncLocal(): Promise<PlaybackState> {
+    const joined = this.requireJoined();
+    const anchor = this.syncAnchor;
+    const itemId = joined.currentItemId;
+    if (!anchor || !itemId || !joined.playlistItemId || anchor.playlistItemId !== joined.playlistItemId) {
+      throw new AppError("SYNCPLAY_RESYNC_NOT_READY", "Choose and start a shared item before resyncing this computer.", 409);
+    }
+    const membershipRevision = this.membershipRevision;
+    const context = {
+      origin: "remote-sync" as const,
+      commandRevision: ++this.commandRevision,
+      commandId: `manual-resync:${joined.playlistItemId}:${this.commandRevision}`,
+    };
+    let state = this.player.getState();
+    if (state.itemId !== itemId || !state.playbackId) {
+      await this.player.loadItem(itemId, "start-over", context);
+      state = await this.waitForPlayerItem(itemId, 30000);
+    }
+    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision || !state.playbackId) {
+      throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
+    }
+    const playbackId = state.playbackId;
+    const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
+    const targetTicks = Math.min(state.durationTicks || Number.MAX_SAFE_INTEGER, Math.max(0, anchor.positionTicks + elapsedTicks));
+    if (this.player.getPlaybackRate() !== 1) state = await this.player.setPlaybackRate(playbackId, 1, context);
+    if (!state.paused) state = await this.player.setPaused(playbackId, true, context);
+    state = await this.player.seek(playbackId, targetTicks, context);
+    if (anchor.playing) state = await this.player.setPaused(playbackId, false, context);
+    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) {
+      throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
+    }
+    this.setSyncAnchor(targetTicks, anchor.playing);
+    await this.sendReady(anchor.playing);
+    this.setState({ ...this.state, error: null });
+    return state;
+  }
+
   private async openSocket(revision: number): Promise<void> {
     const context = this.api.getAuthenticatedSocketContext();
     const url = new URL(context.serverAddress);

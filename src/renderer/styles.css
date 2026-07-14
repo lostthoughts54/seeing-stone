@@ -1566,6 +1566,11 @@ select option {
   margin-top: 14px;
 }
 
+.watch-party-actions {
+  display: flex;
+  gap: 10px;
+}
+
 .watch-party-list {
   display: grid;
   gap: 12px;

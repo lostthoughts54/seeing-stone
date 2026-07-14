@@ -11,6 +11,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - Logout, session expiration, device-session replacement, and server changes deactivate SyncPlay, stop periodic work, clear membership, and restore solo playback behavior.
 - Active group discovery refreshes only while the Active Watch Parties screen is visible. Timing and drift work continue only as needed while joined.
 - The joined-party card visibly reports `This computer: Local download` or `This computer: Jellyfin stream` from the existing sanitized playback state, so the physical local-versus-streamed condition can be verified without exposing a path or URL.
+- `Resync This Computer` reloads the validated shared item through that computer's local-first resolver when needed, restores normal speed, and aligns only that player to the last authoritative group item, position, and play/pause state. It never sends a group-wide seek.
 - Incoming group state, queue, command, and envelope messages use exact strict schemas pinned to Jellyfin 10.11.11. Extra media URLs, paths, fields, malformed IDs, stale commands, duplicate commands, wrong-group messages, and wrong-item messages are rejected.
 
 ## Episode transitions
@@ -24,10 +25,10 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 ## Verification performed on 2026-07-13
 
 - TypeScript main, preload, and renderer typechecks passed.
-- Unit suite: 22 files and 104 tests passed.
+- Unit suite: 22 files and 107 tests passed.
 - Main-process security, persistence, download, offline-sync, reporting, and networking suite: 18 tests passed.
 - Electron runtime: 19 tests passed, including the real sandboxed preload bridge, visible per-computer delivery status, watch-party UI, strict IPC, sender validation, and renderer network denial.
-- Live SyncPlay acceptance against Jellyfin 10.11.11: 11 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover/join after access was granted, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, leave, and empty-group removal.
+- Live SyncPlay acceptance against Jellyfin 10.11.11: 12 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover/join after access was granted, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, local-only manual resync, leave, and empty-group removal.
 - Authenticated application acceptance: 18 tests passed. It exercised real protected-session restoration, UI navigation, native mpv, a verified downloaded item using the local file, an undownloaded item falling back to Jellyfin streaming, and authoritative main-owned reporting.
 - Native mpv runtime and completion acceptance passed with mpv `v0.41.0-dev-ge5486b96d`, including movie completion, the existing 10-second Next Up flow, and cancellation.
 - Persistence runtime and media-probe acceptance passed.
@@ -37,7 +38,7 @@ Installer artifact:
 
 ```text
 D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: 51d93edd46033c4dab9aba9452cf9c4d47106bacfbe8243679f89fd776703a8c
+SHA-256: ed23a172e716ff5f34f05195b37b6bedf186a415677efd1d02a7b3e9909794e9
 ```
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.

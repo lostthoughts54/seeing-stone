@@ -9,7 +9,7 @@ const { spawnSync } = require("node:child_process");
 
 const CHILD_FLAG = "--syncplay-service-child";
 const PARENT_ENV = "LOCALFIRST_SYNCPLAY_SERVICE_PARENT";
-const TEST_COUNT = 11;
+const TEST_COUNT = 12;
 
 if (!process.versions.electron) runParent();
 else void runChild().catch((error) => {
@@ -257,6 +257,18 @@ async function runChild() {
       await waitFor(() => primaryPlayer.getState().positionTicks === target && peerPlayer.getState().positionTicks === target);
       assert.equal(primaryPlayer.count("seek"), 1);
       assert.equal(peerPlayer.count("seek"), 1);
+    });
+
+    await test("manual resync corrects only the requesting player", async () => {
+      const target = peerPlayer.getState().positionTicks;
+      const peerSeekCount = peerPlayer.count("seek");
+      await primaryPlayer.seek(primaryPlayer.getState().playbackId, target + 100_000_000);
+      assert.notEqual(primaryPlayer.getState().positionTicks, target);
+      const corrected = await primaryService.resyncLocal();
+      assert.equal(corrected.positionTicks, target);
+      assert.equal(primaryPlayer.getState().positionTicks, target);
+      assert.equal(peerPlayer.getState().positionTicks, target);
+      assert.equal(peerPlayer.count("seek"), peerSeekCount);
     });
 
     await test("leaving restores independent state and the empty group disappears", async () => {

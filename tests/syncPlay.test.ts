@@ -60,11 +60,11 @@ function harness() {
       return { playbackId: state.playbackId!, resumePositionTicks: 0, durationTicks: state.durationTicks, source: "local" as const };
     }),
     setPaused: vi.fn(async (_playbackId: string, paused: boolean) => {
-      state = playbackState({ paused, phase: paused ? "paused" : "playing" });
+      state = { ...state, paused, phase: paused ? "paused" : "playing" };
       return state;
     }),
     seek: vi.fn(async (_playbackId: string, positionTicks: number) => {
-      state = playbackState({ positionTicks });
+      state = { ...state, positionTicks };
       return state;
     }),
     setPlaybackRate: vi.fn(async (_playbackId: string, rate: number) => { playbackRate = rate; return state; }),
@@ -96,7 +96,8 @@ function harness() {
   internals.currentPlaylistItemId = playlistItemId;
   internals.timeSyncReady = true;
   const receive = (value: unknown) => internals.receiveMessage(Buffer.from(JSON.stringify(value)));
-  return { service, internals, api, player, requests, receive };
+  const setPlayerState = (value: PlaybackState) => { state = structuredClone(value); };
+  return { service, internals, api, player, requests, receive, setPlayerState };
 }
 
 function envelope(messageId: string, messageType: "SyncPlayGroupUpdate" | "SyncPlayCommand", data: unknown) {
@@ -223,6 +224,57 @@ describe("SyncPlayService", () => {
     expect(h.requests).toHaveLength(0);
     await h.internals.handlePlayerEvent({ ...base, origin: "local-user", commandId: null, commandRevision: null });
     expect(h.requests).toEqual([{ path: "/SyncPlay/Pause", body: {}, method: "POST" }]);
+  });
+
+  it("manually resyncs only this player to the validated paused anchor", async () => {
+    const h = harness();
+    h.internals.syncAnchor = {
+      membershipRevision: h.internals.membershipRevision,
+      playlistItemId,
+      positionTicks: 80_000_000,
+      playing: false,
+      monotonicTimestampMs: performance.now(),
+    };
+
+    const state = await h.service.resyncLocal();
+
+    expect(state).toMatchObject({ itemId, positionTicks: 80_000_000, paused: true });
+    expect(h.player.setPaused).toHaveBeenCalledWith(expect.any(String), true, expect.objectContaining({ origin: "remote-sync" }));
+    expect(h.player.seek).toHaveBeenCalledWith(expect.any(String), 80_000_000, expect.objectContaining({
+      origin: "remote-sync",
+      commandId: expect.stringContaining("manual-resync:"),
+    }));
+    expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
+    expect(h.requests.at(-1)).toMatchObject({
+      path: "/SyncPlay/Ready",
+      body: { PositionTicks: 80_000_000, IsPlaying: false, PlaylistItemId: playlistItemId },
+    });
+  });
+
+  it("rejects manual resync before the group has an authoritative item anchor", async () => {
+    const h = harness();
+    h.internals.syncAnchor = null;
+
+    await expect(h.service.resyncLocal()).rejects.toMatchObject({ code: "SYNCPLAY_RESYNC_NOT_READY" });
+    expect(h.player.seek).not.toHaveBeenCalled();
+    expect(h.requests).toHaveLength(0);
+  });
+
+  it("reloads the authoritative item through PlayerController before manual resync", async () => {
+    const h = harness();
+    h.setPlayerState(playbackState({ itemId: otherGroupId, source: "server", positionTicks: 40_000_000 }));
+    h.internals.syncAnchor = {
+      membershipRevision: h.internals.membershipRevision,
+      playlistItemId,
+      positionTicks: 60_000_000,
+      playing: false,
+      monotonicTimestampMs: performance.now(),
+    };
+
+    const state = await h.service.resyncLocal();
+
+    expect(h.player.loadItem).toHaveBeenCalledWith(itemId, "start-over", expect.objectContaining({ origin: "remote-sync" }));
+    expect(state).toMatchObject({ itemId, source: "local", positionTicks: 60_000_000, paused: true });
   });
 
   it("tolerates small drift, rate-corrects medium drift, and seeks only for large drift", async () => {

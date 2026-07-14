@@ -490,14 +490,24 @@ function renderWatchParties(): void {
     const name = document.createElement("strong");
     const metadata = document.createElement("p");
     const leave = document.createElement("button");
+    const resync = document.createElement("button");
+    const actions = document.createElement("div");
     eyebrow.textContent = "Joined party";
     name.textContent = group.name;
     metadata.textContent = `${watchPartyStateLabel(group.playbackState)} - ${group.participantCount} participant${group.participantCount === 1 ? "" : "s"}`;
     leave.type = "button";
     leave.textContent = "Leave Party";
+    leave.dataset.watchPartyAction = "leave";
     leave.addEventListener("click", () => { void leaveWatchParty(leave); });
+    resync.type = "button";
+    resync.textContent = "Resync This Computer";
+    resync.dataset.watchPartyAction = "resync";
+    resync.disabled = !available;
+    resync.addEventListener("click", () => { void resyncWatchParty(resync); });
     copy.append(eyebrow, name, metadata);
-    heading.append(copy, leave);
+    actions.className = "watch-party-actions";
+    actions.append(resync, leave);
+    heading.append(copy, actions);
     const participants = document.createElement("p");
     participants.textContent = group.participants.length ? `Watching with: ${group.participants.join(", ")}` : "Waiting for participants";
     const shared = document.createElement("p");
@@ -603,6 +613,22 @@ async function leaveWatchParty(button: HTMLButtonElement): Promise<void> {
   } catch (error) {
     button.disabled = false;
     showToast(errorMessage(error, "The watch party could not be left."));
+  }
+}
+
+async function resyncWatchParty(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = "Resyncing...";
+  try {
+    const playback = await window.jellyfin.watchParties.resync();
+    state.playbackSource = playback.source;
+    renderWatchParties();
+    showToast("This computer was resynced to the party.");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = label;
+    showToast(errorMessage(error, "This computer could not be resynced."));
   }
 }
 
