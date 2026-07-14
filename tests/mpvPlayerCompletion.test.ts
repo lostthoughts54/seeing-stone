@@ -199,6 +199,18 @@ describe("MpvPlayerService natural completion", () => {
     });
   });
 
+  it("suppresses solo Next Up when a watch-party coordinator assigns another participant", async () => {
+    const h = harness({ nextId: "episode-2" });
+    h.player.setAutomaticTransitionsEnabled(false);
+
+    (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
+    await waitFor(() => h.window.show.mock.calls.length === 1);
+
+    expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
+    expect(h.commands.some((command) => command[0] === "loadfile")).toBe(false);
+    expect(h.player.getState().phase).toBe("ended");
+  });
+
   it.each([
     ["no next episode", { nextId: null }],
     ["next source resolution failure", { nextId: "episode-2", failNextStart: true }],

@@ -191,6 +191,7 @@ const state: RendererState = {
 };
 
 let connectionRetryInFlight = false;
+let watchPartiesVisible = false;
 
 function normalizeServerUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -427,6 +428,11 @@ function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?:
   const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView };
   for (const [name, element] of Object.entries(views)) element.classList.toggle("is-hidden", name !== route);
   state.currentRoute = route;
+  const nextWatchPartiesVisible = route === "watch-parties";
+  if (nextWatchPartiesVisible !== watchPartiesVisible) {
+    watchPartiesVisible = nextWatchPartiesVisible;
+    void window.jellyfin.watchParties.setVisible({ visible: nextWatchPartiesVisible }).catch(() => undefined);
+  }
 
   const desktopRoute = route === "details" ? state.returnRoute : route;
   setButtonActive(navHomeButton, desktopRoute === "home");

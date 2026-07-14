@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SyncPlayService } from "../src/main/services/syncPlay";
+import { AppError } from "../src/main/services/errors";
 import type { PlayerControllerEvent } from "../src/main/services/playerController";
 import type { PlaybackState } from "../src/shared/contracts";
 
@@ -31,6 +32,7 @@ function harness() {
   const requests: Array<{ path: string; body: unknown; method: string }> = [];
   const api = {
     getDetails: vi.fn(async () => ({ userData: { playbackPositionTicks: 25_000_000 } })),
+    getServerTime: vi.fn(async () => ({ requestReceptionTime: new Date().toISOString(), responseTransmissionTime: new Date().toISOString() })),
     syncPlayRequest: vi.fn(async (path: string, body?: unknown, method = body === undefined ? "GET" : "POST") => {
       requests.push({ path, body, method });
       if (path === "/SyncPlay/List") return [{
@@ -52,6 +54,7 @@ function harness() {
     getState: () => structuredClone(state),
     getControllerRevision: () => 1,
     getPlaybackRate: () => playbackRate,
+    setAutomaticTransitionsEnabled: vi.fn(),
     loadItem: vi.fn(async (nextItemId: string) => {
       state = playbackState({ itemId: nextItemId, source: "local", positionTicks: 0 });
       return { playbackId: state.playbackId!, resumePositionTicks: 0, durationTicks: state.durationTicks, source: "local" as const };
@@ -91,6 +94,7 @@ function harness() {
     error: null,
   };
   internals.currentPlaylistItemId = playlistItemId;
+  internals.timeSyncReady = true;
   const receive = (value: unknown) => internals.receiveMessage(Buffer.from(JSON.stringify(value)));
   return { service, internals, api, player, requests, receive };
 }
@@ -122,11 +126,14 @@ describe("SyncPlayService", () => {
       GroupId: groupId,
       Type: "PlayQueue",
       Data: {
+        Reason: "NewPlaylist",
         LastUpdate: "2026-07-13T20:01:00.000Z",
         Playlist: [{ ItemId: nextItem, PlaylistItemId: nextPlaylist }],
         PlayingItemIndex: 0,
         StartPositionTicks: 30_000_000,
         IsPlaying: false,
+        ShuffleMode: "Sorted",
+        RepeatMode: "RepeatNone",
       },
     });
     h.receive(queueEnvelope);
@@ -140,6 +147,29 @@ describe("SyncPlayService", () => {
       body: { PositionTicks: 30_000_000, PlaylistItemId: nextPlaylist },
     });
     expect(h.service.getState().joinedGroup).toMatchObject({ currentItemId: nextItem, playlistItemId: nextPlaylist });
+  });
+
+  it("rejects queue payloads containing unpinned media locations", async () => {
+    const h = harness();
+    h.receive(envelope("89898989898949898989898989898989", "SyncPlayGroupUpdate", {
+      GroupId: groupId,
+      Type: "PlayQueue",
+      Data: {
+        Reason: "NewPlaylist",
+        LastUpdate: "2026-07-13T20:01:00.000Z",
+        Playlist: [{ ItemId: itemId, PlaylistItemId: playlistItemId }],
+        PlayingItemIndex: 0,
+        StartPositionTicks: 0,
+        IsPlaying: true,
+        ShuffleMode: "Sorted",
+        RepeatMode: "RepeatNone",
+        MediaUrl: "https://untrusted.example/video.mkv",
+      },
+    }));
+    await h.internals.queueTask;
+
+    expect(h.player.loadItem).not.toHaveBeenCalled();
+    expect(h.requests).toHaveLength(0);
   });
 
   it("cancels a scheduled command when the client leaves that membership", async () => {
@@ -221,5 +251,108 @@ describe("SyncPlayService", () => {
     await h.internals.correctDrift();
     expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1, expect.objectContaining({ origin: "remote-sync" }));
     expect(h.player.seek).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the lowest-delay NTP sample and reports half-round-trip ping", async () => {
+    const h = harness();
+    const dateNow = vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_020);
+    h.api.getServerTime.mockResolvedValueOnce({
+      requestReceptionTime: new Date(1_105).toISOString(),
+      responseTransmissionTime: new Date(1_105).toISOString(),
+    });
+    await h.internals.synchronizeTime(1);
+
+    expect(h.internals.serverTimeOffsetMs).toBe(95);
+    expect(h.internals.timeSyncReady).toBe(true);
+    expect(h.internals.latencyMs).toBe(10);
+    expect(h.requests.at(-1)).toEqual({ path: "/SyncPlay/Ping", body: { Ping: 10 }, method: "POST" });
+    dateNow.mockRestore();
+  });
+
+  it("does not rejoin a remembered group that disappeared while disconnected", async () => {
+    const h = harness();
+    h.internals.activationRevision = 7;
+    h.internals.rememberedGroupId = groupId;
+    h.internals.reconciling = true;
+    h.internals.openSocket = vi.fn(async () => undefined);
+    h.internals.synchronizeTime = vi.fn(async () => { h.internals.timeSyncReady = true; });
+    h.internals.startPeriodicTasks = vi.fn();
+    h.api.syncPlayRequest.mockResolvedValueOnce([]);
+
+    await h.internals.reconnect(7);
+
+    expect(h.service.getState()).toMatchObject({
+      availability: "available",
+      connection: "connected",
+      joinedGroup: null,
+      error: { code: "SYNCPLAY_GROUP_ENDED" },
+    });
+    expect(h.internals.rememberedGroupId).toBeNull();
+    expect(h.api.syncPlayRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes one exact queue transition only from the deterministic participant", async () => {
+    const h = harness();
+    const nextItem = "eeeeeeeeeeee4eee8eeeeeeeeeeeeeee";
+    h.internals.currentUserName = "Adam";
+    h.internals.updateTransitionAuthority();
+    expect(h.player.setAutomaticTransitionsEnabled).toHaveBeenLastCalledWith(true);
+    await h.player.loadItem(nextItem, "start-over");
+    const transition = {
+      action: "item-transition" as const,
+      origin: "system" as const,
+      commandRevision: null,
+      commandId: null,
+      controllerRevision: 3,
+      monotonicTimestampMs: performance.now(),
+      state: h.player.getState(),
+    };
+    await h.internals.handlePlayerEvent(transition);
+    await h.internals.handlePlayerEvent(transition);
+    expect(h.requests.filter((request) => request.path === "/SyncPlay/SetNewQueue")).toEqual([{
+      path: "/SyncPlay/SetNewQueue",
+      body: { PlayingQueue: [nextItem], PlayingItemPosition: 0, StartPositionTicks: 0 },
+      method: "POST",
+    }]);
+
+    h.internals.currentUserName = "Kayla";
+    h.internals.updateTransitionAuthority();
+    expect(h.player.setAutomaticTransitionsEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports buffering and readiness while surfacing a local player error safely", async () => {
+    const h = harness();
+    const base = {
+      origin: "system" as const,
+      commandRevision: null,
+      commandId: null,
+      controllerRevision: 4,
+      monotonicTimestampMs: performance.now(),
+    };
+    await h.internals.handlePlayerEvent({ ...base, action: "buffering", state: playbackState({ buffering: true, phase: "buffering" }) });
+    await h.internals.handlePlayerEvent({ ...base, action: "buffering", state: playbackState({ buffering: false, phase: "playing" }) });
+    await h.internals.handlePlayerEvent({ ...base, action: "error", state: playbackState({ phase: "error", error: "Decoder unavailable" }) });
+
+    expect(h.requests.map((request) => request.path)).toEqual(["/SyncPlay/Buffering", "/SyncPlay/Ready", "/SyncPlay/Buffering"]);
+    expect(h.service.getState().error).toEqual({ code: "SYNCPLAY_PLAYBACK_FAILED", message: "Decoder unavailable" });
+  });
+
+  it("clears a server-deleted group and stops background work on session expiry", async () => {
+    const h = harness();
+    h.api.syncPlayRequest.mockResolvedValueOnce([]);
+    await h.service.list();
+    expect(h.service.getState()).toMatchObject({ joinedGroup: null, error: { code: "SYNCPLAY_GROUP_ENDED" } });
+    h.internals.handleBackgroundFailure(new AppError("SESSION_EXPIRED", "Expired", 401));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.service.getState()).toMatchObject({ availability: "signed-out", connection: "disconnected", joinedGroup: null });
+    expect(h.player.setAutomaticTransitionsEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("polls group discovery only while the watch-party view is visible", async () => {
+    const h = harness();
+    await h.service.setViewVisible(true);
+    expect(h.internals.refreshTimer).not.toBeNull();
+    await h.service.setViewVisible(false);
+    expect(h.internals.refreshTimer).toBeNull();
   });
 });

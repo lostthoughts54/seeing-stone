@@ -23,6 +23,7 @@ import {
   watchedStateSchema,
   watchPartyCreateSchema,
   watchPartyGroupSchema,
+  watchPartyVisibilitySchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
 import type { DownloadManager } from "./services/downloadManager";
@@ -196,4 +197,5 @@ export function registerIpcHandlers(
   register(IPC.watchPartiesCreate, (input) => requireSyncPlay().create(watchPartyCreateSchema.strict().parse(input).name));
   register(IPC.watchPartiesJoin, (input) => requireSyncPlay().join(watchPartyGroupSchema.strict().parse(input).groupId));
   register(IPC.watchPartiesLeave, () => requireSyncPlay().leave());
+  register(IPC.watchPartiesSetVisible, (input) => requireSyncPlay().setViewVisible(watchPartyVisibilitySchema.strict().parse(input).visible));
 }

@@ -6,6 +6,7 @@ describe("Windows release packaging boundary", () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
+      dependencies: Record<string, string>;
     };
     const config = await readFile("electron-builder.yml", "utf8");
 
@@ -15,6 +16,7 @@ describe("Windows release packaging boundary", () => {
     expect(packageJson.scripts["package:windows"]).toContain("electron-builder --win nsis --x64");
     expect(packageJson.devDependencies["electron-builder"]).toBe("26.15.3");
     expect(packageJson.devDependencies["@electron/fuses"]).toBe("2.1.2");
+    expect(packageJson.dependencies.ws).toBe("8.18.3");
 
     expect(config).toContain("appId: com.localfirst.jellyfin");
     expect(config).toContain("asar: true");

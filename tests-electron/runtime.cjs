@@ -519,6 +519,7 @@ async function runElectronChild() {
         watchPartyState = { ...watchPartyState, joinedGroup: null };
         return structuredClone(watchPartyState);
       },
+      async setViewVisible() { return structuredClone(watchPartyState); },
     };
     registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization, syncPlay);
     let rendererExit = null;
@@ -629,7 +630,7 @@ async function runElectronChild() {
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "delete", "list", "pause", "resume", "retry", "setKeep", "start", "subscribe"],
         playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
-        watchParties: ["create", "getState", "join", "leave", "list", "subscribe"],
+        watchParties: ["create", "getState", "join", "leave", "list", "setVisible", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);

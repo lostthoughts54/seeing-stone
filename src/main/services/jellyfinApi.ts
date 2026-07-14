@@ -141,6 +141,10 @@ export interface AuthenticatedSocketContext extends AuthenticatedContext {
   sessionRevision: number;
   signal: AbortSignal;
 }
+export interface ServerTimeResponse {
+  requestReceptionTime: string;
+  responseTransmissionTime: string;
+}
 export type SyncPlayEndpoint =
   | "/SyncPlay/List"
   | "/SyncPlay/New"
@@ -314,6 +318,17 @@ export class JellyfinApi {
       method,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+  }
+
+  /** Authenticated NTP-style time sample used only by the main-process SyncPlay coordinator. */
+  async getServerTime(): Promise<ServerTimeResponse> {
+    const value = asRecord(await this.request("/GetUtcTime"));
+    const requestReceptionTime = String(value.RequestReceptionTime || "");
+    const responseTransmissionTime = String(value.ResponseTransmissionTime || "");
+    if (!Number.isFinite(Date.parse(requestReceptionTime)) || !Number.isFinite(Date.parse(responseTransmissionTime))) {
+      throw new AppError("SYNCPLAY_TIME_INVALID", "The Jellyfin server returned an invalid time sample.", 502);
+    }
+    return { requestReceptionTime, responseTransmissionTime };
   }
 
   async logout(): Promise<SafeSession> {

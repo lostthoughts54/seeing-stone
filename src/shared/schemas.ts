@@ -65,3 +65,5 @@ export const watchPartyCreateSchema = z.object({
 export const watchPartyGroupSchema = z.object({
   groupId: z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
 });
+
+export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });

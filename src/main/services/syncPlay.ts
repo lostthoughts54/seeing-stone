@@ -47,12 +47,26 @@ const groupUpdateSchema = z.object({
 }).strict();
 const queueItemSchema = z.object({ ItemId: guid, PlaylistItemId: guid }).strict();
 const playQueueSchema = z.object({
+  Reason: z.enum([
+    "NewPlaylist", "SetCurrentItem", "RemoveItems", "MoveItem", "Queue",
+    "QueueNext", "NextItem", "PreviousItem", "RepeatMode", "ShuffleMode",
+  ]),
   LastUpdate: z.string().datetime(),
   Playlist: z.array(queueItemSchema).min(1).max(1000),
   PlayingItemIndex: z.number().int().min(0),
   StartPositionTicks: z.number().int().min(0),
   IsPlaying: z.boolean(),
-}).passthrough();
+  ShuffleMode: z.enum(["Sorted", "Shuffle"]),
+  RepeatMode: z.enum(["RepeatOne", "RepeatAll", "RepeatNone"]),
+}).strict();
+const stateUpdateSchema = z.object({
+  State: groupState,
+  Reason: z.enum([
+    "Play", "SetPlaylistItem", "RemoveFromPlaylist", "MovePlaylistItem", "Queue",
+    "Unpause", "Pause", "Stop", "Seek", "Buffer", "Ready", "NextItem",
+    "PreviousItem", "SetRepeatMode", "SetShuffleMode", "Ping", "IgnoreWait",
+  ]),
+}).strict();
 const commandSchema = z.object({
   GroupId: guid,
   PlaylistItemId: guid,
@@ -79,6 +93,7 @@ interface SyncAnchor {
   playing: boolean;
   monotonicTimestampMs: number;
 }
+interface TimeMeasurement { offsetMs: number; delayMs: number }
 
 const TICKS_PER_SECOND = 10_000_000;
 const DRIFT_TOLERANCE_TICKS = 7_500_000;
@@ -119,6 +134,11 @@ export class SyncPlayService {
   private membershipRevision = 0;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private driftTimer: ReturnType<typeof setInterval> | null = null;
+  private timeSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private rememberedGroupId: string | null = null;
+  private reconciling = false;
   private messageHistory: MessageEntry[] = [];
   private appliedMessageIds = new Set<string>();
   private currentPlaylistItemId: string | null = null;
@@ -126,6 +146,14 @@ export class SyncPlayService {
   private queueTask: Promise<void> = Promise.resolve();
   private syncAnchor: SyncAnchor | null = null;
   private driftCorrectionInFlight = false;
+  private timeMeasurements: TimeMeasurement[] = [];
+  private serverTimeOffsetMs = 0;
+  private latencyMs = 0;
+  private timeSyncReady = false;
+  private currentUserName: string | null = null;
+  private transitionItemInFlight: string | null = null;
+  private lastPublishedTransitionItemId: string | null = null;
+  private viewVisible = false;
 
   constructor(
     private readonly api: JellyfinApi,
@@ -164,14 +192,19 @@ export class SyncPlayService {
       });
       return this.getState();
     }
+    this.currentUserName = context.userName;
     this.setState({ ...emptyState(), availability: "connecting", connection: "connecting" });
+    this.reconciling = true;
     try {
       await this.openSocket(revision);
       if (revision !== this.activationRevision) throw new AppError("SESSION_CHANGED", "The Jellyfin session changed.");
-      this.playerUnsubscribe = this.player.onEvent((event) => { void this.handlePlayerEvent(event); });
+      await this.synchronizeTime(3);
+      this.playerUnsubscribe = this.player.onEvent((event) => { void this.handlePlayerEvent(event).catch((error) => this.handleBackgroundFailure(error)); });
       await this.refreshGroups();
-      this.refreshTimer = setInterval(() => { void this.refreshGroups().catch(() => undefined); }, this.refreshIntervalMs);
-      this.driftTimer = setInterval(() => { void this.correctDrift().catch(() => undefined); }, 1000);
+      this.reconciling = false;
+      this.reconnectAttempt = 0;
+      this.startPeriodicTasks();
+      this.setState({ ...this.state, availability: "available", connection: "connected", error: null });
       context.signal.addEventListener("abort", () => { if (revision === this.activationRevision) void this.deactivate(false); }, { once: true });
     } catch (error) {
       this.closeTransport();
@@ -184,6 +217,7 @@ export class SyncPlayService {
           ? { code: "SYNCPLAY_ACCESS_DENIED", message: "Your Jellyfin account is not allowed to use SyncPlay watch parties." }
           : publicError(error),
       });
+      if (!denied) this.scheduleReconnect(revision);
     }
     return this.getState();
   }
@@ -195,16 +229,41 @@ export class SyncPlayService {
     }
     this.closeTransport();
     this.currentPlaylistItemId = null;
+    this.rememberedGroupId = null;
+    this.reconciling = false;
+    this.currentUserName = null;
+    this.transitionItemInFlight = null;
+    this.lastPublishedTransitionItemId = null;
+    this.viewVisible = false;
     this.syncAnchor = null;
+    this.timeMeasurements = [];
+    this.serverTimeOffsetMs = 0;
+    this.latencyMs = 0;
+    this.timeSyncReady = false;
     this.membershipRevision += 1;
     this.messageHistory = [];
     this.appliedMessageIds.clear();
     await this.restoreNormalRate().catch(() => undefined);
+    this.player.setAutomaticTransitionsEnabled(true);
     this.setState(emptyState());
   }
 
   async list(): Promise<WatchPartyViewState> {
     await this.refreshGroups();
+    return this.getState();
+  }
+
+  async setViewVisible(visible: boolean): Promise<WatchPartyViewState> {
+    this.viewVisible = visible;
+    if (!visible) {
+      if (this.refreshTimer) clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+      return this.getState();
+    }
+    if (this.state.connection === "connected" && !this.reconciling) {
+      await this.refreshGroups();
+      this.startRefreshTimer();
+    }
     return this.getState();
   }
 
@@ -230,6 +289,7 @@ export class SyncPlayService {
 
   async leave(): Promise<WatchPartyViewState> {
     if (!this.state.joinedGroup) return this.getState();
+    this.rememberedGroupId = null;
     const from = this.messageHistory.length;
     await this.api.syncPlayRequest("/SyncPlay/Leave", {}, "POST");
     await this.waitForGroupUpdate("GroupLeft", from).catch(() => undefined);
@@ -295,7 +355,12 @@ export class SyncPlayService {
     socket.on("close", () => {
       if (revision !== this.activationRevision || socket !== this.socket) return;
       this.socket = null;
-      this.setState({ ...this.state, connection: "disconnected", availability: "offline", error: { code: "SYNCPLAY_DISCONNECTED", message: "The watch-party connection was interrupted." } });
+      this.stopPeriodicTasks();
+      this.reconciling = true;
+      this.timeSyncReady = false;
+      this.updateTransitionAuthority();
+      this.setState({ ...this.state, connection: "disconnected", availability: "offline", error: { code: "SYNCPLAY_RECONNECTING", message: "The watch-party connection was interrupted. Reconnecting..." } });
+      this.scheduleReconnect(revision);
     });
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new AppError("SYNCPLAY_CONNECT_TIMEOUT", "The watch-party connection timed out.")), 10000);
@@ -306,7 +371,6 @@ export class SyncPlayService {
       socket.close();
       throw new AppError("SESSION_CHANGED", "The Jellyfin session changed.");
     }
-    this.setState({ ...this.state, availability: "available", connection: "connected", error: null });
   }
 
   private receiveMessage(raw: unknown): void {
@@ -330,7 +394,7 @@ export class SyncPlayService {
     const command = commandSchema.safeParse(envelope.data.Data);
     if (!command.success) return;
     this.rememberMessage(envelope.data.MessageId);
-    void this.handleCommand(envelope.data.MessageId, command.data);
+    void this.handleCommand(envelope.data.MessageId, command.data).catch((error) => this.handleBackgroundFailure(error));
   }
 
   private handleGroupUpdate(update: GroupUpdate): void {
@@ -342,7 +406,13 @@ export class SyncPlayService {
     if (joined && update.GroupId !== joined.groupId) return;
     if (update.Type === "GroupLeft" || update.Type === "NotInGroup" || update.Type === "GroupDoesNotExist") {
       this.clearJoinedGroup();
-      void this.refreshGroups().catch(() => undefined);
+      if (update.Type === "GroupDoesNotExist") {
+        void this.refreshGroups().then(() => {
+          if (!this.state.joinedGroup) this.setState({ ...this.state, error: { code: "SYNCPLAY_GROUP_ENDED", message: "That watch party no longer exists." } });
+        }).catch(() => undefined);
+      } else {
+        void this.refreshGroups().catch(() => undefined);
+      }
       return;
     }
     if (update.Type === "LibraryAccessDenied") {
@@ -356,9 +426,9 @@ export class SyncPlayService {
     } else if (update.Type === "UserLeft" && typeof update.Data === "string") {
       const participants = joined.participants.filter((name) => name !== update.Data);
       this.setJoined({ ...joined, participants, participantCount: participants.length });
-    } else if (update.Type === "StateUpdate" && update.Data && typeof update.Data === "object") {
-      const value = update.Data as Record<string, unknown>;
-      if (groupState.safeParse(value.State).success) this.setJoined({ ...joined, playbackState: value.State as WatchPartyPlaybackState });
+    } else if (update.Type === "StateUpdate") {
+      const value = stateUpdateSchema.safeParse(update.Data);
+      if (value.success) this.setJoined({ ...joined, playbackState: value.data.State as WatchPartyPlaybackState });
     } else if (update.Type === "PlayQueue") {
       const queue = playQueueSchema.safeParse(update.Data);
       if (!queue.success || queue.data.PlayingItemIndex >= queue.data.Playlist.length) return;
@@ -375,6 +445,7 @@ export class SyncPlayService {
     if (!joined || membershipRevision !== this.membershipRevision) return;
     const selected = queue.Playlist[queue.PlayingItemIndex];
     this.currentPlaylistItemId = selected.PlaylistItemId;
+    if (this.lastPublishedTransitionItemId !== selected.ItemId) this.lastPublishedTransitionItemId = null;
     this.setJoined({ ...joined, currentItemId: selected.ItemId, playlistItemId: selected.PlaylistItemId });
     this.syncAnchor = {
       membershipRevision,
@@ -413,12 +484,15 @@ export class SyncPlayService {
   }
 
   private async handleCommand(messageId: string, command: Command): Promise<void> {
+    if (this.reconciling) return;
     const joined = this.state.joinedGroup;
     if (!joined || command.GroupId !== joined.groupId) return;
     if (command.Command !== "Stop" && (!this.currentPlaylistItemId || command.PlaylistItemId !== this.currentPlaylistItemId)) return;
     if (Date.parse(command.EmittedAt) < Date.parse(joined.lastUpdatedAt) - 1000) return;
     const membershipRevision = this.membershipRevision;
-    const delay = Math.max(0, Math.min(2000, Date.parse(command.When) - Date.now()));
+    if (!this.timeSyncReady) return;
+    const localCommandTime = Date.parse(command.When) - this.serverTimeOffsetMs;
+    const delay = Math.max(0, Math.min(2000, localCommandTime - Date.now()));
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     if (!this.state.joinedGroup || this.state.joinedGroup.groupId !== command.GroupId || membershipRevision !== this.membershipRevision) return;
     if (command.Command !== "Stop" && command.PlaylistItemId !== this.currentPlaylistItemId) return;
@@ -434,7 +508,8 @@ export class SyncPlayService {
       this.setSyncAnchor(positionTicks, false);
     } else if (command.Command === "Unpause") {
       const basePosition = command.PositionTicks ?? state.positionTicks;
-      const elapsedTicks = Math.max(0, Math.min(5 * TICKS_PER_SECOND, (Date.now() - Date.parse(command.When)) * 10_000));
+      const serverNow = Date.now() + this.serverTimeOffsetMs;
+      const elapsedTicks = Math.max(0, Math.min(5 * TICKS_PER_SECOND, (serverNow - Date.parse(command.When)) * 10_000));
       const targetPosition = basePosition + elapsedTicks;
       if (Math.abs(state.positionTicks - targetPosition) >= DRIFT_SEEK_TICKS) {
         await this.player.seek(state.playbackId, targetPosition, context);
@@ -454,7 +529,18 @@ export class SyncPlayService {
   private async handlePlayerEvent(event: PlayerControllerEvent): Promise<void> {
     if (!this.state.joinedGroup || !this.currentPlaylistItemId) return;
     if (event.action === "buffering") {
+      if (event.state.buffering) await this.restoreNormalRate().catch(() => undefined);
       await this.sendBuffering(event.state.buffering).catch(() => undefined);
+      return;
+    }
+    if (event.action === "item-transition" && event.origin === "system") {
+      await this.publishAutomaticTransition(event);
+      return;
+    }
+    if (event.action === "error") {
+      await this.restoreNormalRate().catch(() => undefined);
+      this.setState({ ...this.state, error: { code: "SYNCPLAY_PLAYBACK_FAILED", message: event.state.error || "This item could not be played on this computer." } });
+      await this.sendBuffering(true).catch(() => undefined);
       return;
     }
     if (event.origin !== "local-user") return;
@@ -468,7 +554,7 @@ export class SyncPlayService {
     const state = this.player.getState();
     if (!this.currentPlaylistItemId) return;
     await this.api.syncPlayRequest("/SyncPlay/Ready", {
-      When: new Date().toISOString(),
+      When: this.serverNowIso(),
       PositionTicks: state.positionTicks,
       IsPlaying: isPlaying,
       PlaylistItemId: this.currentPlaylistItemId,
@@ -479,7 +565,7 @@ export class SyncPlayService {
     const state = this.player.getState();
     if (!this.currentPlaylistItemId) return;
     await this.api.syncPlayRequest(buffering ? "/SyncPlay/Buffering" : "/SyncPlay/Ready", {
-      When: new Date().toISOString(),
+      When: this.serverNowIso(),
       PositionTicks: state.positionTicks,
       IsPlaying: !state.paused,
       PlaylistItemId: this.currentPlaylistItemId,
@@ -500,6 +586,11 @@ export class SyncPlayService {
     const groups = parsed.data.map(safeGroup);
     const joined = this.state.joinedGroup;
     const matching = joined ? groups.find((group) => group.groupId === joined.groupId) : null;
+    if (joined && !matching && !this.reconciling) {
+      this.clearJoinedGroup();
+      this.setState({ ...this.state, groups, error: { code: "SYNCPLAY_GROUP_ENDED", message: "The watch party ended or was removed from the server." } });
+      return;
+    }
     this.setState({
       ...this.state,
       availability: "available",
@@ -513,21 +604,27 @@ export class SyncPlayService {
     const parsed = groupInfoSchema.safeParse(update.Data);
     if (!parsed.success || parsed.data.GroupId !== update.GroupId) return;
     const group = safeGroup(parsed.data);
+    this.rememberedGroupId = group.groupId;
     if (this.state.joinedGroup?.groupId !== group.groupId) this.membershipRevision += 1;
     this.currentPlaylistItemId = null;
+    this.lastPublishedTransitionItemId = null;
     this.syncAnchor = null;
     this.setJoined({ ...group, currentItemId: null, playlistItemId: null });
+    void this.reportPing().catch(() => undefined);
   }
 
   private setJoined(group: JoinedWatchParty): void {
     this.setState({ ...this.state, joinedGroup: group, error: null });
+    this.updateTransitionAuthority();
   }
 
   private clearJoinedGroup(): void {
     if (this.state.joinedGroup || this.currentPlaylistItemId) this.membershipRevision += 1;
     this.currentPlaylistItemId = null;
+    this.rememberedGroupId = null;
     this.syncAnchor = null;
     this.setState({ ...this.state, joinedGroup: null });
+    this.player.setAutomaticTransitionsEnabled(true);
     void this.restoreNormalRate().catch(() => undefined);
   }
 
@@ -583,10 +680,9 @@ export class SyncPlayService {
   }
 
   private closeTransport(): void {
-    if (this.refreshTimer) clearInterval(this.refreshTimer);
-    this.refreshTimer = null;
-    if (this.driftTimer) clearInterval(this.driftTimer);
-    this.driftTimer = null;
+    this.stopPeriodicTasks();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.playerUnsubscribe?.();
     this.playerUnsubscribe = null;
     const socket = this.socket;
@@ -594,15 +690,163 @@ export class SyncPlayService {
     try { socket?.close(); } catch { socket?.terminate(); }
   }
 
+  private startPeriodicTasks(): void {
+    this.stopPeriodicTasks();
+    this.startRefreshTimer();
+    this.driftTimer = setInterval(() => { void this.correctDrift().catch((error) => this.handleBackgroundFailure(error)); }, 1000);
+    this.timeSyncTimer = setInterval(() => { void this.synchronizeTime(1).catch((error) => this.handleBackgroundFailure(error)); }, 60000);
+  }
+
+  private startRefreshTimer(): void {
+    if (!this.viewVisible || this.refreshTimer) return;
+    this.refreshTimer = setInterval(() => { void this.refreshGroups().catch((error) => this.handleBackgroundFailure(error)); }, this.refreshIntervalMs);
+  }
+
+  private stopPeriodicTasks(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
+    if (this.driftTimer) clearInterval(this.driftTimer);
+    this.driftTimer = null;
+    if (this.timeSyncTimer) clearInterval(this.timeSyncTimer);
+    this.timeSyncTimer = null;
+  }
+
+  private scheduleReconnect(revision: number): void {
+    if (revision !== this.activationRevision || this.reconnectTimer) return;
+    if (this.reconnectAttempt >= 6) {
+      this.setState({ ...this.state, availability: "offline", connection: "disconnected", error: { code: "SYNCPLAY_RECONNECT_FAILED", message: "The watch-party connection could not be restored. Sign in again or retry later." } });
+      return;
+    }
+    const delay = Math.min(15000, 1000 * (2 ** this.reconnectAttempt));
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.reconnect(revision);
+    }, delay);
+  }
+
+  private async reconnect(revision: number): Promise<void> {
+    if (revision !== this.activationRevision) return;
+    this.setState({ ...this.state, availability: "connecting", connection: "connecting", error: null });
+    try {
+      let reconciliationError: WatchPartyViewState["error"] = null;
+      await this.openSocket(revision);
+      this.timeMeasurements = [];
+      this.timeSyncReady = false;
+      await this.synchronizeTime(3);
+      if (!this.playerUnsubscribe) this.playerUnsubscribe = this.player.onEvent((event) => { void this.handlePlayerEvent(event).catch((error) => this.handleBackgroundFailure(error)); });
+      await this.refreshGroups();
+      const rememberedGroupId = this.rememberedGroupId;
+      if (rememberedGroupId) {
+        if (this.state.groups.some((group) => group.groupId === rememberedGroupId)) {
+          const from = this.messageHistory.length;
+          await this.api.syncPlayRequest("/SyncPlay/Join", { GroupId: rememberedGroupId }, "POST");
+          const update = await this.waitForGroupUpdate("GroupJoined", from, rememberedGroupId);
+          this.applyJoinedGroup(update);
+        } else {
+          this.clearJoinedGroup();
+          reconciliationError = { code: "SYNCPLAY_GROUP_ENDED", message: "The watch party ended while this computer was disconnected." };
+        }
+      }
+      if (revision !== this.activationRevision) return;
+      this.reconciling = false;
+      this.reconnectAttempt = 0;
+      this.startPeriodicTasks();
+      this.setState({ ...this.state, availability: "available", connection: "connected", error: reconciliationError });
+      this.updateTransitionAuthority();
+    } catch (error) {
+      const socket = this.socket;
+      this.socket = null;
+      try { socket?.close(); } catch { socket?.terminate(); }
+      this.setState({ ...this.state, availability: "offline", connection: "disconnected", error: publicError(error) });
+      this.scheduleReconnect(revision);
+    }
+  }
+
   private rememberMessage(messageId: string): void {
     this.appliedMessageIds.add(messageId);
     if (this.appliedMessageIds.size > 2048) this.appliedMessageIds.delete(this.appliedMessageIds.values().next().value!);
   }
 
+  private async synchronizeTime(samples: number): Promise<void> {
+    for (let index = 0; index < samples; index += 1) {
+      const requestSent = Date.now();
+      const value = await this.api.getServerTime();
+      const responseReceived = Date.now();
+      const requestReceived = Date.parse(value.requestReceptionTime);
+      const responseSent = Date.parse(value.responseTransmissionTime);
+      const delayMs = responseReceived - requestSent - (responseSent - requestReceived);
+      const offsetMs = ((requestReceived - requestSent) + (responseSent - responseReceived)) / 2;
+      if (!Number.isFinite(delayMs) || !Number.isFinite(offsetMs) || delayMs < 0 || delayMs > 30000) continue;
+      this.timeMeasurements.push({ delayMs, offsetMs });
+      if (this.timeMeasurements.length > 8) this.timeMeasurements.shift();
+    }
+    const best = [...this.timeMeasurements].sort((left, right) => left.delayMs - right.delayMs)[0];
+    if (!best) throw new AppError("SYNCPLAY_TIME_UNAVAILABLE", "Jellyfin time synchronization failed.", 503);
+    this.serverTimeOffsetMs = best.offsetMs;
+    this.latencyMs = Math.max(0, best.delayMs / 2);
+    this.timeSyncReady = true;
+    if (this.state.joinedGroup) await this.reportPing();
+  }
+
+  private reportPing(): Promise<unknown> {
+    return this.api.syncPlayRequest("/SyncPlay/Ping", { Ping: this.latencyMs }, "POST");
+  }
+
+  private handleBackgroundFailure(error: unknown): void {
+    if (error instanceof AppError && (error.code === "SESSION_EXPIRED" || error.code === "NOT_AUTHENTICATED" || error.code === "SESSION_CHANGED")) {
+      void this.deactivate(false);
+      return;
+    }
+    if (this.state.connection === "connected" && this.state.joinedGroup) {
+      this.setState({ ...this.state, error: publicError(error) });
+    }
+  }
+
+  private serverNowIso(): string {
+    return new Date(Date.now() + this.serverTimeOffsetMs).toISOString();
+  }
+
+  private updateTransitionAuthority(): void {
+    const joined = this.state.joinedGroup;
+    const leader = joined ? [...joined.participants].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))[0] : null;
+    const enabled = Boolean(
+      joined
+      && this.currentUserName
+      && leader
+      && leader.localeCompare(this.currentUserName, undefined, { sensitivity: "base" }) === 0
+      && this.state.connection === "connected"
+      && !this.reconciling,
+    );
+    this.player.setAutomaticTransitionsEnabled(enabled || !joined);
+  }
+
+  private async publishAutomaticTransition(event: PlayerControllerEvent): Promise<void> {
+    const itemId = event.state.itemId;
+    const joined = this.state.joinedGroup;
+    if (!itemId || !joined || itemId === joined.currentItemId || this.transitionItemInFlight === itemId || this.lastPublishedTransitionItemId === itemId) return;
+    const leader = [...joined.participants].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))[0];
+    if (!this.currentUserName || !leader || leader.localeCompare(this.currentUserName, undefined, { sensitivity: "base" }) !== 0) return;
+    const membershipRevision = this.membershipRevision;
+    this.transitionItemInFlight = itemId;
+    try {
+      await this.waitForPlayerItemReady(itemId, 30000);
+      if (membershipRevision !== this.membershipRevision || this.reconciling || this.state.connection !== "connected") return;
+      await this.api.syncPlayRequest("/SyncPlay/SetNewQueue", {
+        PlayingQueue: [itemId],
+        PlayingItemPosition: 0,
+        StartPositionTicks: 0,
+      }, "POST");
+      this.lastPublishedTransitionItemId = itemId;
+    } finally {
+      if (this.transitionItemInFlight === itemId) this.transitionItemInFlight = null;
+    }
+  }
+
   private requireAvailable(): void {
     if (this.state.availability === "denied") throw new AppError("SYNCPLAY_ACCESS_DENIED", "Your Jellyfin account is not allowed to use watch parties.", 403);
     if (this.state.availability === "unsupported") throw new AppError("SYNCPLAY_VERSION_UNSUPPORTED", "This Jellyfin server version has not been verified for watch parties.", 409);
-    if (this.state.connection !== "connected") throw new AppError("SYNCPLAY_DISCONNECTED", "The watch-party connection is not available.", 503);
+    if (this.reconciling || this.state.connection !== "connected") throw new AppError("SYNCPLAY_DISCONNECTED", "The watch-party connection is not available.", 503);
   }
 
   private requireJoined(): JoinedWatchParty {
@@ -641,5 +885,16 @@ export class SyncPlayService {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new AppError("SYNCPLAY_PLAYBACK_TIMEOUT", "The shared item did not start in time.", 504);
+  }
+
+  private async waitForPlayerItemReady(itemId: string, timeoutMs: number): Promise<PlaybackState> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = this.player.getState();
+      if (state.itemId === itemId && state.playbackId && ["playing", "paused", "buffering"].includes(state.phase)) return state;
+      if (state.itemId === itemId && state.phase === "error") throw new AppError("SYNCPLAY_PLAYBACK_FAILED", state.error || "The next shared episode could not be played.");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new AppError("SYNCPLAY_PLAYBACK_TIMEOUT", "The next shared episode did not start in time.", 504);
   }
 }

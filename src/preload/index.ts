@@ -33,6 +33,7 @@ import {
   type WatchedStateResult,
   type WatchPartyCreateInput,
   type WatchPartyGroupInput,
+  type WatchPartyVisibilityInput,
   type WatchPartyViewState,
 } from "../shared/contracts";
 
@@ -117,6 +118,7 @@ const bridge: JellyfinBridge = {
     create: (input: WatchPartyCreateInput) => invoke<WatchPartyViewState>(IPC.watchPartiesCreate, input),
     join: (input: WatchPartyGroupInput) => invoke<WatchPartyViewState>(IPC.watchPartiesJoin, input),
     leave: () => invoke<WatchPartyViewState>(IPC.watchPartiesLeave),
+    setVisible: (input: WatchPartyVisibilityInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetVisible, input),
     subscribe: (listener: (state: WatchPartyViewState) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, state: WatchPartyViewState) => listener(state);
       ipcRenderer.on(IPC.watchPartiesChanged, receive);

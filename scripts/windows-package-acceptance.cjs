@@ -82,7 +82,7 @@ async function main() {
   await waitFor(() => !existsSync(installedExecutable), 60000, "installed executable removal");
   assert.equal(existsSync(userDataRoot), true, "Uninstall removed the isolated user-data directory.");
   assert.equal(readDeviceId(), firstIdentity, "Uninstall altered the persisted device identity.");
-  assert.equal(queryInstallations().length, 0, "The uninstall registry entry remains.");
+  await waitFor(() => queryInstallations().length === 0, 60000, "uninstall registry entry removal");
   assertNoExistingShortcuts();
 
   process.stdout.write(`${JSON.stringify({
@@ -137,6 +137,7 @@ function assertPackagedResources(applicationRoot) {
     "/package.json",
   ]) assert.equal(asarEntries.includes(expected), true, `${expected} is missing from app.asar.`);
   assert.equal(asarEntries.some((entry) => entry.startsWith("/node_modules/zod/")), true, "The Zod runtime is missing from app.asar.");
+  assert.equal(asarEntries.some((entry) => entry.startsWith("/node_modules/ws/")), true, "The SyncPlay WebSocket runtime is missing from app.asar.");
   assert.equal(asarEntries.some((entry) => entry.startsWith("/src/") || entry.startsWith("/tests/") || entry.startsWith("/tests-node/")), false, "Development source or tests were packaged.");
   assert.equal(asarEntries.some((entry) => entry.startsWith("/dist/") && entry.endsWith(".map")), false, "Application source maps were packaged.");
   assert.equal(asarEntries.some((entry) => entry === "/app.js" || entry === "/server.js"), false, "The imported prototype source was packaged loose.");

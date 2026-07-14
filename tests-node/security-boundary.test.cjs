@@ -11,7 +11,7 @@ const { redactText, sanitizeLogValue } = require("../dist/main/services/logger.j
 const { PlaybackSessionService } = require("../dist/main/services/playbackSession.js");
 const { SecureSessionStore } = require("../dist/main/services/secureSession.js");
 const { connectionScore } = require("../dist/main/services/serverDiscovery.js");
-const { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema, watchPartyCreateSchema, watchPartyGroupSchema } = require("../dist/shared/schemas.js");
+const { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema, watchPartyCreateSchema, watchPartyGroupSchema, watchPartyVisibilitySchema } = require("../dist/shared/schemas.js");
 
 const secretSession = {
   serverUrl: "http://127.0.0.1:8096",
@@ -259,6 +259,7 @@ test("IPC schemas reject extra headers, paths, commands, and arguments", () => {
   assert.throws(() => watchPartyCreateSchema.strict().parse({ name: "Movie night", headers: { Authorization: "token" } }));
   assert.throws(() => watchPartyGroupSchema.strict().parse({ groupId: "11111111111141118111111111111111", url: "ws://server/socket?api_key=token" }));
   assert.throws(() => watchPartyGroupSchema.strict().parse({ groupId: "11111111-1111-not-a-guid-111111111111" }));
+  assert.throws(() => watchPartyVisibilitySchema.strict().parse({ visible: true, url: "ws://server/socket" }));
 });
 
 test("physical LAN discovery outranks VPN and virtual adapters", () => {

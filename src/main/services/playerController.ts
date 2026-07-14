@@ -41,6 +41,8 @@ export interface PlayerController {
   getState(): PlaybackState;
   getControllerRevision(): number;
   getPlaybackRate(): number;
+  /** Enables solo Next Up transitions; a group coordinator may designate one participant. */
+  setAutomaticTransitionsEnabled(enabled: boolean): void;
   loadItem(itemId: string, resumeMode: "resume" | "start-over", context?: PlayerCommandContext): Promise<PlaybackStartResult>;
   setPaused(playbackId: string, paused: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;
   seek(playbackId: string, positionTicks: number, context?: PlayerCommandContext): Promise<PlaybackState>;

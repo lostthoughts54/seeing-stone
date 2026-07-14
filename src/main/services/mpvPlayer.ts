@@ -82,6 +82,7 @@ export class MpvPlayerService implements PlayerController {
   private readonly completion = new PlaybackCompletionCoordinator();
   private controllerRevision = 0;
   private playbackRate = 1;
+  private automaticTransitionsEnabled = true;
   private pendingPause: { paused: boolean; expiresAt: number } | null = null;
   private pendingSeek: { positionTicks: number; expiresAt: number } | null = null;
   private pendingFullscreen: { fullscreen: boolean; expiresAt: number } | null = null;
@@ -116,6 +117,10 @@ export class MpvPlayerService implements PlayerController {
 
   getPlaybackRate(): number {
     return this.playbackRate;
+  }
+
+  setAutomaticTransitionsEnabled(enabled: boolean): void {
+    this.automaticTransitionsEnabled = enabled;
   }
 
   loadItem(
@@ -421,6 +426,11 @@ export class MpvPlayerService implements PlayerController {
       try { this.playback.stop(completedSource.playbackId); } catch { /* Already finalized. */ }
       await this.proxy.close();
       this.playbackTarget = null;
+
+      if (!this.automaticTransitionsEnabled) {
+        await this.stop(completedSource.playbackId, "ended", { origin: "system" });
+        return;
+      }
 
       if (completedSource.itemType !== "Episode" || !completedSource.seriesId) {
         await this.stop(completedSource.playbackId, "ended", { origin: "system" });

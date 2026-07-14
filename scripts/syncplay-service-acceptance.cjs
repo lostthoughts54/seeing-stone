@@ -9,7 +9,7 @@ const { spawnSync } = require("node:child_process");
 
 const CHILD_FLAG = "--syncplay-service-child";
 const PARENT_ENV = "LOCALFIRST_SYNCPLAY_SERVICE_PARENT";
-const TEST_COUNT = 7;
+const TEST_COUNT = 10;
 
 if (!process.versions.electron) runParent();
 else void runChild().catch((error) => {
@@ -129,8 +129,8 @@ async function runChild() {
 
     await test("two actual SyncPlayService clients establish authenticated sockets", async () => {
       const [primaryState, peerState] = await Promise.all([primaryService.activate(), peerService.activate()]);
-      assert.equal(primaryState.connection, "connected");
-      assert.equal(peerState.connection, "connected");
+      assert.equal(primaryState.connection, "connected", primaryState.error?.code || "PRIMARY_NOT_CONNECTED");
+      assert.equal(peerState.connection, "connected", peerState.error?.code || "PEER_NOT_CONNECTED");
     });
 
     const groupName = `LocalFirst W3 ${suffix}`;
@@ -146,10 +146,19 @@ async function runChild() {
       await waitFor(() => primaryService.getState().joinedGroup?.participantCount === 2);
     });
 
+    await test("a dropped peer socket reconnects and restores the same group membership", async () => {
+      const peerInternals = peerService;
+      peerInternals.socket.terminate();
+      await waitFor(() => peerService.getState().connection !== "connected");
+      await waitFor(() => peerService.getState().connection === "connected" && peerService.getState().joinedGroup?.groupId === groupId, 30000);
+      await waitFor(() => primaryService.getState().joinedGroup?.participantCount === 2, 30000);
+    });
+
     let selectedItem;
+    let playableMovies;
     await test("the exact item ID resolves independently to local and server playback", async () => {
-      const movies = await primaryApi.getLibraryItems("Movie", 25);
-      selectedItem = movies.find((item) => item.id);
+      playableMovies = await primaryApi.getLibraryItems("Movie", 25);
+      selectedItem = playableMovies.find((item) => item.id);
       assert.ok(selectedItem, "A playable movie is required for live SyncPlay acceptance.");
       const selected = await primaryService.selectItem(selectedItem.id, "start-over");
       assert.equal(selected.source, "local");
@@ -157,6 +166,51 @@ async function runChild() {
       assert.equal(primaryPlayer.getState().source, "local");
       assert.equal(peerPlayer.getState().source, "server");
       assert.equal(peerService.getState().joinedGroup?.currentItemId, selectedItem.id);
+    });
+
+    await test("the deterministic participant publishes one exact automatic item transition", async () => {
+      const nextItem = playableMovies.find((item) => item.id && item.id !== selectedItem.id);
+      assert.ok(nextItem, "Two playable items are required for transition acceptance.");
+      const participantNames = primaryService.getState().joinedGroup.participants;
+      const leaderName = [...participantNames].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))[0];
+      const primaryIsLeader = leaderName.localeCompare(primarySession.user.name, undefined, { sensitivity: "base" }) === 0;
+      const leaderService = primaryIsLeader ? primaryService : peerService;
+      const leaderPlayer = primaryIsLeader ? primaryPlayer : peerPlayer;
+      await leaderPlayer.loadItem(nextItem.id, "start-over");
+      await leaderService.handlePlayerEvent({
+        action: "item-transition",
+        origin: "system",
+        commandRevision: null,
+        commandId: null,
+        controllerRevision: leaderPlayer.getControllerRevision(),
+        monotonicTimestampMs: performance.now(),
+        state: leaderPlayer.getState(),
+      });
+      await waitFor(() => (
+        primaryPlayer.getState().itemId === nextItem.id
+        && peerPlayer.getState().itemId === nextItem.id
+        && primaryService.getState().joinedGroup?.currentItemId === nextItem.id
+        && peerService.getState().joinedGroup?.currentItemId === nextItem.id
+      ));
+      assert.equal(primaryService.getState().joinedGroup?.currentItemId, nextItem.id);
+      assert.equal(peerService.getState().joinedGroup?.currentItemId, nextItem.id);
+    });
+
+    await test("peer buffering enters group wait and readiness resumes convergence", async () => {
+      peerPlayer.setBuffering(true);
+      await peerService.handlePlayerEvent({
+        action: "buffering", origin: "system", commandRevision: null, commandId: null,
+        controllerRevision: peerPlayer.getControllerRevision(), monotonicTimestampMs: performance.now(), state: peerPlayer.getState(),
+      });
+      await waitFor(() => primaryService.getState().joinedGroup?.playbackState === "Waiting");
+      peerPlayer.setBuffering(false);
+      await peerService.handlePlayerEvent({
+        action: "buffering", origin: "system", commandRevision: null, commandId: null,
+        controllerRevision: peerPlayer.getControllerRevision(), monotonicTimestampMs: performance.now(), state: peerPlayer.getState(),
+      });
+      await waitFor(() => primaryService.getState().joinedGroup?.playbackState !== "Waiting");
+      assert.equal(primaryService.getState().connection, "connected");
+      assert.equal(peerService.getState().connection, "connected");
     });
 
     await test("pause initiated by the peer converges without a feedback loop", async () => {
@@ -217,7 +271,9 @@ function createPlayer(source) {
     getState: snapshot,
     getControllerRevision: () => revision,
     getPlaybackRate: () => rate,
+    setAutomaticTransitionsEnabled() {},
     count: (action) => actions.filter((value) => value === action).length,
+    setBuffering(buffering) { state = { ...state, buffering, phase: buffering ? "buffering" : (state.paused ? "paused" : "playing") }; return snapshot(); },
     async loadItem(itemId) {
       revision += 1;
       state = { ...state, playbackId: randomUUID(), itemId, phase: "playing", source, positionTicks: 0, paused: false };
@@ -271,4 +327,7 @@ function findProductionUserData(packageJson) {
 }
 
 function coded(code) { const error = new Error(code); error.code = code; return error; }
-function safeCode(error) { return String(error?.code || error?.message || "UNKNOWN").replace(/[^A-Z0-9_.-]/gi, "_").slice(0, 120); }
+function safeCode(error) {
+  const value = error?.code === "ERR_ASSERTION" ? error?.message : (error?.code || error?.message);
+  return String(value || "UNKNOWN").replace(/[^A-Z0-9_.-]/gi, "_").slice(0, 120);
+}
