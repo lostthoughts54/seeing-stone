@@ -146,6 +146,7 @@ interface RendererState {
   selectedEpisodeIds: Set<string>;
   playbackItem: MediaItem | null;
   playbackId: string | null;
+  playbackSource: "server" | "local" | null;
   playbackRequestId: number;
   downloads: DownloadSummary[];
   lastFocusElement: HTMLElement | null;
@@ -181,6 +182,7 @@ const state: RendererState = {
   selectedEpisodeIds: new Set(),
   playbackItem: null,
   playbackId: null,
+  playbackSource: null,
   playbackRequestId: 0,
   downloads: [],
   lastFocusElement: null,
@@ -501,7 +503,14 @@ function renderWatchParties(): void {
     const shared = document.createElement("p");
     shared.className = "shared-control-note";
     shared.textContent = "Shared controls: anyone can choose an item, play, pause, or seek.";
-    joinedWatchParty.append(heading, participants, shared);
+    const delivery = document.createElement("p");
+    delivery.className = "watch-party-delivery-note";
+    delivery.textContent = state.playbackSource === "local"
+      ? "This computer: Local download"
+      : state.playbackSource === "server"
+        ? "This computer: Jellyfin stream"
+        : "This computer: Waiting for shared media";
+    joinedWatchParty.append(heading, participants, shared, delivery);
   }
 
   if (!available) {
@@ -1584,7 +1593,9 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
     return;
   }
   state.playbackId = resolved.playbackId;
+  state.playbackSource = resolved.source;
   playerSourceBadge.textContent = resolved.source === "local" ? "Local" : "Jellyfin";
+  if (state.currentRoute === "watch-parties") renderWatchParties();
 }
 
 async function playDownloadedItem(download: DownloadSummary): Promise<void> {
@@ -1620,12 +1631,15 @@ async function closePlayer(): Promise<void> {
   document.body.classList.remove("is-playing");
   state.playbackItem = null;
   state.playbackId = null;
+  state.playbackSource = null;
   state.downloads = [];
   state.lastFocusElement?.focus?.();
   if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
 
 window.jellyfin.playback.subscribe((playback) => {
+  state.playbackSource = playback.source;
+  if (state.currentRoute === "watch-parties") renderWatchParties();
   if (playback.playbackId || !state.playbackId) return;
   state.playbackId = null;
   state.playbackItem = null;
@@ -1665,6 +1679,7 @@ function resetSignedInState(): void {
   state.selectedEpisodeIds.clear();
   state.playbackItem = null;
   state.playbackId = null;
+  state.playbackSource = null;
   state.lastFocusElement = null;
   state.watchParties = null;
 

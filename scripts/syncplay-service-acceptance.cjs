@@ -9,7 +9,7 @@ const { spawnSync } = require("node:child_process");
 
 const CHILD_FLAG = "--syncplay-service-child";
 const PARENT_ENV = "LOCALFIRST_SYNCPLAY_SERVICE_PARENT";
-const TEST_COUNT = 10;
+const TEST_COUNT = 11;
 
 if (!process.versions.electron) runParent();
 else void runChild().catch((error) => {
@@ -97,7 +97,7 @@ async function runChild() {
     temporaryUserId = created.Id;
     await adminJson(primaryContext, `/Users/${encodeURIComponent(temporaryUserId)}/Policy`, {
       method: "POST",
-      body: { ...created.Policy, SyncPlayAccess: "CreateAndJoinGroups" },
+      body: { ...created.Policy, SyncPlayAccess: "None" },
       expectJson: false,
     });
 
@@ -126,6 +126,20 @@ async function runChild() {
     const logger = { info() {}, warn() {}, error() {} };
     primaryService = new SyncPlayService(primaryApi, primaryPlayer, logger, 60000);
     peerService = new SyncPlayService(peerApi, peerPlayer, logger, 60000);
+
+    await test("a signed-in account without SyncPlay access fails closed", async () => {
+      const denied = await peerService.activate();
+      assert.equal(denied.availability, "denied");
+      assert.equal(denied.connection, "disconnected");
+      assert.equal(denied.error?.code, "SYNCPLAY_ACCESS_DENIED");
+      assert.equal(denied.groups.length, 0);
+      assert.equal(denied.joinedGroup, null);
+    });
+    await adminJson(primaryContext, `/Users/${encodeURIComponent(temporaryUserId)}/Policy`, {
+      method: "POST",
+      body: { ...created.Policy, SyncPlayAccess: "CreateAndJoinGroups" },
+      expectJson: false,
+    });
 
     await test("two actual SyncPlayService clients establish authenticated sockets", async () => {
       const [primaryState, peerState] = await Promise.all([primaryService.activate(), peerService.activate()]);
@@ -208,18 +222,31 @@ async function runChild() {
         action: "buffering", origin: "system", commandRevision: null, commandId: null,
         controllerRevision: peerPlayer.getControllerRevision(), monotonicTimestampMs: performance.now(), state: peerPlayer.getState(),
       });
-      await waitFor(() => primaryService.getState().joinedGroup?.playbackState !== "Waiting");
+      await waitFor(() => (
+        primaryService.getState().joinedGroup?.playbackState !== "Waiting"
+        && peerService.getState().joinedGroup?.playbackState !== "Waiting"
+      ), 30000);
       assert.equal(primaryService.getState().connection, "connected");
       assert.equal(peerService.getState().connection, "connected");
     });
 
     await test("pause initiated by the peer converges without a feedback loop", async () => {
       await peerService.requestPaused(false);
-      await waitFor(() => !primaryPlayer.getState().paused && !peerPlayer.getState().paused);
+      await waitFor(() => (
+        !primaryPlayer.getState().paused
+        && !peerPlayer.getState().paused
+        && primaryService.getState().joinedGroup?.playbackState === "Playing"
+        && peerService.getState().joinedGroup?.playbackState === "Playing"
+      ), 30000);
       const primaryPauseCount = primaryPlayer.count("pause");
       const peerPauseCount = peerPlayer.count("pause");
       await peerService.requestPaused(true);
-      await waitFor(() => primaryPlayer.getState().paused && peerPlayer.getState().paused);
+      await waitFor(() => (
+        primaryPlayer.getState().paused
+        && peerPlayer.getState().paused
+        && primaryService.getState().joinedGroup?.playbackState === "Paused"
+        && peerService.getState().joinedGroup?.playbackState === "Paused"
+      ), 30000);
       assert.equal(primaryPlayer.count("pause"), primaryPauseCount + 1);
       assert.equal(peerPlayer.count("pause"), peerPauseCount + 1);
     });

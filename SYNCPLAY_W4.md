@@ -10,6 +10,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - Buffering sends SyncPlay `Buffering`; recovery sends `Ready`. Temporary playback-rate correction is reset on buffering, player error, leave, or deactivation.
 - Logout, session expiration, device-session replacement, and server changes deactivate SyncPlay, stop periodic work, clear membership, and restore solo playback behavior.
 - Active group discovery refreshes only while the Active Watch Parties screen is visible. Timing and drift work continue only as needed while joined.
+- The joined-party card visibly reports `This computer: Local download` or `This computer: Jellyfin stream` from the existing sanitized playback state, so the physical local-versus-streamed condition can be verified without exposing a path or URL.
 - Incoming group state, queue, command, and envelope messages use exact strict schemas pinned to Jellyfin 10.11.11. Extra media URLs, paths, fields, malformed IDs, stale commands, duplicate commands, wrong-group messages, and wrong-item messages are rejected.
 
 ## Episode transitions
@@ -25,8 +26,8 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - TypeScript main, preload, and renderer typechecks passed.
 - Unit suite: 22 files and 104 tests passed.
 - Main-process security, persistence, download, offline-sync, reporting, and networking suite: 18 tests passed.
-- Electron runtime: 18 tests passed, including the real sandboxed preload bridge, watch-party UI, strict IPC, sender validation, and renderer network denial.
-- Live SyncPlay acceptance against Jellyfin 10.11.11: 10 tests passed with two actual `SyncPlayService` clients. It exercised create/discover/join, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, leave, and empty-group removal.
+- Electron runtime: 19 tests passed, including the real sandboxed preload bridge, visible per-computer delivery status, watch-party UI, strict IPC, sender validation, and renderer network denial.
+- Live SyncPlay acceptance against Jellyfin 10.11.11: 11 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover/join after access was granted, forced socket loss and membership restoration, independent local/server source selection, one exact automatic transition, buffering wait/readiness recovery, peer pause, creator seek, leave, and empty-group removal.
 - Authenticated application acceptance: 18 tests passed. It exercised real protected-session restoration, UI navigation, native mpv, a verified downloaded item using the local file, an undownloaded item falling back to Jellyfin streaming, and authoritative main-owned reporting.
 - Native mpv runtime and completion acceptance passed with mpv `v0.41.0-dev-ge5486b96d`, including movie completion, the existing 10-second Next Up flow, and cancellation.
 - Persistence runtime and media-probe acceptance passed.
@@ -36,7 +37,7 @@ Installer artifact:
 
 ```text
 D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.0-x64.exe
-SHA-256: ec2503e006c705f6b3b7aff22f023199f4c7bdbb6fe665cfe7fc1cd6c74473c8
+SHA-256: 51d93edd46033c4dab9aba9452cf9c4d47106bacfbe8243679f89fd776703a8c
 ```
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.
@@ -45,11 +46,13 @@ The installer is not Authenticode-signed. Windows may therefore show an unknown-
 
 Automated tests cannot claim the final physical two-computer conditions. The following is the final acceptance gate:
 
+Use `SYNCPLAY_PHYSICAL_ACCEPTANCE.md` as the fillable run sheet for the exact packaged build.
+
 1. Install the rebuilt package on both Windows computers.
 2. Sign in as Adam and Kayla to the same Jellyfin 10.11.11 server. Existing credentials are not embedded in the installer; each computer keeps its own session in Windows protected storage after sign-in.
 3. Download the chosen test episode through Kayla's client and confirm it appears in Downloads. Leave Adam's copy undownloaded.
 4. Open Active Watch Parties on both clients. Create a group on either computer and confirm it appears automatically on the other.
-5. Join from the second computer, choose the exact test episode, and confirm both players start. Kayla's computer should report local playback and Adam's should stream or transcode.
+5. Join from the second computer, choose the exact test episode, and confirm both players start. The joined-party card should say `This computer: Local download` on Kayla's computer and `This computer: Jellyfin stream` on Adam's.
 6. From each computer in turn, test pause, play, and a substantial seek. Confirm both converge without repeated bouncing.
 7. Temporarily interrupt one computer's network, restore it, and confirm membership and playback recover or show the documented actionable failure.
 8. Let an episode finish across a season boundary and confirm both clients transition to the same exact Next Up episode.

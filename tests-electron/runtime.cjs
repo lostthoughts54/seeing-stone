@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 18;
+const EXPECTED_TESTS = 19;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -707,6 +707,62 @@ async function runElectronChild() {
       });
       assert.equal(result.independentToast, "Left the party. Playback controls are independent again.");
       assert.equal(result.createdName, "Runtime created party");
+    });
+
+    await test("joined watch party visibly identifies this computer's local or Jellyfin delivery", async () => {
+      await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("navWatchPartiesButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector(".watch-party-card button")) break;
+          await delay(20);
+        }
+        document.querySelector(".watch-party-card button")?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (!document.getElementById("joinedWatchParty").classList.contains("is-hidden")) break;
+          await delay(20);
+        }
+      })()`);
+
+      const baseState = {
+        playbackId: "77777777-7777-4777-8777-777777777777",
+        itemId: runtimeItem.id,
+        phase: "playing",
+        positionTicks: 10_000_000,
+        durationTicks: runtimeItem.runTimeTicks,
+        paused: false,
+        buffering: false,
+        seekable: true,
+        fullscreen: false,
+        audioTracks: [],
+        subtitleTracks: [],
+        error: null,
+      };
+      mainWindow.webContents.send(IPC.playbackStateChanged, { ...baseState, source: "local" });
+      const local = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const text = document.querySelector(".watch-party-delivery-note")?.textContent;
+          if (text === "This computer: Local download") return text;
+          await delay(20);
+        }
+        return document.querySelector(".watch-party-delivery-note")?.textContent;
+      })()`);
+      assert.equal(local, "This computer: Local download");
+
+      mainWindow.webContents.send(IPC.playbackStateChanged, { ...baseState, source: "server" });
+      const server = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const text = document.querySelector(".watch-party-delivery-note")?.textContent;
+          if (text === "This computer: Jellyfin stream") return text;
+          await delay(20);
+        }
+        return document.querySelector(".watch-party-delivery-note")?.textContent;
+      })()`);
+      assert.equal(server, "This computer: Jellyfin stream");
+
+      await mainWindow.webContents.executeJavaScript(`document.querySelector("#joinedWatchParty button")?.click()`);
     });
 
     await test("movie details toggle explicit watched state through only the narrow item action", async () => {
