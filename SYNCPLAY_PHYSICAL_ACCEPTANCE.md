@@ -5,9 +5,9 @@ Use this sheet with the exact installer below. Check each item only after observ
 ## Test build
 
 ```text
-D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.2-x64.exe
-Bytes: 120490152
-SHA-256: f97203c1ac383c93338db34909b5baaa62d2ac879eede0b923cde26cf13b85d4
+D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.3-x64.exe
+Bytes: 120490443
+SHA-256: 4def44f554b6408093f956dc83f567cc7049763243a1019b6e174731ea2b6d5f
 Jellyfin server: 10.11.11 only
 ```
 

@@ -1,6 +1,6 @@
 # LocalFirst Jellyfin
 
-Current application version: `0.4.2`.
+Current application version: `0.4.3`.
 
 This repository contains the Windows Electron client built from the accepted `0.3.0` interface baseline.
 
@@ -63,7 +63,7 @@ Build the current unsigned Windows installer:
 pnpm package:windows
 ```
 
-The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.2-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
+The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.3-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
 
 Example server URLs:
 

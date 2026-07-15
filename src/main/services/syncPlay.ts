@@ -96,8 +96,10 @@ interface SyncAnchor {
 interface TimeMeasurement { offsetMs: number; delayMs: number }
 
 const TICKS_PER_SECOND = 10_000_000;
-const DRIFT_TOLERANCE_TICKS = 7_500_000;
-const DRIFT_RATE_RESET_TICKS = 3_500_000;
+const DRIFT_TOLERANCE_TICKS = 1_000_000;
+const DRIFT_RATE_RESET_TICKS = 500_000;
+const DRIFT_MEDIUM_RATE_TICKS = 4_000_000;
+const DRIFT_HIGH_RATE_TICKS = 16_000_000;
 const DRIFT_SEEK_TICKS = 30_000_000;
 
 const emptyState = (): WatchPartyViewState => ({
@@ -748,7 +750,11 @@ export class SyncPlayService {
         if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
         await this.player.seek(state.playbackId, expectedTicks, context);
       } else if (Math.abs(driftTicks) >= DRIFT_TOLERANCE_TICKS) {
-        const rate = driftTicks > 0 ? 1.02 : 0.98;
+        const magnitude = Math.abs(driftTicks);
+        const adjustment = magnitude >= DRIFT_HIGH_RATE_TICKS
+          ? 0.06
+          : magnitude >= DRIFT_MEDIUM_RATE_TICKS ? 0.04 : 0.02;
+        const rate = driftTicks > 0 ? 1 + adjustment : 1 - adjustment;
         if (this.player.getPlaybackRate() !== rate) await this.player.setPlaybackRate(state.playbackId, rate, context);
       } else if (Math.abs(driftTicks) <= DRIFT_RATE_RESET_TICKS && this.player.getPlaybackRate() !== 1) {
         await this.player.setPlaybackRate(state.playbackId, 1, context);

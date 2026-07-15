@@ -351,32 +351,80 @@ describe("SyncPlayService", () => {
     expect(state).toMatchObject({ itemId, source: "local", positionTicks: 60_000_000, paused: true });
   });
 
-  it("tolerates small drift, rate-corrects medium drift, and seeks only for large drift", async () => {
+  it("scales smooth drift correction through three bands and seeks only at three seconds", async () => {
     const h = harness();
-    const anchor = (positionTicks: number) => {
+    const now = 25_000;
+    const performanceNow = vi.spyOn(performance, "now").mockReturnValue(now);
+    const anchor = (driftTicks: number) => {
+      const playerPositionTicks = 40_000_000;
+      h.setPlayerState(playbackState({ positionTicks: playerPositionTicks }));
       h.internals.syncAnchor = {
         membershipRevision: h.internals.membershipRevision,
         playlistItemId,
-        positionTicks,
+        positionTicks: playerPositionTicks + driftTicks,
         playing: true,
-        monotonicTimestampMs: performance.now(),
+        monotonicTimestampMs: now,
       };
     };
 
-    anchor(14_000_000);
-    await h.internals.correctDrift();
-    expect(h.player.setPlaybackRate).not.toHaveBeenCalled();
-    expect(h.player.seek).not.toHaveBeenCalled();
+    try {
+      anchor(999_999);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).not.toHaveBeenCalled();
+      expect(h.player.seek).not.toHaveBeenCalled();
 
-    anchor(28_000_000);
-    await h.internals.correctDrift();
-    expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.02, expect.objectContaining({ origin: "remote-sync" }));
-    expect(h.player.seek).not.toHaveBeenCalled();
+      anchor(1_000_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.02, expect.objectContaining({ origin: "remote-sync" }));
 
-    anchor(60_000_000);
-    await h.internals.correctDrift();
-    expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1, expect.objectContaining({ origin: "remote-sync" }));
-    expect(h.player.seek).toHaveBeenCalledTimes(1);
+      anchor(4_000_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.04, expect.objectContaining({ origin: "remote-sync" }));
+
+      anchor(16_000_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.06, expect.objectContaining({ origin: "remote-sync" }));
+
+      anchor(-16_000_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 0.94, expect.objectContaining({ origin: "remote-sync" }));
+
+      anchor(30_000_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1, expect.objectContaining({ origin: "remote-sync" }));
+      expect(h.player.seek).toHaveBeenCalledTimes(1);
+    } finally {
+      performanceNow.mockRestore();
+    }
+  });
+
+  it("uses hysteresis before returning a corrected player to normal speed", async () => {
+    const h = harness();
+    const now = 25_000;
+    const performanceNow = vi.spyOn(performance, "now").mockReturnValue(now);
+    const anchor = (driftTicks: number) => {
+      h.internals.syncAnchor = {
+        membershipRevision: h.internals.membershipRevision,
+        playlistItemId,
+        positionTicks: 10_000_000 + driftTicks,
+        playing: true,
+        monotonicTimestampMs: now,
+      };
+    };
+
+    try {
+      anchor(2_000_000);
+      await h.internals.correctDrift();
+      anchor(750_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenCalledTimes(1);
+
+      anchor(500_000);
+      await h.internals.correctDrift();
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1, expect.objectContaining({ origin: "remote-sync" }));
+    } finally {
+      performanceNow.mockRestore();
+    }
   });
 
   it("uses the lowest-delay NTP sample and reports half-round-trip ping", async () => {

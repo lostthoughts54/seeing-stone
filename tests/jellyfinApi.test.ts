@@ -9,7 +9,7 @@ import { SecureSessionStore, type SessionProtector } from "../src/main/services/
 const identity: DeviceIdentity = {
   deviceId: "11111111-1111-4111-8111-111111111111",
   clientName: "LocalFirst Jellyfin",
-  clientVersion: "0.4.2",
+  clientVersion: "0.4.3",
   deviceName: "Windows Desktop",
 };
 
@@ -247,7 +247,7 @@ describe("JellyfinApi main-side boundary", () => {
     });
     expect(observedHeaders.length).toBeGreaterThan(2);
     expect(new Set(observedHeaders.map((value) => value.match(/DeviceId="([^"]+)"/)?.[1])).size).toBe(1);
-    expect(observedHeaders.every((value) => value.includes('Client="LocalFirst Jellyfin"') && value.includes('Version="0.4.2"'))).toBe(true);
+    expect(observedHeaders.every((value) => value.includes('Client="LocalFirst Jellyfin"') && value.includes('Version="0.4.3"'))).toBe(true);
     expect(observedTokenHeaders.filter(Boolean).every((value) => value === "SECRET_TOKEN_SENTINEL")).toBe(true);
     expect(observedRequests.every(({ init }) => init?.redirect === "manual")).toBe(true);
     expect(openedUrls).toEqual(["https://trailers.example/movie"]);

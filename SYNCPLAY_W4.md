@@ -27,7 +27,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 ## Verification performed through 2026-07-14
 
 - TypeScript main, preload, and renderer typechecks passed.
-- Unit suite: 23 files and 115 tests passed, including the active-room join race, native `Ctrl+R` event, local-only routing, bounded on-video feedback, taskbar window boundary, and sanitized persistent download-location settings.
+- Unit suite: 23 files and 116 tests passed, including the active-room join race, native `Ctrl+R` event, local-only routing, bounded on-video feedback, taskbar window boundary, sanitized persistent download-location settings, and exact tiered drift-correction boundaries.
 - Main-process security, persistence, download, offline-sync, reporting, and networking suite: 19 tests passed, including changing roots while preserving paused and completed copies.
 - Electron runtime: 20 tests passed, including the real sandboxed preload bridge, main-owned download-location actions, visible per-computer delivery status, watch-party UI, strict IPC, sender validation, and renderer network denial.
 - Live SyncPlay acceptance against Jellyfin 10.11.11: 12 tests passed with two actual `SyncPlayService` clients. It exercised a real account denied by Jellyfin's SyncPlay policy, create/discover after access was granted, a second participant joining after the first was already playing and seeking, exact active-item and position convergence with independent local/server source selection, forced socket loss and membership restoration, one exact automatic transition, buffering wait/readiness recovery, peer play/pause, creator seek, the in-player local-only resync request, leave, and empty-group removal.
@@ -40,9 +40,9 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 Installer artifact:
 
 ```text
-D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.2-x64.exe
-Bytes: 120490152
-SHA-256: f97203c1ac383c93338db34909b5baaa62d2ac879eede0b923cde26cf13b85d4
+D:\docs\jellyfin player\.runtime\release\LocalFirst-Jellyfin-Setup-0.4.3-x64.exe
+Bytes: 120490443
+SHA-256: 4def44f554b6408093f956dc83f567cc7049763243a1019b6e174731ea2b6d5f
 ```
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.
