@@ -26,6 +26,8 @@ import {
   type PlaybackState,
   type PlaybackTrackInput,
   type PlaybackViewportInput,
+  type PlaybackAdapterPreference,
+  type PlaybackAdapterPreferenceInput,
   type RpcResult,
   type SafeSession,
   type SearchInput,
@@ -113,6 +115,8 @@ const bridge: JellyfinBridge = {
     stop: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackStop, input),
     getState: () => invoke<PlaybackState>(IPC.playbackGetState),
     setViewport: (input: PlaybackViewportInput) => invoke<{ embedded: boolean }>(IPC.playbackSetViewport, input),
+    getAdapterPreference: () => invoke<PlaybackAdapterPreference>(IPC.playbackGetAdapterPreference),
+    setAdapterPreference: (input: PlaybackAdapterPreferenceInput) => invoke<PlaybackAdapterPreference>(IPC.playbackSetAdapterPreference, input),
     subscribe: (listener: (state: PlaybackState) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, state: PlaybackState) => listener(state);
       ipcRenderer.on(IPC.playbackStateChanged, receive);

@@ -228,6 +228,7 @@ describe("PlaybackSessionService", () => {
     });
 
     const started = await service.start(item.id, "start-over");
+    expect(started.sourceKind).toBe("direct-play");
     const response = await service.handle(new Request(started.mediaUrl, { headers: { Range: "bytes=100-200" } }));
 
     expect(response.status).toBe(200);
@@ -237,6 +238,29 @@ describe("PlaybackSessionService", () => {
     expect(fetchTranscodedStream).not.toHaveBeenCalled();
     expect(started.mediaSourceId).toBe("mkv-source");
     expect(JSON.stringify(started)).not.toContain("http");
+  });
+
+  it("uses Jellyfin direct stream distinctly when direct play is unavailable", async () => {
+    const fetchStaticStream = vi.fn();
+    const fetchDirectStream = vi.fn(async () => new Response("remuxed", { headers: { "Content-Type": "video/mp4" } }));
+    const fetchTranscodedStream = vi.fn();
+    const service = new PlaybackSessionService({
+      async getDetails() { return item; },
+      async getMediaSourceCapabilities() {
+        return { itemId: item.id, sources: [{ id: "remux-source", container: "mkv", size: 5, supportsDirectPlay: false, supportsDirectStream: true, supportsTranscoding: true }] };
+      },
+      fetchStaticStream,
+      fetchDirectStream,
+      fetchTranscodedStream,
+    });
+    const started = await service.start(item.id, "start-over");
+    const response = await service.handle(new Request(started.mediaUrl));
+    expect(started.sourceKind).toBe("direct-stream");
+    expect(response.headers.get("Content-Type")).toBe("video/mp4");
+    expect(response.headers.has("Accept-Ranges")).toBe(false);
+    expect(fetchDirectStream).toHaveBeenCalledWith("movie-1", "remux-source", started.playbackId, expect.any(AbortSignal));
+    expect(fetchStaticStream).not.toHaveBeenCalled();
+    expect(fetchTranscodedStream).not.toHaveBeenCalled();
   });
 
   it("fails clearly when Jellyfin offers neither direct delivery nor transcoding", async () => {

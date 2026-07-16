@@ -46,5 +46,9 @@ Expand-Archive -LiteralPath $archivePath -DestinationPath $runtimeDirectory -For
 if (-not (Test-Path -LiteralPath (Join-Path $runtimeDirectory "mpv.exe"))) {
   throw "mpv.exe was not present in the verified archive."
 }
+$executableHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $runtimeDirectory "mpv.exe")).Hash.ToLowerInvariant()
+if ($executableHash -ne $manifest.executableSha256) {
+  throw "Extracted mpv.exe checksum mismatch."
+}
 
 Write-Host "mpv $($manifest.version) is ready at $runtimeDirectory"

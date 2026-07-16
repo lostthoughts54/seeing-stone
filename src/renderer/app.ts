@@ -1655,6 +1655,9 @@ interface PlaybackPresentation {
   failureMessage: string;
 }
 
+let playerViewportRevision = 0;
+let playerViewportFrame: number | null = null;
+
 async function syncPlayerViewport(visible = !playerView.classList.contains("is-hidden")): Promise<boolean> {
   const bounds = videoPlayer.getBoundingClientRect();
   const result = await window.jellyfin.playback.setViewport({
@@ -1663,8 +1666,17 @@ async function syncPlayerViewport(visible = !playerView.classList.contains("is-h
     width: bounds.width,
     height: bounds.height,
     visible: visible && bounds.width >= 16 && bounds.height >= 16,
+    revision: ++playerViewportRevision,
   }).catch(() => ({ embedded: false }));
   return result.embedded;
+}
+
+function schedulePlayerViewport(): void {
+  if (playerViewportFrame !== null) return;
+  playerViewportFrame = requestAnimationFrame(() => {
+    playerViewportFrame = null;
+    void syncPlayerViewport();
+  });
 }
 
 async function startPresentedPlayback(presentation: PlaybackPresentation): Promise<void> {
@@ -1754,8 +1766,8 @@ window.jellyfin.playback.subscribe((playback) => {
   state.lastFocusElement?.focus?.();
 });
 
-new ResizeObserver(() => { void syncPlayerViewport(); }).observe(videoPlayer);
-window.addEventListener("resize", () => { void syncPlayerViewport(); });
+new ResizeObserver(schedulePlayerViewport).observe(videoPlayer);
+window.addEventListener("resize", schedulePlayerViewport);
 
 function resetSignedInState(): void {
   if (state.searchTimer) clearTimeout(state.searchTimer);

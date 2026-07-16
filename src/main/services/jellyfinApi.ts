@@ -484,6 +484,14 @@ export class JellyfinApi {
       itemId,
       sources: sources.map((entry) => {
         const source = asRecord(entry);
+        const streams = Array.isArray(source.MediaStreams) ? source.MediaStreams.map(asRecord) : [];
+        const video = streams.find((stream) => stream.Type === "Video");
+        const audio = streams.find((stream) => stream.Type === "Audio");
+        const width = nullableNumber(video?.Width);
+        const height = nullableNumber(video?.Height);
+        const transcodeReasons = Array.isArray(source.TranscodingReasons)
+          ? source.TranscodingReasons.map((reason) => asString(reason)).filter(Boolean).join(", ")
+          : nullableString(source.TranscodingReasons);
         return {
           id: asString(source.Id),
           container: nullableString(source.Container),
@@ -491,6 +499,14 @@ export class JellyfinApi {
           supportsDirectPlay: source.SupportsDirectPlay === true,
           supportsDirectStream: source.SupportsDirectStream === true,
           supportsTranscoding: source.SupportsTranscoding === true,
+          videoCodec: nullableString(video?.Codec),
+          audioCodec: nullableString(audio?.Codec),
+          audioChannels: nullableString(audio?.ChannelLayout) ?? (nullableNumber(audio?.Channels)?.toString() ?? null),
+          width,
+          height,
+          bitrate: nullableNumber(source.Bitrate) ?? nullableNumber(video?.BitRate),
+          videoRange: nullableString(video?.VideoRange),
+          transcodeReason: transcodeReasons,
           externalSubtitles: externalSubtitles(source.MediaStreams),
         };
       }).filter((source) => source.id),
@@ -551,6 +567,19 @@ export class JellyfinApi {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchDirectStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response> {
+    return this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
+      static: "false",
+      mediaSourceId,
+      deviceId: this.identity.deviceId,
+      playSessionId,
+      enableAutoStreamCopy: "true",
+      allowVideoStreamCopy: "true",
+      allowAudioStreamCopy: "true",
+      context: "Streaming",
+    }, { signal });
   }
 
   async fetchExternalSubtitle(

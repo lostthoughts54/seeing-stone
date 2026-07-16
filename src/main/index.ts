@@ -26,7 +26,7 @@ import { LocalPlaybackResolver } from "./services/localPlaybackResolver";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
 import { PlayerPreferencesService } from "./services/playerPreferences";
-import { MpvPlayerService } from "./services/mpvPlayer";
+import { EmbeddedMpvAdapter, LegacyExternalMpvAdapter } from "./services/mpvPlayer";
 import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
@@ -37,6 +37,7 @@ import { OfflineSynchronizationService } from "./services/offlineSynchronization
 import { IPC } from "../shared/contracts";
 import { SyncPlayService } from "./services/syncPlay";
 import { EmbeddedVideoHost } from "./services/embeddedVideoHost";
+import type { PlayerController } from "./services/playerController";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -47,6 +48,8 @@ let persistence: SqlitePersistenceService | null = null;
 let downloadManager: DownloadManager | null = null;
 let offlineSynchronization: OfflineSynchronizationService | null = null;
 let activeSyncPlay: SyncPlayService | null = null;
+let activePlayback: PlayerController | null = null;
+let activeVideoHost: EmbeddedVideoHost | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -59,14 +62,20 @@ app.on("before-quit", (event) => {
   const activeDownloads = downloadManager;
   const activeSynchronization = offlineSynchronization;
   const syncPlay = activeSyncPlay;
+  const playback = activePlayback;
+  const videoHost = activeVideoHost;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
   activeSyncPlay = null;
+  activePlayback = null;
+  activeVideoHost = null;
   const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
-  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay]).then(() => activePersistence.close()).finally(() => {
+  const stopPlayback = playback ? playback.clear().catch(() => undefined) : Promise.resolve();
+  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback]).then(() => activePersistence.close()).finally(() => {
+    videoHost?.destroy();
     persistenceClosing = true;
     app.quit();
   });
@@ -128,9 +137,17 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   downloadManager.onChanged((downloads) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
   });
-  const embeddedRequested = !app.isPackaged && process.env.SEEING_STONE_PLAYER === "embedded";
+  const storedPlayerPreferences = await playerPreferences.get();
+  const requestedMode = process.env.SEEING_STONE_PLAYER === "embedded" || process.env.SEEING_STONE_PLAYER === "legacy"
+    ? process.env.SEEING_STONE_PLAYER
+    : storedPlayerPreferences.adapterMode ?? "legacy";
+  const embeddedRequested = !app.isPackaged && requestedMode === "embedded";
   const videoHost = embeddedRequested ? new EmbeddedVideoHost(mainWindow) : undefined;
-  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost);
+  const playback = videoHost
+    ? new EmbeddedMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost)
+    : new LegacyExternalMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
+  activePlayback = playback;
+  activeVideoHost = videoHost ?? null;
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
@@ -179,6 +196,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     activeSyncPlay,
     downloadLocationController,
     videoHost,
+    playerPreferences,
   );
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {

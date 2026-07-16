@@ -56,7 +56,9 @@ export const playbackFullscreenSchema = playbackIdSchema.extend({ fullscreen: z.
 export const playbackViewportSchema = z.object({
   x: z.number().finite().min(-10000).max(10000), y: z.number().finite().min(-10000).max(10000),
   width: z.number().finite().min(0).max(10000), height: z.number().finite().min(0).max(10000), visible: z.boolean(),
+  revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 });
+export const playbackAdapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded"]) });
 
 export const downloadStartSchema = z.object({ itemId: z.string().min(1).max(128) });
 

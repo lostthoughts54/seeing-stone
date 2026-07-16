@@ -236,6 +236,14 @@ describe("JellyfinApi main-side boundary", () => {
       supportsDirectPlay: true,
       supportsDirectStream: true,
       supportsTranscoding: true,
+      videoCodec: null,
+      audioCodec: null,
+      audioChannels: null,
+      width: null,
+      height: null,
+      bitrate: null,
+      videoRange: null,
+      transcodeReason: null,
       externalSubtitles: [{
         streamIndex: 4,
         format: "srt",
@@ -272,6 +280,7 @@ describe("JellyfinApi main-side boundary", () => {
 
     vi.useFakeTimers();
     await api.fetchStaticStream("movie-1", "source-1");
+    await api.fetchDirectStream("movie-1", "source-1", "22222222-2222-4222-8222-222222222222");
     const transcoded = await api.fetchTranscodedStream("movie-1", "source-1", "33333333-3333-4333-8333-333333333333");
     expect(await transcoded.text()).toBe("transcoded-video");
     await vi.advanceTimersByTimeAsync(15001);
@@ -279,6 +288,10 @@ describe("JellyfinApi main-side boundary", () => {
     await vi.advanceTimersByTimeAsync(30000);
     expect(transcodeSignal?.aborted).toBe(false);
     const transcodeRequest = observedRequests.find(({ url }) => url.pathname.endsWith("/stream.mp4"));
+    const directStreamRequest = observedRequests.find(({ url }) => url.searchParams.get("playSessionId") === "22222222-2222-4222-8222-222222222222");
+    expect(directStreamRequest?.url.pathname).toBe("/Videos/movie-1/stream");
+    expect(directStreamRequest?.url.searchParams.get("enableAutoStreamCopy")).toBe("true");
+    expect(directStreamRequest?.url.searchParams.get("deviceId")).toBe(identity.deviceId);
     expect(transcodeRequest?.url.searchParams.get("static")).toBe("false");
     expect(transcodeRequest?.url.searchParams.get("mediaSourceId")).toBe("source-1");
     expect(transcodeRequest?.url.searchParams.get("deviceId")).toBe(identity.deviceId);

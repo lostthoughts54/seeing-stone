@@ -127,7 +127,21 @@ export class LocalPlaybackResolver {
         resumePositionTicks,
         durationTicks,
         source: "local",
+        sourceKind: details ? (candidate.downloadId ? "downloaded" : "matched-local") : "offline-local",
         delivery: "local",
+        diagnostics: {
+          sourceKind: details ? (candidate.downloadId ? "downloaded" : "matched-local") : "offline-local",
+          playbackRate: 1,
+          bufferAheadTicks: null,
+          container: probeResult.container ?? candidate.container,
+          videoCodec: null,
+          audioCodec: null,
+          audioChannels: null,
+          resolution: null,
+          bitrate: null,
+          videoRange: null,
+          transcodeReason: null,
+        },
         externalSubtitles: [],
         initialAction: resumeMode !== "start-over"
           ? "progress"

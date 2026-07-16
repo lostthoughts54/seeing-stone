@@ -2,7 +2,8 @@
 
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
-const { existsSync } = require("node:fs");
+const { createHash } = require("node:crypto");
+const { existsSync, readFileSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
@@ -20,6 +21,9 @@ void main().catch((error) => {
 
 async function main() {
   assert.equal(existsSync(executable), true, "Run pnpm setup:mpv first.");
+  const manifest = JSON.parse(readFileSync(join(root, "mpv-runtime.json"), "utf8"));
+  const executableHash = createHash("sha256").update(readFileSync(executable)).digest("hex");
+  assert.equal(executableHash, manifest.executableSha256, "Pinned mpv.exe checksum mismatch.");
   if (!existsSync(fixture)) createFixture();
 
   const pipe = `\\\\.\\pipe\\localfirst-mpv-acceptance-${randomUUID()}`;
@@ -37,7 +41,7 @@ async function main() {
   try {
     await ipc.connect(pipe, 10000);
     const version = await ipc.command(["get_property", "mpv-version"]);
-    assert.match(String(version), /^mpv v0\.41\.0/);
+    assert.equal(String(version), `mpv ${manifest.version}`);
     const duration = Number(await waitForProperty(ipc, "duration"));
     assert.ok(duration >= 11 && duration <= 13, `Unexpected duration: ${duration}`);
 

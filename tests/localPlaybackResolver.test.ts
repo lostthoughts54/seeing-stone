@@ -128,6 +128,7 @@ describe("LocalPlaybackResolver", () => {
       mediaSourceId: "source-1",
       mediaUrl: target,
       source: "local",
+      sourceKind: "downloaded",
       delivery: "local",
       resumePositionTicks: 300,
       durationTicks: 1_000,
@@ -166,6 +167,7 @@ describe("LocalPlaybackResolver", () => {
     const resolved = await value.resolver.resolve("episode-1", "resume");
     expect(resolved?.resumePositionTicks).toBe(450);
     expect(resolved?.source).toBe("local");
+    expect(resolved?.sourceKind).toBe("offline-local");
   });
 
   it("marks missing, size-tampered, path-escaped, and probe-invalid copies unusable", async () => {

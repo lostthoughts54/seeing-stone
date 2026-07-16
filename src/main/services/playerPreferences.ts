@@ -3,20 +3,27 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 const preferencesSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   windowMaximized: z.boolean(),
+  adapterMode: z.enum(["legacy", "embedded"]),
 });
+
+const legacyPreferencesSchema = z.object({ schemaVersion: z.literal(1), windowMaximized: z.boolean() });
+
+export type PlayerAdapterMode = "legacy" | "embedded";
 
 export interface PlayerPreferences {
   windowMaximized: boolean;
+  adapterMode?: PlayerAdapterMode;
 }
 
 export interface PlayerPreferencesStore {
   get(): Promise<PlayerPreferences>;
   setWindowMaximized(windowMaximized: boolean): Promise<void>;
+  setAdapterMode?(adapterMode: PlayerAdapterMode): Promise<void>;
 }
 
-const DEFAULTS: PlayerPreferences = { windowMaximized: true };
+const DEFAULTS: PlayerPreferences = { windowMaximized: true, adapterMode: "legacy" };
 
 export class PlayerPreferencesService implements PlayerPreferencesStore {
   private readonly preferencesPath: string;
@@ -42,7 +49,17 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
     await this.runExclusive(async () => {
       const current = await this.get();
       if (current.windowMaximized === windowMaximized) return;
-      const next = { windowMaximized };
+      const next = { ...current, windowMaximized };
+      await this.persist(next);
+      this.cached = next;
+    });
+  }
+
+  async setAdapterMode(adapterMode: PlayerAdapterMode): Promise<void> {
+    await this.runExclusive(async () => {
+      const current = await this.get();
+      if (current.adapterMode === adapterMode) return;
+      const next = { ...current, adapterMode };
       await this.persist(next);
       this.cached = next;
     });
@@ -50,8 +67,14 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
 
   private async initialize(): Promise<PlayerPreferences> {
     try {
-      const parsed = preferencesSchema.parse(JSON.parse(await readFile(this.preferencesPath, "utf8")));
-      this.cached = { windowMaximized: parsed.windowMaximized };
+      const raw = JSON.parse(await readFile(this.preferencesPath, "utf8"));
+      const parsed = preferencesSchema.safeParse(raw);
+      if (parsed.success) this.cached = { windowMaximized: parsed.data.windowMaximized, adapterMode: parsed.data.adapterMode };
+      else {
+        const legacy = legacyPreferencesSchema.parse(raw);
+        this.cached = { windowMaximized: legacy.windowMaximized, adapterMode: "legacy" };
+        await this.persist(this.cached);
+      }
     } catch {
       this.cached = { ...DEFAULTS };
       await this.persist(this.cached);
@@ -60,7 +83,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
   }
 
   private async persist(preferences: PlayerPreferences): Promise<void> {
-    const safe = preferencesSchema.parse({ schemaVersion: 1, ...preferences });
+    const safe = preferencesSchema.parse({ schemaVersion: 2, ...preferences, adapterMode: preferences.adapterMode ?? "legacy" });
     await mkdir(dirname(this.preferencesPath), { recursive: true });
     const temporaryPath = `${this.preferencesPath}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(safe, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });

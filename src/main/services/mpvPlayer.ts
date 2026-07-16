@@ -30,6 +30,11 @@ function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     itemId: null,
     phase: "idle",
     source: null,
+    diagnostics: {
+      sourceKind: null, playbackRate: 1, bufferAheadTicks: null, container: null,
+      videoCodec: null, audioCodec: null, audioChannels: null, resolution: null,
+      bitrate: null, videoRange: null, transcodeReason: null,
+    },
     positionTicks: 0,
     durationTicks: 0,
     paused: false,
@@ -57,6 +62,11 @@ function tracks(value: unknown): { audioTracks: PlaybackTrack[]; subtitleTracks:
       title: typeof record.title === "string" ? record.title.slice(0, 256) : null,
       language: typeof record.lang === "string" ? record.lang.slice(0, 32) : null,
       selected: record.selected === true,
+      codec: typeof record.codec === "string" ? record.codec.slice(0, 32) : null,
+      channels: typeof record["demux-channel-count"] === "number" ? record["demux-channel-count"] : null,
+      isDefault: record.default === true,
+      isForced: record.forced === true,
+      external: record.external === true,
     };
     (type === "audio" ? audioTracks : subtitleTracks).push(track);
   }
@@ -160,6 +170,10 @@ export class MpvPlayerService implements PlayerController {
       itemId,
       phase: "loading",
       source: source.source,
+      diagnostics: source.diagnostics ?? {
+        ...emptyState().diagnostics!,
+        sourceKind: source.sourceKind ?? (source.source === "local" ? "downloaded" : source.delivery === "transcode" ? "transcode" : "direct-stream"),
+      },
       positionTicks: source.resumePositionTicks,
       durationTicks: source.durationTicks,
     }));
@@ -177,6 +191,7 @@ export class MpvPlayerService implements PlayerController {
         resumePositionTicks: source.resumePositionTicks,
         durationTicks: source.durationTicks,
         source: source.source,
+        sourceKind: source.sourceKind,
       };
     } catch (error) {
       await this.failAndClean(error);
@@ -228,6 +243,7 @@ export class MpvPlayerService implements PlayerController {
     }
     await this.command(["set_property", "speed", rate]);
     this.playbackRate = rate;
+    this.state = { ...this.state, diagnostics: { ...this.state.diagnostics!, playbackRate: rate } };
     this.emitEvent("state", context);
     return this.getState();
   }
@@ -335,12 +351,44 @@ export class MpvPlayerService implements PlayerController {
   }
 
   async clear(): Promise<void> {
-    if (this.source) await this.stop(this.source.playbackId);
+    if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
     else {
       this.playbackRevision += 1;
       this.playback.clear();
       this.playbackRate = 1;
+      this.videoHost?.hide();
       this.update(emptyState(), "stop", { origin: "system" });
+    }
+  }
+
+  private async handleUnexpectedProcessExit(): Promise<void> {
+    const source = this.source;
+    if (!source || this.stopping) return;
+    this.playbackRevision += 1;
+    this.endHandlingRevision = null;
+    this.replacingFile = false;
+    this.eofArmed = false;
+    await this.report("stop").catch(() => undefined);
+    this.stopReportingTimer();
+    this.ipc?.close();
+    this.ipc = null;
+    await this.proxy.close().catch(() => undefined);
+    this.videoHost?.hide();
+    this.playbackTarget = null;
+    try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
+    this.source = null;
+    this.playbackRate = 1;
+    this.pendingPause = null;
+    this.pendingSeek = null;
+    this.pendingFullscreen = null;
+    this.update(emptyState({
+      itemId: source.itemId,
+      phase: "error",
+      error: "The playback engine disconnected unexpectedly.",
+    }), "error", { origin: "system" });
+    if (!this.mainWindow.isDestroyed()) {
+      if (this.mainWindow.isMinimized()) this.mainWindow.restore();
+      this.mainWindow.show();
     }
   }
 
@@ -379,7 +427,7 @@ export class MpvPlayerService implements PlayerController {
     child.once("exit", () => {
       if (this.process !== child) return;
       this.process = null;
-      if (!this.stopping && this.source) void this.stop(this.source.playbackId, "ended");
+      if (!this.stopping && this.source) void this.handleUnexpectedProcessExit();
     });
     const ipc = new MpvIpcClient();
     this.ipc = ipc;
@@ -395,6 +443,7 @@ export class MpvPlayerService implements PlayerController {
       ipc.observe(7, "fullscreen"),
       ipc.observe(8, "window-maximized"),
       ipc.observe(9, "eof-reached"),
+      ipc.observe(10, "demuxer-cache-duration"),
     ]);
     const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
     await this.addExternalSubtitles(ipc, playbackTargets);
@@ -583,7 +632,7 @@ export class MpvPlayerService implements PlayerController {
   }
 
   private async persistWindowStateIfWindowed(ipc: MpvIpcClient | null): Promise<void> {
-    if (!ipc) return;
+    if (!ipc || this.videoHost) return;
     const fullscreen = await ipc.command(["get_property", "fullscreen"]).catch(() => this.state.fullscreen);
     if (fullscreen === true) return;
     const maximized = await ipc.command(["get_property", "window-maximized"]).catch(() => this.windowMaximized);
@@ -671,7 +720,10 @@ export class MpvPlayerService implements PlayerController {
       next.buffering = message.data;
       if (next.buffering !== this.state.buffering) action = "buffering";
     }
-    if (message.name === "seekable" && typeof message.data === "boolean") next.seekable = message.data;
+      if (message.name === "seekable" && typeof message.data === "boolean") next.seekable = message.data;
+    if (message.name === "demuxer-cache-duration" && typeof message.data === "number" && Number.isFinite(message.data)) {
+      next.diagnostics = { ...next.diagnostics!, bufferAheadTicks: Math.max(0, Math.round(message.data * TICKS_PER_SECOND)) };
+    }
     if (message.name === "fullscreen" && typeof message.data === "boolean") {
       next.fullscreen = message.data;
       const pending = this.pendingFullscreen;
@@ -716,9 +768,9 @@ export class MpvPlayerService implements PlayerController {
       kind,
       itemId: this.source.itemId,
       mediaSourceId: this.source.mediaSourceId,
-      playMethod: this.source.source === "local"
-        ? "DirectPlay"
-        : this.source.delivery === "transcode" ? "Transcode" : "DirectStream",
+       playMethod: this.source.source === "local" || this.source.sourceKind === "direct-play"
+         ? "DirectPlay"
+         : this.source.delivery === "transcode" ? "Transcode" : "DirectStream",
       positionTicks: this.state.positionTicks,
       paused: this.state.paused,
       actionKind: actionKind ?? (kind === "start" ? this.source.initialAction : "progress"),
@@ -763,5 +815,20 @@ export class MpvPlayerService implements PlayerController {
     }
     const message = error instanceof AppError ? error.message : "mpv playback could not be started.";
     this.update(emptyState({ phase: "error", error: message }), "error", { origin: "system" });
+  }
+}
+
+export class LegacyExternalMpvAdapter extends MpvPlayerService {}
+
+export class EmbeddedMpvAdapter extends MpvPlayerService {
+  constructor(
+    mainWindow: BrowserWindow,
+    playback: PlaybackSessionService,
+    reporting: PlaybackReportingService,
+    preferences: PlayerPreferencesStore,
+    runtime: MpvRuntimePaths,
+    videoHost: MpvVideoHost,
+  ) {
+    super(mainWindow, playback, reporting, preferences, runtime, videoHost);
   }
 }

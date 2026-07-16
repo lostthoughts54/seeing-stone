@@ -1,4 +1,4 @@
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
+import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import {
   IPC,
   type DownloadLocationSummary,
@@ -21,6 +21,7 @@ import {
   playbackStartSchema,
   playbackTrackSchema,
   playbackViewportSchema,
+  playbackAdapterPreferenceSchema,
   searchSchema,
   serverUrlSchema,
   watchedStateSchema,
@@ -35,6 +36,7 @@ import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
 import type { PlayerController } from "./services/playerController";
 import type { MpvVideoHost } from "./services/embeddedVideoHost";
+import type { PlayerPreferencesService } from "./services/playerPreferences";
 import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
 
@@ -86,6 +88,7 @@ export function registerIpcHandlers(
   syncPlay?: SyncPlayService,
   downloadLocation?: DownloadLocationController,
   videoHost?: MpvVideoHost,
+  playerPreferences?: PlayerPreferencesService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -225,6 +228,20 @@ export function registerIpcHandlers(
     const viewport = playbackViewportSchema.strict().parse(input);
     videoHost?.updateViewport(viewport);
     return { embedded: Boolean(videoHost) };
+  });
+  const adapterPreference = async () => {
+    if (!playerPreferences) throw new AppError("PLAYER_PREFERENCES_UNAVAILABLE", "Player preferences are unavailable.", 503);
+    const selected = (await playerPreferences.get()).adapterMode ?? "legacy";
+    const active = videoHost ? "embedded" : "legacy";
+    return { active, selected, embeddedAvailable: !app.isPackaged, restartRequired: active !== selected } as const;
+  };
+  register(IPC.playbackGetAdapterPreference, adapterPreference);
+  register(IPC.playbackSetAdapterPreference, async (input) => {
+    if (!playerPreferences) throw new AppError("PLAYER_PREFERENCES_UNAVAILABLE", "Player preferences are unavailable.", 503);
+    const { mode } = playbackAdapterPreferenceSchema.strict().parse(input);
+    if (mode === "embedded" && app.isPackaged) throw new AppError("EMBEDDED_PLAYER_GUARDED", "The embedded player is not enabled in packaged builds.", 409);
+    await playerPreferences.setAdapterMode(mode);
+    return adapterPreference();
   });
   const requireSyncPlay = (): SyncPlayService => {
     if (!syncPlay) throw new AppError("SYNCPLAY_UNAVAILABLE", "Watch parties are unavailable in this build.", 503);

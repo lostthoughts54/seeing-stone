@@ -170,6 +170,15 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("MpvPlayerService natural completion", () => {
+  it("reports a forced playback-engine exit as a system error, never completion", async () => {
+    const h = harness();
+    await (h.player as never as { handleUnexpectedProcessExit(): Promise<void> }).handleUnexpectedProcessExit();
+    expect(h.player.getState()).toMatchObject({ phase: "error", playbackId: null, error: "The playback engine disconnected unexpectedly." });
+    expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
+    expect(h.reportedEvents[0]).toMatchObject({ actionKind: "progress", watched: false });
+    expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
+  });
+
   it("auto-closes a movie after exactly one authoritative stop report", async () => {
     const h = harness();
     h.internals.source = source("movie-1", "movie-playback", "Movie");

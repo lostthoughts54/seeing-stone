@@ -13,6 +13,7 @@ interface PlaybackApi {
   getNextUpForSeries?(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null>;
   getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
   fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response>;
+  fetchDirectStream?(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response>;
   fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response>;
   fetchExternalSubtitle(itemId: string, mediaSourceId: string, streamIndex: number, format: ExternalSubtitleFormat, signal?: AbortSignal): Promise<Response>;
 }
@@ -22,6 +23,7 @@ interface PlaybackRecord {
   itemId: string;
   mediaSourceId: string;
   delivery: "direct" | "transcode" | "local";
+  sourceKind: import("../../shared/contracts").PlaybackSourceKind;
   externalSubtitles: ExternalSubtitleTrack[];
   requests: Set<AbortController>;
 }
@@ -33,6 +35,8 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   mediaSourceId: string;
   mediaUrl: string;
   delivery: "direct" | "transcode" | "local";
+  sourceKind?: import("../../shared/contracts").PlaybackSourceKind;
+  diagnostics?: import("../../shared/contracts").PlaybackDiagnostics;
   externalSubtitles: ExternalSubtitleTrack[];
   initialAction: "progress" | "start_over" | "replay";
 }
@@ -104,6 +108,7 @@ export class PlaybackSessionService {
         itemId,
         mediaSourceId: resolvedLocal.mediaSourceId,
         delivery: "local",
+        sourceKind: resolvedLocal.sourceKind ?? "downloaded",
         externalSubtitles: resolvedLocal.externalSubtitles,
         requests: new Set(),
       };
@@ -112,6 +117,7 @@ export class PlaybackSessionService {
         itemId,
         phase: "loading",
         source: "local",
+        diagnostics: resolvedLocal.diagnostics,
         durationTicks: resolvedLocal.durationTicks,
       });
       return resolvedLocal;
@@ -130,7 +136,9 @@ export class PlaybackSessionService {
       throw error;
     }
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
-    const directSource = capabilities.sources.find((entry) => entry.supportsDirectStream || entry.supportsDirectPlay);
+    const directPlaySource = capabilities.sources.find((entry) => entry.supportsDirectPlay);
+    const directStreamSource = capabilities.sources.find((entry) => entry.supportsDirectStream);
+    const directSource = directPlaySource ?? directStreamSource;
     const source = directSource
       ?? capabilities.sources.find((entry) => entry.supportsTranscoding)
       ?? capabilities.sources[0];
@@ -139,6 +147,9 @@ export class PlaybackSessionService {
       throw new AppError("NO_MEDIA_SOURCE", "No playable media source is available.", 422);
     }
     const delivery = source === directSource ? "direct" : "transcode";
+    const sourceKind = source === directPlaySource
+      ? "direct-play"
+      : source === directStreamSource ? "direct-stream" : "transcode";
     if (delivery === "transcode" && !source.supportsTranscoding) {
       this.state = state({ itemId, phase: "error", error: "This media requires server transcoding, but transcoding is unavailable." });
       throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
@@ -173,6 +184,7 @@ export class PlaybackSessionService {
       itemId,
       mediaSourceId: source.id,
       delivery,
+      sourceKind,
       externalSubtitles: externalSubtitleTracks,
       requests: new Set(),
     };
@@ -187,7 +199,21 @@ export class PlaybackSessionService {
       resumePositionTicks: resumeMode === "resume" ? details.userData.playbackPositionTicks : 0,
       durationTicks: details.runTimeTicks,
       source: "server",
+      sourceKind,
       delivery,
+      diagnostics: {
+        sourceKind,
+        playbackRate: 1,
+        bufferAheadTicks: null,
+        container: source.container,
+        videoCodec: source.videoCodec ?? null,
+        audioCodec: source.audioCodec ?? null,
+        audioChannels: source.audioChannels ?? null,
+        resolution: source.width && source.height ? `${source.width}×${source.height}` : null,
+        bitrate: source.bitrate ?? null,
+        videoRange: source.videoRange ?? null,
+        transcodeReason: sourceKind === "transcode" ? source.transcodeReason ?? null : null,
+      },
       externalSubtitles: externalSubtitleTracks,
       initialAction: initialAction(resumeMode, details.userData.played, details.userData.playbackPositionTicks),
     };
@@ -237,7 +263,14 @@ export class PlaybackSessionService {
           playback.id,
           requestController.signal,
         )
-        : await this.api.fetchStaticStream(
+        : playback.sourceKind === "direct-stream" && this.api.fetchDirectStream
+          ? await this.api.fetchDirectStream(
+            playback.itemId,
+            playback.mediaSourceId,
+            playback.id,
+            requestController.signal,
+          )
+          : await this.api.fetchStaticStream(
           playback.itemId,
           playback.mediaSourceId,
           request.headers.get("range") || undefined,
@@ -261,6 +294,9 @@ export class PlaybackSessionService {
     }
     if (playback.delivery === "transcode") {
       headers.set("Content-Type", "video/mp4");
+      headers.delete("Content-Range");
+      headers.delete("Accept-Ranges");
+    } else if (playback.sourceKind === "direct-stream") {
       headers.delete("Content-Range");
       headers.delete("Accept-Ranges");
     } else {

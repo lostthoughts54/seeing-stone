@@ -80,6 +80,14 @@ export interface MediaSourceCapabilities {
     supportsDirectPlay: boolean;
     supportsDirectStream: boolean;
     supportsTranscoding: boolean;
+    videoCodec?: string | null;
+    audioCodec?: string | null;
+    audioChannels?: string | null;
+    width?: number | null;
+    height?: number | null;
+    bitrate?: number | null;
+    videoRange?: string | null;
+    transcodeReason?: string | null;
     externalSubtitles?: ExternalSubtitleTrack[];
   }>;
 }
@@ -125,12 +133,17 @@ export interface PlaybackTrack {
   title: string | null;
   language: string | null;
   selected: boolean;
+  codec?: string | null;
+  channels?: number | null;
+  isDefault?: boolean;
+  isForced?: boolean;
+  external?: boolean;
 }
 
 export interface PlaybackState {
   playbackId: string | null;
   itemId: string | null;
-  phase: "idle" | "resolving" | "loading" | "playing" | "paused" | "buffering" | "ended" | "stopped" | "error";
+  phase: "idle" | "resolving" | "loading" | "ready" | "playing" | "paused" | "buffering" | "stalled" | "disconnected" | "ended" | "stopped" | "error";
   source: "server" | "local" | null;
   diagnostics?: PlaybackDiagnostics;
   positionTicks: number;
@@ -186,7 +199,15 @@ export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
 export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
 export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
-export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean }
+export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean; revision: number }
+export type PlayerAdapterMode = "legacy" | "embedded";
+export interface PlaybackAdapterPreference {
+  active: PlayerAdapterMode;
+  selected: PlayerAdapterMode;
+  embeddedAvailable: boolean;
+  restartRequired: boolean;
+}
+export interface PlaybackAdapterPreferenceInput { mode: PlayerAdapterMode }
 export interface DownloadStartInput { itemId: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
@@ -283,6 +304,8 @@ export interface JellyfinBridge {
     stop(input: PlaybackIdInput): Promise<PlaybackState>;
     getState(): Promise<PlaybackState>;
     setViewport(input: PlaybackViewportInput): Promise<{ embedded: boolean }>;
+    getAdapterPreference(): Promise<PlaybackAdapterPreference>;
+    setAdapterPreference(input: PlaybackAdapterPreferenceInput): Promise<PlaybackAdapterPreference>;
     subscribe(listener: (state: PlaybackState) => void): () => void;
   };
   watchParties: {
@@ -337,6 +360,8 @@ export const IPC = {
   playbackStop: "playback:stop",
     playbackGetState: "playback:get-state",
     playbackSetViewport: "playback:set-viewport",
+    playbackGetAdapterPreference: "playback:get-adapter-preference",
+    playbackSetAdapterPreference: "playback:set-adapter-preference",
   playbackStateChanged: "playback:state-changed",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",
