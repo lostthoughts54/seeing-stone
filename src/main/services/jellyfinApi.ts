@@ -59,6 +59,84 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function boundedNullableString(value: unknown, maximum: number): string | null {
+  return nullableString(value)?.slice(0, maximum) ?? null;
+}
+
+export function seeingStoneMpvDeviceProfile(): JsonRecord {
+  return {
+    Name: "Seeing Stone mpv",
+    DirectPlayProfiles: [
+      { Container: "mp4,m4v,mov", Type: "Video", VideoCodec: "h264,hevc,av1,mpeg4", AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus" },
+      { Container: "mkv,webm", Type: "Video", VideoCodec: "h264,hevc,av1,vp9,vp8,mpeg4,mpeg2video,vc1,theora", AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus,vorbis,dts,truehd" },
+      { Container: "ts,mpegts,m2ts", Type: "Video", VideoCodec: "h264,hevc,mpeg2video,vc1", AudioCodec: "aac,ac3,eac3,mp2,mp3,dts" },
+      { Container: "avi,flv,ogv", Type: "Video", VideoCodec: "h264,mpeg4,mpeg2video,vc1,theora", AudioCodec: "aac,ac3,mp3,vorbis" },
+    ],
+    TranscodingProfiles: [{
+      Container: "mp4",
+      Type: "Video",
+      VideoCodec: "h264,hevc,av1",
+      AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus",
+      Protocol: "http",
+      Context: "Streaming",
+      CopyTimestamps: true,
+      EnableSubtitlesInManifest: false,
+      MaxAudioChannels: "8",
+    }],
+    CodecProfiles: [],
+    ContainerProfiles: [],
+    SubtitleProfiles: [
+      { Format: "srt", Method: "External" },
+      { Format: "subrip", Method: "External" },
+      { Format: "ass", Method: "External" },
+      { Format: "ssa", Method: "External" },
+      { Format: "vtt", Method: "External" },
+      { Format: "pgssub,dvdsub", Method: "Embed" },
+    ],
+  };
+}
+
+function mediaSourceCapabilities(itemId: string, value: unknown): MediaSourceCapabilities {
+  const result = asRecord(value);
+  const sources = Array.isArray(result.MediaSources) ? result.MediaSources : [];
+  return {
+    itemId,
+    sources: sources.map((entry) => {
+      const source = asRecord(entry);
+      const streams = Array.isArray(source.MediaStreams) ? source.MediaStreams.map(asRecord) : [];
+      const video = streams.find((stream) => stream.Type === "Video");
+      const audio = streams.find((stream) => stream.Type === "Audio");
+      const width = nullableNumber(video?.Width);
+      const height = nullableNumber(video?.Height);
+      const transcodeReasons = Array.isArray(source.TranscodingReasons)
+        ? source.TranscodingReasons.map((reason) => asString(reason).slice(0, 128)).filter(Boolean).slice(0, 16).join(", ")
+        : boundedNullableString(source.TranscodingReasons, 512);
+      return {
+        id: asString(source.Id).slice(0, 256),
+        container: boundedNullableString(source.Container, 64),
+        size: nullableNumber(source.Size),
+        supportsDirectPlay: source.SupportsDirectPlay === true,
+        supportsDirectStream: source.SupportsDirectStream === true,
+        supportsTranscoding: source.SupportsTranscoding === true,
+        videoCodec: boundedNullableString(video?.Codec, 64),
+        audioCodec: boundedNullableString(audio?.Codec, 64),
+        audioChannels: boundedNullableString(audio?.ChannelLayout, 64) ?? (nullableNumber(audio?.Channels)?.toString() ?? null),
+        width,
+        height,
+        bitrate: nullableNumber(source.Bitrate) ?? nullableNumber(video?.BitRate),
+        videoRange: boundedNullableString(video?.VideoRange, 64),
+        transcodeReason: transcodeReasons,
+        externalSubtitles: externalSubtitles(source.MediaStreams),
+      };
+    }).filter((source) => source.id),
+  };
+}
+
+export interface PlaybackSourceInfo {
+  capabilities: MediaSourceCapabilities;
+  playSessionId: string | null;
+}
+
 function externalSubtitleFormat(value: unknown): ExternalSubtitleFormat {
   const codec = asString(value).trim().toLocaleLowerCase("en-US");
   if (codec === "ass") return "ass";
@@ -475,42 +553,35 @@ export class JellyfinApi {
   }
 
   async getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<MediaSourceCapabilities> {
-    const session = this.requireSession();
-    const result = asRecord(await this.request(`/Items/${encodeURIComponent(itemId)}/PlaybackInfo`, {
-      UserId: session.userId,
-    }, { method: "POST", body: JSON.stringify({ UserId: session.userId }), signal }));
-    const sources = Array.isArray(result.MediaSources) ? result.MediaSources : [];
+    return mediaSourceCapabilities(itemId, await this.requestPlaybackInfo(itemId, signal));
+  }
+
+  async getPlaybackSourceInfo(itemId: string, signal?: AbortSignal): Promise<PlaybackSourceInfo> {
+    const result = await this.requestPlaybackInfo(itemId, signal);
     return {
-      itemId,
-      sources: sources.map((entry) => {
-        const source = asRecord(entry);
-        const streams = Array.isArray(source.MediaStreams) ? source.MediaStreams.map(asRecord) : [];
-        const video = streams.find((stream) => stream.Type === "Video");
-        const audio = streams.find((stream) => stream.Type === "Audio");
-        const width = nullableNumber(video?.Width);
-        const height = nullableNumber(video?.Height);
-        const transcodeReasons = Array.isArray(source.TranscodingReasons)
-          ? source.TranscodingReasons.map((reason) => asString(reason)).filter(Boolean).join(", ")
-          : nullableString(source.TranscodingReasons);
-        return {
-          id: asString(source.Id),
-          container: nullableString(source.Container),
-          size: nullableNumber(source.Size),
-          supportsDirectPlay: source.SupportsDirectPlay === true,
-          supportsDirectStream: source.SupportsDirectStream === true,
-          supportsTranscoding: source.SupportsTranscoding === true,
-          videoCodec: nullableString(video?.Codec),
-          audioCodec: nullableString(audio?.Codec),
-          audioChannels: nullableString(audio?.ChannelLayout) ?? (nullableNumber(audio?.Channels)?.toString() ?? null),
-          width,
-          height,
-          bitrate: nullableNumber(source.Bitrate) ?? nullableNumber(video?.BitRate),
-          videoRange: nullableString(video?.VideoRange),
-          transcodeReason: transcodeReasons,
-          externalSubtitles: externalSubtitles(source.MediaStreams),
-        };
-      }).filter((source) => source.id),
+      capabilities: mediaSourceCapabilities(itemId, result),
+      playSessionId: boundedNullableString(result.PlaySessionId, 256),
     };
+  }
+
+  private async requestPlaybackInfo(itemId: string, signal?: AbortSignal): Promise<JsonRecord> {
+    const session = this.requireSession();
+    return asRecord(await this.request(`/Items/${encodeURIComponent(itemId)}/PlaybackInfo`, {
+      UserId: session.userId,
+    }, {
+      method: "POST",
+      body: JSON.stringify({
+        UserId: session.userId,
+        DeviceProfile: seeingStoneMpvDeviceProfile(),
+        EnableDirectPlay: true,
+        EnableDirectStream: true,
+        EnableTranscoding: true,
+        AllowVideoStreamCopy: true,
+        AllowAudioStreamCopy: true,
+        MaxAudioChannels: 8,
+      }),
+      signal,
+    }));
   }
 
   async getTrailerUrl(itemId: string): Promise<string | null> {
@@ -646,8 +717,12 @@ export class JellyfinApi {
     itemId: string;
     mediaSourceId: string;
     playMethod: "DirectPlay" | "DirectStream" | "Transcode";
+    playSessionId: string;
     positionTicks: number;
     paused: boolean;
+    canSeek: boolean;
+    audioStreamIndex: number | null;
+    subtitleStreamIndex: number | null;
   }): Promise<void> {
     const endpoint = event.kind === "start"
       ? "/Sessions/Playing"
@@ -659,9 +734,15 @@ export class JellyfinApi {
       body: JSON.stringify({
         ItemId: event.itemId,
         MediaSourceId: event.mediaSourceId,
+        PlaySessionId: event.playSessionId,
         PositionTicks: Math.max(0, Math.floor(event.positionTicks)),
-        IsPaused: event.paused,
-        PlayMethod: event.playMethod,
+        ...(event.kind === "stop" ? {} : {
+          IsPaused: event.paused,
+          PlayMethod: event.playMethod,
+          CanSeek: event.canSeek,
+          AudioStreamIndex: event.audioStreamIndex,
+          SubtitleStreamIndex: event.subtitleStreamIndex,
+        }),
       }),
     });
   }

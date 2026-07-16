@@ -49,7 +49,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 1);
+    assert.equal(health.schemaVersion, 2);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -73,7 +73,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
@@ -304,6 +304,45 @@ test("playback revisions preserve completion and allow newer explicit lower posi
   try {
     await reopened.open();
     assert.equal((await reopened.getPlaybackHead(identity.serverId, identity.userId, media.itemId)).latestRevision, 23);
+  } finally {
+    await reopened.close();
+  }
+});
+
+test("authoritative playback reports survive a SQLite close and reopen", async () => {
+  const { directory, service } = await createSeededService("lf-report-roundtrip-");
+  const report = {
+    kind: "progress",
+    mediaSourceId: "source-1",
+    playMethod: "DirectStream",
+    playSessionId: "play-session-1",
+    paused: true,
+    canSeek: true,
+    audioStreamIndex: 2,
+    subtitleStreamIndex: 4,
+  };
+  try {
+    const captured = await service.recordPlaybackRevision({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      actionKind: "progress",
+      positionTicks: 123_000_000,
+      watched: false,
+      occurredAt: 1000,
+      report,
+    });
+    assert.deepEqual(captured.report, report);
+  } finally {
+    await service.close();
+  }
+
+  const reopened = new SqlitePersistenceService(directory);
+  try {
+    await reopened.open();
+    const [captured] = await reopened.listPendingProgress();
+    assert.deepEqual(captured.report, report);
+    assert.equal(captured.positionTicks, 123_000_000);
   } finally {
     await reopened.close();
   }

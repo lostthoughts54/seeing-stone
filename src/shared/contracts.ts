@@ -129,6 +129,8 @@ export interface PlaybackDiagnostics {
 
 export interface PlaybackTrack {
   id: number;
+  /** Demuxer stream index when mpv can map it reliably. */
+  streamIndex?: number | null;
   type: "audio" | "subtitle";
   title: string | null;
   language: string | null;

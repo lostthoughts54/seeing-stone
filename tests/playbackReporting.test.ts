@@ -17,6 +17,7 @@ function revision(localRevision: number): PlaybackRevisionRecord {
     attemptCount: 0,
     lastError: null,
     syncedAt: null,
+    report: null,
   };
 }
 
@@ -28,14 +29,16 @@ describe("PlaybackReportingService durable main-side boundary", () => {
       .mockResolvedValueOnce(first)
       .mockResolvedValueOnce(second);
     const setActive = vi.fn();
-    const markCaptureFailed = vi.fn(async () => undefined);
+    const flushCapture = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     const reportAuthoritativePlayback = vi.fn()
       .mockRejectedValueOnce(Object.assign(new Error("offline"), { code: "NETWORK_ERROR" }))
       .mockResolvedValueOnce(undefined);
     const warn = vi.fn();
     const service = new PlaybackReportingService(
       { reportAuthoritativePlayback } as never,
-      { capture, setActive, markCaptureFailed },
+      { capture, setActive, flushCapture },
       { info() {}, warn, error() {} },
     );
 
@@ -44,8 +47,12 @@ describe("PlaybackReportingService durable main-side boundary", () => {
       itemId: "episode-1",
       mediaSourceId: "source-1",
       playMethod: "DirectPlay",
+      playSessionId: "play-session-1",
       positionTicks: 0,
       paused: false,
+      canSeek: true,
+      audioStreamIndex: 1,
+      subtitleStreamIndex: null,
       actionKind: "replay",
       watched: false,
     });
@@ -54,8 +61,12 @@ describe("PlaybackReportingService durable main-side boundary", () => {
       itemId: "episode-1",
       mediaSourceId: "source-1",
       playMethod: "DirectPlay",
+      playSessionId: "play-session-1",
       positionTicks: 200,
       paused: false,
+      canSeek: true,
+      audioStreamIndex: 1,
+      subtitleStreamIndex: null,
       actionKind: "progress",
       watched: false,
     });
@@ -65,11 +76,22 @@ describe("PlaybackReportingService durable main-side boundary", () => {
       actionKind: "replay",
       positionTicks: 0,
       watched: false,
+      report: {
+        kind: "start",
+        mediaSourceId: "source-1",
+        playMethod: "DirectPlay",
+        playSessionId: "play-session-1",
+        paused: false,
+        canSeek: true,
+        audioStreamIndex: 1,
+        subtitleStreamIndex: null,
+      },
     });
     expect(setActive).toHaveBeenNthCalledWith(1, first, true);
     expect(setActive).toHaveBeenNthCalledWith(2, second, false);
-    expect(markCaptureFailed).toHaveBeenCalledWith(first, expect.objectContaining({ code: "NETWORK_ERROR" }));
-    expect(reportAuthoritativePlayback).toHaveBeenCalledTimes(2);
+    expect(flushCapture).toHaveBeenNthCalledWith(1, first);
+    expect(flushCapture).toHaveBeenNthCalledWith(2, second);
+    expect(reportAuthoritativePlayback).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith("Authoritative playback reporting was deferred.", expect.any(Object));
   });
 });

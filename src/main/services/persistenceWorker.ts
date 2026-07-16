@@ -176,6 +176,23 @@ CREATE INDEX playback_revisions_pending_idx
   WHERE sync_state IN ('pending', 'failed');
 `;
 
+const MIGRATION_2 = `
+ALTER TABLE playback_revisions ADD COLUMN report_kind TEXT
+  CHECK (report_kind IS NULL OR report_kind IN ('start', 'progress', 'stop'));
+ALTER TABLE playback_revisions ADD COLUMN report_media_source_id TEXT;
+ALTER TABLE playback_revisions ADD COLUMN report_play_method TEXT
+  CHECK (report_play_method IS NULL OR report_play_method IN ('DirectPlay', 'DirectStream', 'Transcode'));
+ALTER TABLE playback_revisions ADD COLUMN report_play_session_id TEXT;
+ALTER TABLE playback_revisions ADD COLUMN report_paused INTEGER
+  CHECK (report_paused IS NULL OR report_paused IN (0, 1));
+ALTER TABLE playback_revisions ADD COLUMN report_can_seek INTEGER
+  CHECK (report_can_seek IS NULL OR report_can_seek IN (0, 1));
+ALTER TABLE playback_revisions ADD COLUMN report_audio_stream_index INTEGER
+  CHECK (report_audio_stream_index IS NULL OR report_audio_stream_index >= 0);
+ALTER TABLE playback_revisions ADD COLUMN report_subtitle_stream_index INTEGER
+  CHECK (report_subtitle_stream_index IS NULL OR report_subtitle_stream_index >= 0);
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -221,6 +238,12 @@ function initialize(): PersistenceHealth {
       transaction(() => {
         db().exec(MIGRATION_1);
         db().exec("PRAGMA user_version = 1");
+      });
+    }
+    if (version < 2) {
+      transaction(() => {
+        db().exec(MIGRATION_2);
+        db().exec("PRAGMA user_version = 2");
       });
     }
     const now = Date.now();
@@ -507,6 +530,9 @@ function listLocalVersions(serverId: string, userId: string, itemId: string): Lo
 }
 
 function playbackRevisionRow(row: Record<string, unknown>): PlaybackRevisionRecord {
+  const reportKind = row.report_kind === null || row.report_kind === undefined
+    ? null
+    : row.report_kind as NonNullable<PlaybackRevisionRecord["report"]>["kind"];
   return {
     serverId: String(row.server_id),
     userId: String(row.user_id),
@@ -515,6 +541,16 @@ function playbackRevisionRow(row: Record<string, unknown>): PlaybackRevisionReco
     actionKind: row.action_kind as PlaybackRevisionRecord["actionKind"],
     positionTicks: Number(row.position_ticks),
     watched: row.watched === 1,
+    report: reportKind === null ? null : {
+      kind: reportKind,
+      mediaSourceId: String(row.report_media_source_id),
+      playMethod: row.report_play_method as NonNullable<PlaybackRevisionRecord["report"]>["playMethod"],
+      playSessionId: String(row.report_play_session_id),
+      paused: row.report_paused === 1,
+      canSeek: row.report_can_seek === 1,
+      audioStreamIndex: row.report_audio_stream_index === null ? null : Number(row.report_audio_stream_index),
+      subtitleStreamIndex: row.report_subtitle_stream_index === null ? null : Number(row.report_subtitle_stream_index),
+    },
     completionEvent: row.completion_event === 1,
     occurredAt: Number(row.occurred_at),
     syncState: row.sync_state as PlaybackRevisionRecord["syncState"],
@@ -556,11 +592,21 @@ function recordPlaybackRevision(input: Extract<PersistenceOperation, { kind: "re
     db().prepare(`
       INSERT INTO playback_revisions(
         server_id, user_id, item_id, local_revision, action_kind, position_ticks, watched, completion_event,
-        occurred_at, sync_state, attempt_count, last_error, synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL)
+        occurred_at, sync_state, attempt_count, last_error, synced_at,
+        report_kind, report_media_source_id, report_play_method, report_play_session_id,
+        report_paused, report_can_seek, report_audio_stream_index, report_subtitle_stream_index
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.serverId, input.userId, input.itemId, revision, input.actionKind, input.positionTicks,
       input.watched ? 1 : 0, completionEvent ? 1 : 0, input.occurredAt,
+      input.report?.kind ?? null,
+      input.report?.mediaSourceId ?? null,
+      input.report?.playMethod ?? null,
+      input.report?.playSessionId ?? null,
+      input.report ? (input.report.paused ? 1 : 0) : null,
+      input.report ? (input.report.canSeek ? 1 : 0) : null,
+      input.report?.audioStreamIndex ?? null,
+      input.report?.subtitleStreamIndex ?? null,
     );
     db().prepare(`
       INSERT INTO playback_heads(

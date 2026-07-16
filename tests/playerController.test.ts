@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MpvPlayerService } from "../src/main/services/mpvPlayer";
+import { MpvPlayerService, parsePlaybackTracks } from "../src/main/services/mpvPlayer";
 import type { PlayerControllerEvent } from "../src/main/services/playerController";
 
 function harness() {
@@ -110,5 +110,32 @@ describe("PlayerController mpv adapter", () => {
     expect(h.player.getState()).toMatchObject({ buffering: true, phase: "buffering" });
     expect(h.events.at(-1)).toMatchObject({ action: "buffering", origin: "system" });
     expect(JSON.stringify(h.events.at(-1))).not.toContain("jellyfin-media://");
+  });
+
+  it("promotes a continuous measured cache wait to stalled and recovers cleanly", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.message({ event: "property-change", name: "paused-for-cache", data: true });
+      expect(h.player.getState().phase).toBe("buffering");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(h.player.getState().phase).toBe("stalled");
+      expect(h.events.at(-1)).toMatchObject({ action: "stalled", origin: "system" });
+      h.message({ event: "property-change", name: "paused-for-cache", data: false });
+      expect(h.player.getState().phase).toBe("playing");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sanitizes rich mpv track metadata while retaining future stream mapping", () => {
+    expect(parsePlaybackTracks([
+      { id: 1, type: "audio", title: "English", lang: "eng", selected: true, codec: "aac", "ff-index": 2, "demux-channel-count": 6, default: true },
+      { id: 3, type: "sub", title: "Signs", lang: "eng", selected: false, codec: "subrip", "ff-index": 4, forced: true, external: true },
+      { id: "bad", type: "audio", title: "ignored" },
+    ])).toEqual({
+      audioTracks: [expect.objectContaining({ id: 1, streamIndex: 2, codec: "aac", channels: 6, isDefault: true })],
+      subtitleTracks: [expect.objectContaining({ id: 3, streamIndex: 4, codec: "subrip", isForced: true, external: true })],
+    });
   });
 });

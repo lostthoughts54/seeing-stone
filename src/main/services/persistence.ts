@@ -296,11 +296,28 @@ export class SqlitePersistenceService {
 
   async recordPlaybackRevision(input: RecordPlaybackRevisionInput): Promise<PlaybackRevisionRecord> {
     const identity = safeIdentity(input);
+    const report = input.report ? {
+      kind: input.report.kind,
+      mediaSourceId: boundedText(input.report.mediaSourceId, "Playback media source identity", 256),
+      playMethod: input.report.playMethod,
+      playSessionId: boundedText(input.report.playSessionId, "Playback session identity", 256),
+      paused: input.report.paused === true,
+      canSeek: input.report.canSeek === true,
+      audioStreamIndex: optionalNonnegativeInteger(input.report.audioStreamIndex, "Audio stream index"),
+      subtitleStreamIndex: optionalNonnegativeInteger(input.report.subtitleStreamIndex, "Subtitle stream index"),
+    } : null;
+    if (report && !["start", "progress", "stop"].includes(report.kind)) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Playback report kind is invalid.", 400);
+    }
+    if (report && !["DirectPlay", "DirectStream", "Transcode"].includes(report.playMethod)) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Playback report method is invalid.", 400);
+    }
     return this.invoke({
       kind: "recordPlaybackRevision",
       input: {
         ...input,
         ...identity,
+        report,
         positionTicks: nonnegativeInteger(input.positionTicks, "Playback position"),
         occurredAt: nonnegativeInteger(input.occurredAt, "Playback timestamp"),
       },

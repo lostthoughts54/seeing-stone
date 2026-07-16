@@ -4,6 +4,7 @@ import type { AuthenticatedContext } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { SqlitePersistenceService } from "./persistence";
 import type {
+  DurablePlaybackReport,
   PlaybackActionKind,
   PlaybackRevisionRecord,
   RecordPlaybackRevisionInput,
@@ -17,6 +18,10 @@ interface OfflineSyncApi {
     actionKind: PlaybackActionKind;
     positionTicks: number;
     watched: boolean;
+  }): Promise<void>;
+  reportAuthoritativePlayback(input: DurablePlaybackReport & {
+    itemId: string;
+    positionTicks: number;
   }): Promise<void>;
 }
 
@@ -181,6 +186,14 @@ export class OfflineSynchronizationService {
     ).catch(() => undefined);
   }
 
+  async flushCapture(revision: PlaybackRevisionRecord): Promise<boolean> {
+    const cycleWasAlreadyRunning = this.running !== null;
+    await this.syncNow();
+    if (cycleWasAlreadyRunning) await this.syncNow();
+    const head = await this.persistence.getPlaybackHead(revision.serverId, revision.userId, revision.itemId);
+    return Boolean(head && head.lastSucceededRevision >= revision.localRevision);
+  }
+
   syncNow(): Promise<void> {
     if (!this.enabled) return Promise.resolve();
     if (this.running) return this.running;
@@ -210,8 +223,10 @@ export class OfflineSynchronizationService {
     }
 
     for (const [key, entries] of groups) {
-      if (!this.isCurrent(revision) || this.activeItems.has(key)) continue;
-      const plan = coalescePlaybackRevisions(entries);
+      if (!this.isCurrent(revision)) return;
+      const reportEntries = entries.filter((entry) => entry.report != null)
+        .sort((left, right) => left.localRevision - right.localRevision);
+      const plan = coalescePlaybackRevisions(entries.filter((entry) => entry.report == null));
       for (const stale of plan.superseded) {
         if (!this.isCurrent(revision)) return;
         await this.persistence.markPlaybackSuperseded(
@@ -221,11 +236,52 @@ export class OfflineSynchronizationService {
           stale.localRevision,
         ).catch(() => undefined);
       }
-      for (const entry of plan.selected) {
+      const selected = [...reportEntries, ...plan.selected]
+        .sort((left, right) => left.localRevision - right.localRevision);
+      for (const entry of selected) {
         if (!this.isCurrent(revision)) return;
-        const succeeded = await this.synchronizeRevision(entry, revision);
+        // Periodic automatic progress remains deferred while playback is active,
+        // but explicit local actions and exact lifecycle reports retain revision
+        // order so a later report cannot advance the watermark past them.
+        if (this.activeItems.has(key) && !entry.report && entry.actionKind === "progress") continue;
+        const succeeded = entry.report
+          ? await this.synchronizeReportRevision(entry, revision)
+          : await this.synchronizeRevision(entry, revision);
         if (!succeeded) break;
       }
+    }
+  }
+
+  private async synchronizeReportRevision(entry: PlaybackRevisionRecord, sessionRevision: number): Promise<boolean> {
+    if (!entry.report || !this.isCurrent(sessionRevision)) return false;
+    const head = await this.persistence.getPlaybackHead(entry.serverId, entry.userId, entry.itemId);
+    if (!head || !this.isCurrent(sessionRevision)) return false;
+    if (entry.localRevision <= head.lastSucceededRevision) {
+      await this.persistence.markPlaybackSuperseded(
+        entry.serverId,
+        entry.userId,
+        entry.itemId,
+        entry.localRevision,
+      ).catch(() => undefined);
+      return true;
+    }
+    try {
+      await this.api.reportAuthoritativePlayback({
+        ...entry.report,
+        itemId: entry.itemId,
+        positionTicks: entry.positionTicks,
+      });
+      if (!this.isCurrent(sessionRevision)) return false;
+      await this.persistence.markProgressSucceeded(
+        entry.serverId,
+        entry.userId,
+        entry.itemId,
+        entry.localRevision,
+      );
+      return true;
+    } catch (error) {
+      await this.fail(entry, error);
+      return false;
     }
   }
 

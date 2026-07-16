@@ -113,7 +113,10 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("SearchTerm")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("IncludeItemTypes")) return Response.json({ Items: [unsafeItem] });
-      if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({ MediaSources: unsafeItem.MediaSources });
+      if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({
+        MediaSources: unsafeItem.MediaSources,
+        PlaySessionId: "play-session-1",
+      });
       if (url.pathname === "/Videos/movie-1/source-1/Subtitles/4/Stream.srt") {
         return new Response("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n", { headers: { "Content-Type": "application/x-subrip" } });
       }
@@ -146,7 +149,9 @@ describe("JellyfinApi main-side boundary", () => {
     const seasons = await api.getSeasons("series-1");
     const episodes = await api.getEpisodes("series-1", "season-1");
     const nextUp = await api.getNextUpForSeries("series-1");
-    const capabilities = await api.getMediaSourceCapabilities("movie-1");
+    const sourceInfo = await api.getPlaybackSourceInfo("movie-1");
+    const capabilities = sourceInfo.capabilities;
+    expect(sourceInfo.playSessionId).toBe("play-session-1");
     const externalSubtitle = await api.fetchExternalSubtitle("movie-1", "source-1", 4, "srt");
     expect(await externalSubtitle.text()).toContain("Subtitle");
     const artwork = await api.fetchArtwork("movie-1", "Primary", { maxWidth: "500" });
@@ -157,8 +162,12 @@ describe("JellyfinApi main-side boundary", () => {
       itemId: "movie-1",
       mediaSourceId: "source-1",
       playMethod: "DirectPlay",
+      playSessionId: "play-session-1",
       positionTicks: 1234,
       paused: false,
+      canSeek: true,
+      audioStreamIndex: 2,
+      subtitleStreamIndex: 4,
     });
     await api.synchronizeOfflinePlayback({
       itemId: "movie-1",
@@ -207,6 +216,19 @@ describe("JellyfinApi main-side boundary", () => {
       MediaSourceId: "source-1",
       PositionTicks: 1234,
       PlayMethod: "DirectPlay",
+      PlaySessionId: "play-session-1",
+      CanSeek: true,
+      AudioStreamIndex: 2,
+      SubtitleStreamIndex: 4,
+    });
+    const playbackInfoRequest = observedRequests.find((entry) => entry.url.pathname.endsWith("/PlaybackInfo"));
+    const playbackInfoBody = JSON.parse(String(playbackInfoRequest?.init?.body));
+    expect(playbackInfoBody).toMatchObject({
+      EnableDirectPlay: true,
+      EnableDirectStream: true,
+      EnableTranscoding: true,
+      MaxAudioChannels: 8,
+      DeviceProfile: { Name: "Seeing Stone mpv" },
     });
     const watchedRequests = observedRequests.filter((entry) => entry.url.pathname === "/UserPlayedItems/movie-1");
     expect(watchedRequests.map((entry) => entry.init?.method)).toEqual(["POST", "DELETE", "POST", "DELETE"]);

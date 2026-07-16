@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { createHash } = require("node:crypto");
-const { existsSync, readFileSync } = require("node:fs");
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
@@ -12,7 +12,8 @@ const root = resolve(__dirname, "..");
 const runtime = process.argv[2] ? resolve(process.argv[2]) : join(root, ".runtime", "mpv");
 const executable = join(runtime, "mpv.exe");
 const consoleExecutable = join(runtime, "mpv.com");
-const fixture = join(root, ".runtime", "mpv-acceptance.mkv");
+const fixture = join(root, ".runtime", "mpv-adapter-acceptance.mkv");
+const subtitleFixture = join(root, ".runtime", "mpv-adapter-acceptance.srt");
 
 void main().catch((error) => {
   process.stderr.write(`${error?.stack || String(error)}\n`);
@@ -25,6 +26,9 @@ async function main() {
   const executableHash = createHash("sha256").update(readFileSync(executable)).digest("hex");
   assert.equal(executableHash, manifest.executableSha256, "Pinned mpv.exe checksum mismatch.");
   if (!existsSync(fixture)) createFixture();
+  if (!existsSync(subtitleFixture)) {
+    writeFileSync(subtitleFixture, "1\n00:00:00,000 --> 00:00:02,500\nSynthetic subtitle acceptance\n", "utf8");
+  }
 
   const pipe = `\\\\.\\pipe\\localfirst-mpv-acceptance-${randomUUID()}`;
   const child = spawn(executable, [
@@ -33,6 +37,7 @@ async function main() {
     "--vo=null",
     "--ao=null",
     "--pause=yes",
+    `--sub-file=${subtitleFixture}`,
     `--input-ipc-server=${pipe}`,
     "--",
     fixture,
@@ -57,7 +62,17 @@ async function main() {
 
     const trackList = await ipc.command(["get_property", "track-list"]);
     assert.ok(Array.isArray(trackList) && trackList.some((track) => track.type === "video"));
-    process.stdout.write(`mpv runtime acceptance passed (${version}, duration ${duration.toFixed(2)}s).\n`);
+    const audioTrack = trackList.find((track) => track.type === "audio");
+    const subtitleTrack = trackList.find((track) => track.type === "sub");
+    assert.equal(typeof audioTrack?.id, "number", "Synthetic audio track was not discovered.");
+    assert.equal(typeof subtitleTrack?.id, "number", "Synthetic subtitle track was not discovered.");
+    await ipc.command(["set_property", "aid", audioTrack.id]);
+    await ipc.command(["set_property", "sid", subtitleTrack.id]);
+    assert.equal(await ipc.command(["get_property", "aid"]), audioTrack.id);
+    assert.equal(await ipc.command(["get_property", "sid"]), subtitleTrack.id);
+    await ipc.command(["set_property", "speed", 1.05]);
+    assert.equal(await ipc.command(["get_property", "speed"]), 1.05);
+    process.stdout.write(`mpv runtime acceptance passed (${version}, duration ${duration.toFixed(2)}s, audio and subtitle tracks verified).\n`);
   } finally {
     await ipc.command(["quit"]).catch(() => undefined);
     ipc.close();
@@ -68,8 +83,9 @@ async function main() {
 function createFixture() {
   const result = spawnSync(consoleExecutable, [
     "--no-config",
-    "--no-audio",
     "--ovc=mpeg4",
+    "--oac=aac",
+    "--audio-file=av://lavfi:sine=frequency=440:duration=12",
     `--o=${fixture}`,
     "av://lavfi:testsrc2=duration=12:size=640x360:rate=24",
   ], { cwd: root, encoding: "utf8", windowsHide: true });

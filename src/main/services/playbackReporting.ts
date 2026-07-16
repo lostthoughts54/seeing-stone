@@ -1,15 +1,11 @@
 import type { JellyfinApi } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { OfflineSynchronizationService } from "./offlineSynchronization";
-import type { PlaybackActionKind, PlaybackRevisionRecord } from "./persistenceTypes";
+import type { DurablePlaybackReport, PlaybackActionKind, PlaybackRevisionRecord } from "./persistenceTypes";
 
-export interface AuthoritativePlaybackEvent {
-  kind: "start" | "progress" | "stop";
+export interface AuthoritativePlaybackEvent extends DurablePlaybackReport {
   itemId: string;
-  mediaSourceId: string;
-  playMethod: "DirectPlay" | "DirectStream" | "Transcode";
   positionTicks: number;
-  paused: boolean;
   actionKind: PlaybackActionKind;
   watched: boolean;
 }
@@ -21,7 +17,7 @@ export interface AuthoritativePlaybackEvent {
 export class PlaybackReportingService {
   constructor(
     private readonly api: JellyfinApi,
-    private readonly synchronization: Pick<OfflineSynchronizationService, "capture" | "setActive" | "markCaptureFailed">,
+    private readonly synchronization: Pick<OfflineSynchronizationService, "capture" | "setActive" | "flushCapture">,
     private readonly logger: AppLogger,
   ) {}
 
@@ -33,15 +29,29 @@ export class PlaybackReportingService {
         actionKind: event.actionKind,
         positionTicks: event.positionTicks,
         watched: event.watched,
+        report: {
+          kind: event.kind,
+          mediaSourceId: event.mediaSourceId,
+          playMethod: event.playMethod,
+          playSessionId: event.playSessionId,
+          paused: event.paused,
+          canSeek: event.canSeek,
+          audioStreamIndex: event.audioStreamIndex,
+          subtitleStreamIndex: event.subtitleStreamIndex,
+        },
       });
       if (event.kind === "start") this.synchronization.setActive(revision, true);
     } catch (error) {
       this.logger.warn("Authoritative playback progress could not be persisted.", { kind: event.kind, error });
     }
     try {
-      await this.api.reportAuthoritativePlayback(event);
+      if (revision) {
+        const synchronized = await this.synchronization.flushCapture(revision);
+        if (!synchronized) this.logger.warn("Authoritative playback reporting was deferred.", { kind: event.kind });
+      } else {
+        await this.api.reportAuthoritativePlayback(event);
+      }
     } catch (error) {
-      if (revision) await this.synchronization.markCaptureFailed(revision, error);
       this.logger.warn("Authoritative playback reporting was deferred.", { kind: event.kind, error });
     } finally {
       if (revision && event.kind === "stop") this.synchronization.setActive(revision, false);

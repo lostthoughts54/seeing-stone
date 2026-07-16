@@ -5,11 +5,14 @@ export type PlayerActionOrigin = "local-user" | "remote-sync" | "system";
 export type PlayerAction =
   | "state"
   | "load-item"
+  | "ready"
   | "play"
   | "pause"
   | "seek"
   | "stop"
   | "buffering"
+  | "stalled"
+  | "disconnected"
   | "completed"
   | "item-transition"
   | "resync-request"
@@ -17,7 +20,7 @@ export type PlayerAction =
   | "tracks"
   | "fullscreen";
 
-export interface PlayerCommandContext {
+export interface PlaybackCommandContext {
   origin: PlayerActionOrigin;
   /** Monotonic revision owned by the caller's authentication/group session. */
   commandRevision?: number;
@@ -25,7 +28,10 @@ export interface PlayerCommandContext {
   commandId?: string;
 }
 
-export interface PlayerControllerEvent {
+/** @deprecated Use PlaybackCommandContext. */
+export type PlayerCommandContext = PlaybackCommandContext;
+
+export interface PlaybackEvent {
   action: PlayerAction;
   origin: PlayerActionOrigin;
   commandRevision: number | null;
@@ -36,14 +42,22 @@ export interface PlayerControllerEvent {
   state: PlaybackState;
 }
 
+/** @deprecated Use PlaybackEvent. */
+export type PlayerControllerEvent = PlaybackEvent;
+
 export interface PlaybackAdapter {
   onState(listener: (state: PlaybackState) => void): () => void;
-  onEvent(listener: (event: PlayerControllerEvent) => void): () => void;
+  onEvent(listener: (event: PlaybackEvent) => void): () => void;
   getState(): PlaybackState;
   getControllerRevision(): number;
   getPlaybackRate(): number;
   /** Enables solo Next Up transitions; a group coordinator may designate one participant. */
   setAutomaticTransitionsEnabled(enabled: boolean): void;
+  load(itemId: string, resumeMode: "resume" | "start-over", context?: PlaybackCommandContext): Promise<PlaybackStartResult>;
+  play(playbackId: string, context?: PlaybackCommandContext): Promise<PlaybackState>;
+  pause(playbackId: string, context?: PlaybackCommandContext): Promise<PlaybackState>;
+  setRate(playbackId: string, rate: number, context?: PlaybackCommandContext): Promise<PlaybackState>;
+  /** Compatibility name retained for existing SyncPlay code. */
   loadItem(itemId: string, resumeMode: "resume" | "start-over", context?: PlayerCommandContext): Promise<PlaybackStartResult>;
   setPaused(playbackId: string, paused: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;
   seek(playbackId: string, positionTicks: number, context?: PlayerCommandContext): Promise<PlaybackState>;

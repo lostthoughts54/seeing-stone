@@ -35,6 +35,7 @@ function revision(localRevision: number, overrides: Partial<PlaybackRevisionReco
     attemptCount: 0,
     lastError: null,
     syncedAt: null,
+    report: null,
     ...overrides,
   };
 }
@@ -213,6 +214,53 @@ describe("OfflineSynchronizationService", () => {
     expect(persistence.heads.get("episode-1")?.lastSucceededRevision).toBe(6);
     expect(persistence.heads.get("episode-1")?.lastSucceededPositionTicks).toBe(250);
     expect(persistence.heads.get("episode-1")?.lastSucceededWatched).toBe(false);
+  });
+
+  it("preserves explicit local actions before later exact playback reports", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const entries = [
+      revision(1, { actionKind: "mark_watched", watched: true }),
+      revision(2, {
+        positionTicks: 300,
+        report: {
+          kind: "progress",
+          mediaSourceId: "source-1",
+          playMethod: "DirectPlay",
+          playSessionId: "play-session-1",
+          paused: false,
+          canSeek: true,
+          audioStreamIndex: 1,
+          subtitleStreamIndex: null,
+        },
+      }),
+    ];
+    persistence.seed(entries, {
+      serverId: context.serverId,
+      userId: context.userId,
+      itemId: "episode-1",
+      latestRevision: 2,
+      actionKind: "progress",
+      positionTicks: 300,
+      watched: false,
+      occurredAt: 2,
+      lastSucceededRevision: 0,
+      lastSucceededPositionTicks: 0,
+      lastSucceededWatched: false,
+      updatedAt: 2,
+    });
+    const sent: string[] = [];
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getDetails: vi.fn(async () => remoteItem(0, false)),
+      synchronizeOfflinePlayback: vi.fn(async () => { sent.push("explicit"); }),
+      reportAuthoritativePlayback: vi.fn(async () => { sent.push("report"); }),
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    service.activate();
+    await service.syncNow();
+    await service.shutdown();
+
+    expect(sent).toEqual(["explicit", "report"]);
+    expect(persistence.revisions.map((entry) => entry.syncState)).toEqual(["succeeded", "succeeded"]);
   });
 
   it("never sends stale automatic progress but permits a newer explicit lower revision", async () => {

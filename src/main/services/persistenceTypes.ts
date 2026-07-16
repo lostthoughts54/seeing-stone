@@ -1,4 +1,4 @@
-export const DATABASE_SCHEMA_VERSION = 1;
+export const DATABASE_SCHEMA_VERSION = 2;
 
 export interface CatalogIdentityInput {
   serverId: string;
@@ -125,6 +125,17 @@ export interface DownloadBundleRecord {
 export type PlaybackActionKind = "progress" | "completed" | "start_over" | "replay" | "mark_watched" | "mark_unwatched";
 export type ProgressSyncState = "pending" | "succeeded" | "failed" | "superseded";
 
+export interface DurablePlaybackReport {
+  kind: "start" | "progress" | "stop";
+  mediaSourceId: string;
+  playMethod: "DirectPlay" | "DirectStream" | "Transcode";
+  playSessionId: string;
+  paused: boolean;
+  canSeek: boolean;
+  audioStreamIndex: number | null;
+  subtitleStreamIndex: number | null;
+}
+
 export interface RecordPlaybackRevisionInput {
   serverId: string;
   userId: string;
@@ -133,9 +144,11 @@ export interface RecordPlaybackRevisionInput {
   positionTicks: number;
   watched: boolean;
   occurredAt: number;
+  report?: DurablePlaybackReport | null;
 }
 
-export interface PlaybackRevisionRecord extends RecordPlaybackRevisionInput {
+export interface PlaybackRevisionRecord extends Omit<RecordPlaybackRevisionInput, "report"> {
+  report: DurablePlaybackReport | null;
   localRevision: number;
   completionEvent: boolean;
   syncState: ProgressSyncState;
@@ -144,7 +157,7 @@ export interface PlaybackRevisionRecord extends RecordPlaybackRevisionInput {
   syncedAt: number | null;
 }
 
-export interface PlaybackHeadRecord extends RecordPlaybackRevisionInput {
+export interface PlaybackHeadRecord extends Omit<RecordPlaybackRevisionInput, "report"> {
   latestRevision: number;
   lastSucceededRevision: number;
   lastSucceededPositionTicks: number;

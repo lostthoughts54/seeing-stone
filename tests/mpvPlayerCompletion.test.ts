@@ -182,7 +182,7 @@ describe("MpvPlayerService natural completion", () => {
   it("reports a forced playback-engine exit as a system error, never completion", async () => {
     const h = harness({ embedded: true });
     await (h.player as never as { handleUnexpectedProcessExit(): Promise<void> }).handleUnexpectedProcessExit();
-    expect(h.player.getState()).toMatchObject({ phase: "error", playbackId: null, error: "The playback engine disconnected unexpectedly." });
+    expect(h.player.getState()).toMatchObject({ phase: "disconnected", playbackId: null, error: "The playback engine disconnected unexpectedly." });
     expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
     expect(h.reportedEvents[0]).toMatchObject({ actionKind: "progress", watched: false });
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
