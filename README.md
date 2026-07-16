@@ -88,4 +88,4 @@ The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified so
 
 ## Milestone boundary
 
-The SyncPlay W4 implementation, automated regressions, live two-service Jellyfin acceptance, and packaged Windows acceptance are complete. The final physical two-computer run remains the acceptance gate and is not yet claimed as complete; use [SYNCPLAY_PHYSICAL_ACCEPTANCE.md](SYNCPLAY_PHYSICAL_ACCEPTANCE.md) with the exact accepted installer.
+The SyncPlay W4 implementation, automated regressions, live two-service Jellyfin acceptance, packaged Windows acceptance, and initial Adam/Kayla field use are complete. The 0.4.3 timing retest and several extended physical scenarios were explicitly deferred as accepted follow-up risk; [SYNCPLAY_PHYSICAL_ACCEPTANCE.md](SYNCPLAY_PHYSICAL_ACCEPTANCE.md) remains the exact later regression sheet.

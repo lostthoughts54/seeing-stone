@@ -13,6 +13,8 @@ Jellyfin server: 10.11.11 only
 
 Windows may show an unknown-publisher warning because this private test installer is not Authenticode-signed.
 
+The earlier two-computer run on 0.4.2 successfully reached shared playback but left Kayla audibly 0.5-1.0 seconds behind. Version 0.4.3 is the current build because it replaces the overly broad timing tolerance with smooth tiered correction while keeping the automatic three-second seek boundary. Adam accepted release without delaying for a second physical run; this sheet remains available for later troubleshooting or regression testing.
+
 ## Before starting
 
 - [ ] Adam and Kayla each have a distinct Jellyfin account with SyncPlay access.
@@ -61,7 +63,8 @@ Party name: ________________________________
 - [ ] Kayla pauses; both computers pause once.
 - [ ] Kayla resumes; both computers resume without bouncing between states.
 - [ ] Kayla seeks to a different position; both computers converge near the same position.
-- [ ] Small timing differences settle without constant seeking or speed oscillation.
+- [ ] Keep both players audible for at least one minute. A small offset shrinks instead of remaining fixed, without visible video jumps or speed oscillation.
+- [ ] Automatic correction does not seek for a difference under three seconds. The explicit `Ctrl+R` action may still jump because it is a user-requested immediate resync.
 
 ### 4. Buffering and reconnect
 
@@ -98,8 +101,8 @@ Adam computer / Windows version: ______________________________
 
 Kayla computer / Windows version: ______________________________
 
-- [ ] PASS — every required item above passed.
-- [ ] FAIL — one or more items failed; record the first failure below.
+- [ ] PASS - every required item above passed.
+- [ ] FAIL - one or more items failed; record the first failure below.
 
 First failed step: ______________________________
 

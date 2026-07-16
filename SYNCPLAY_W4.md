@@ -8,6 +8,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - An interrupted authenticated WebSocket reconnects after bounded exponential delays of 1, 2, 4, 8, 15, and 15 seconds. Shared commands are disabled while membership is being reconciled.
 - A remembered group is rejoined only if the authenticated group list still contains it. A deleted or vanished group clears local membership and presents an actionable error.
 - Buffering sends SyncPlay `Buffering`; recovery sends `Ready`. Temporary playback-rate correction is reset on buffering, player error, leave, or deactivation.
+- Automatic drift correction leaves differences below 0.1 seconds alone, uses symmetric 2%, 4%, and 6% speed correction across the 0.1-0.4, 0.4-1.6, and 1.6-3.0 second bands, and reserves an automatic seek for drift of at least three seconds. A 0.05-second reset threshold prevents speed oscillation near the tolerance boundary.
 - Logout, session expiration, device-session replacement, and server changes deactivate SyncPlay, stop periodic work, clear membership, and restore solo playback behavior.
 - Active group discovery refreshes only while the Active Watch Parties screen is visible. Timing and drift work continue only as needed while joined.
 - The joined-party card visibly reports `This computer: Local download` or `This computer: Jellyfin stream` from the existing sanitized playback state, so the physical local-versus-streamed condition can be verified without exposing a path or URL.
@@ -24,7 +25,7 @@ W4 completes the implementation work required before Adam and Kayla perform the 
 - This preserves the central local-first rule: one computer can select a verified downloaded file while another selects Direct Play, streaming, or transcoding. SyncPlay never sends a filesystem path or delivery URL between clients.
 - Leaving or losing the group restores ordinary solo Next Up behavior on every computer.
 
-## Verification performed through 2026-07-14
+## Verification performed through 2026-07-15
 
 - TypeScript main, preload, and renderer typechecks passed.
 - Unit suite: 23 files and 116 tests passed, including the active-room join race, native `Ctrl+R` event, local-only routing, bounded on-video feedback, taskbar window boundary, sanitized persistent download-location settings, and exact tiered drift-correction boundaries.
@@ -47,9 +48,15 @@ SHA-256: 4def44f554b6408093f956dc83f567cc7049763243a1019b6e174731ea2b6d5f
 
 The installer is not Authenticode-signed. Windows may therefore show an unknown-publisher warning.
 
-## Physical Adam/Kayla acceptance still required
+## Physical field evidence and accepted follow-up risk
 
-Automated tests cannot claim the final physical two-computer conditions. The following is the final acceptance gate:
+Adam and Kayla used the packaged watch-party feature on two physical computers on 2026-07-14. They successfully joined the same party and shared playback worked after some initial difficulty. The run exposed a stable audible offset with Kayla approximately 0.5-1.0 seconds behind Adam. The prior correction policy tolerated as much as 0.75 seconds and corrected larger sub-three-second differences at only 2%, so that observation directly motivated the tiered 0.4.3 correction above.
+
+Version 0.4.3 has exact boundary tests, the full automated regression suite, live two-service Jellyfin acceptance, native mpv acceptance, and packaged Windows acceptance. Adam accepted release on 2026-07-15 without waiting for another physical run; any remaining real-world issue will be handled as a follow-up bug. The 0.4.3 timing behavior itself is therefore not claimed as physically observed.
+
+## Deferred physical regression checklist
+
+Automated tests cannot claim conditions that were not observed on two physical computers. Adam accepted 0.4.3 for release without another physical run, so the following checklist is retained as a recommended later regression and troubleshooting aid rather than a release blocker:
 
 Use `SYNCPLAY_PHYSICAL_ACCEPTANCE.md` as the fillable run sheet for the exact packaged build.
 
@@ -71,4 +78,4 @@ pnpm test:authenticated
 pnpm test:package
 ```
 
-No claim is made yet that the physical downloaded-versus-streamed pair, induced real-network drift, or cross-season two-computer Next Up acceptance has passed. Those are the only remaining goal acceptance items.
+No claim is made that the physical downloaded-versus-streamed pair, 0.4.3 timing behavior, induced real-network recovery, or cross-season two-computer Next Up scenarios were observed. Those checks were explicitly deferred at release acceptance and should be run if a related issue appears.
