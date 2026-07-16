@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, type Rectangle } from "electron";
+import { BaseWindow, BrowserWindow, screen, type Rectangle } from "electron";
 import { AppError } from "./errors";
 
 export interface VideoViewport {
@@ -27,7 +27,7 @@ export function videoHostBounds(content: Rectangle, viewport: VideoViewport): Re
 
 export class EmbeddedVideoHost implements MpvVideoHost {
   readonly embedded = true as const;
-  private readonly window: BrowserWindow;
+  private readonly window: BaseWindow;
   private viewport: VideoViewport = { x: 0, y: 0, width: 0, height: 0, visible: false, revision: 0 };
   private lastBounds: Rectangle | null = null;
   private hostVisible = false;
@@ -35,12 +35,12 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   private readonly displayMetricsListener = () => this.scheduleReconcile();
 
   constructor(private readonly owner: BrowserWindow) {
-    this.window = new BrowserWindow({
+    this.window = new BaseWindow({
       parent: owner, modal: false, frame: false, show: false, focusable: false,
-      skipTaskbar: true, backgroundColor: "#020207",
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false },
+      skipTaskbar: true, backgroundColor: "#020207", hasShadow: false,
+      roundedCorners: false, thickFrame: false, resizable: false, movable: false,
+      minimizable: false, maximizable: false, fullscreenable: false,
     });
-    this.window.setMenu(null);
     this.window.setIgnoreMouseEvents(true);
     owner.on("move", () => this.scheduleReconcile());
     owner.on("resize", () => this.scheduleReconcile());
@@ -63,7 +63,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   updateViewport(viewport: VideoViewport): void {
     if (viewport.revision <= this.viewport.revision) return;
     this.viewport = { ...viewport };
-    this.applyBounds();
+    this.scheduleReconcile();
   }
   setFullscreen(fullscreen: boolean): void {
     if (this.owner.isFullScreen() !== fullscreen) this.owner.setFullScreen(fullscreen);
@@ -84,7 +84,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   private scheduleReconcile(): void {
     if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     this.applyBounds();
-    this.reconcileTimer = setTimeout(() => { this.reconcileTimer = null; this.applyBounds(); }, 150);
+    this.reconcileTimer = setTimeout(() => { this.reconcileTimer = null; this.applyBounds(); }, 500);
   }
 
   private applyBounds(): void {

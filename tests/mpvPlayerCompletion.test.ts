@@ -54,7 +54,7 @@ function nextEpisode(itemId: string) {
   };
 }
 
-function harness(options: { nextId?: string | null; failNextStart?: boolean; localNext?: boolean; externalSubtitleNext?: boolean } = {}) {
+function harness(options: { nextId?: string | null; failNextStart?: boolean; localNext?: boolean; externalSubtitleNext?: boolean; embedded?: boolean } = {}) {
   const current = source("episode-1", "playback-1");
   const replacement = source(options.nextId || "episode-2", "playback-2");
   if (options.localNext) {
@@ -116,6 +116,14 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     },
     close: vi.fn(),
   };
+  const videoHost = {
+    embedded: true as const,
+    getWindowId: () => "1234",
+    updateViewport: vi.fn(),
+    setFullscreen: vi.fn(),
+    hide: vi.fn(),
+    destroy: vi.fn(),
+  };
   const player = new MpvPlayerService(
     window as never,
     playback as never,
@@ -125,6 +133,7 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     }) } as never,
     { get: async () => ({ windowMaximized: true }), setWindowMaximized: async () => undefined },
     { executable: "mpv.exe", inputConfig: "input.conf" },
+    options.embedded ? videoHost : undefined,
   );
   const internals = player as unknown as Record<string, unknown>;
   internals.source = current;
@@ -158,7 +167,7 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
   internals.reportingActive = true;
   internals.playbackRevision = 1;
   internals.completion = new PlaybackCompletionCoordinator(10, 3, async () => undefined);
-  return { player, internals, playback, reports, reportedEvents, commands, window, current, proxy };
+  return { player, internals, playback, reports, reportedEvents, commands, window, current, proxy, videoHost };
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -171,12 +180,13 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 describe("MpvPlayerService natural completion", () => {
   it("reports a forced playback-engine exit as a system error, never completion", async () => {
-    const h = harness();
+    const h = harness({ embedded: true });
     await (h.player as never as { handleUnexpectedProcessExit(): Promise<void> }).handleUnexpectedProcessExit();
     expect(h.player.getState()).toMatchObject({ phase: "error", playbackId: null, error: "The playback engine disconnected unexpectedly." });
     expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
     expect(h.reportedEvents[0]).toMatchObject({ actionKind: "progress", watched: false });
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
+    expect(h.videoHost.hide).toHaveBeenCalledOnce();
   });
 
   it("auto-closes a movie after exactly one authoritative stop report", async () => {

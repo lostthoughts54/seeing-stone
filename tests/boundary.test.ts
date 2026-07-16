@@ -121,6 +121,9 @@ describe("renderer and preload security boundary", () => {
     expect(player).toContain("this.mainWindow.show()");
     expect(player).not.toContain("this.mainWindow.hide()");
     expect(player).toContain("`--wid=${windowId}`");
+    expect(player).toContain('["--gpu-api=opengl"]');
+    expect(host).toContain("new BaseWindow({");
+    expect(host).not.toContain("new BrowserWindow({");
     expect(host).toContain("getNativeWindowHandle()");
     expect(host).toContain("readUInt32LE(0)");
     expect(host).toContain("setIgnoreMouseEvents(true)");

@@ -413,6 +413,7 @@ export class MpvPlayerService implements PlayerController {
       `--osc=${this.videoHost ? "no" : "yes"}`,
       `--input-default-bindings=${this.videoHost ? "no" : "yes"}`,
       `--input-vo-keyboard=${this.videoHost ? "no" : "yes"}`,
+      ...(this.videoHost ? ["--gpu-api=opengl"] : []),
       "--title=Seeing Stone Player",
       ...(windowId ? [`--wid=${windowId}`] : ["--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
       `--input-conf=${this.runtime.inputConfig}`,

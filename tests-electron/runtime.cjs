@@ -655,7 +655,7 @@ async function runElectronChild() {
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
-        playback: ["getState", "seek", "selectAudio", "selectSubtitle", "setFullscreen", "setPaused", "start", "stop", "subscribe"],
+        playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setViewport", "start", "stop", "subscribe"],
         watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
@@ -1051,8 +1051,10 @@ async function runElectronChild() {
         }
         const searchQuickPlay = document.querySelector('#searchRows [data-quick-play-item="runtime-zulu-movie-id"]');
         searchQuickPlay?.click();
+        let livePlayback = null;
         for (let attempt = 0; attempt < 100; attempt += 1) {
-          if (document.getElementById("playerTitle").textContent === "Zulu movie") break;
+          livePlayback = await window.jellyfin.playback.getState();
+          if (livePlayback.itemId === "runtime-zulu-movie-id") break;
           await delay(20);
         }
         return {
@@ -1062,6 +1064,7 @@ async function runElectronChild() {
           searchQuickPlayPresent: Boolean(searchQuickPlay),
           quickPlayLabel: searchQuickPlay?.getAttribute("aria-label"),
           playerTitle: document.getElementById("playerTitle").textContent,
+          playbackItemId: livePlayback?.itemId ?? null,
         };
       })()`);
 
@@ -1071,6 +1074,7 @@ async function runElectronChild() {
       assert.equal(result.searchQuickPlayPresent, true);
       assert.equal(result.quickPlayLabel, "Play Zulu movie");
       assert.equal(result.playerTitle, "Zulu movie");
+      assert.equal(result.playbackItemId, runtimeOtherMovie.id);
       const playbackState = playback.getState();
       assert.equal(playbackState.itemId, runtimeOtherMovie.id);
       playback.stop(playbackState.playbackId);
@@ -1089,8 +1093,10 @@ async function runElectronChild() {
         const buttons = [...(card?.querySelectorAll("button") ?? [])];
         const play = buttons.find((button) => button.textContent === "Play");
         play?.click();
+        let livePlayback = null;
         for (let attempt = 0; attempt < 100; attempt += 1) {
-          if (document.getElementById("playerSourceBadge").textContent === "Jellyfin") break;
+          livePlayback = await window.jellyfin.playback.getState();
+          if (livePlayback.itemId === "runtime-offline-episode-id") break;
           await delay(20);
         }
         return {
@@ -1099,6 +1105,7 @@ async function runElectronChild() {
           playerTitle: document.getElementById("playerTitle").textContent,
           playerMeta: document.getElementById("playerMeta").textContent,
           sourceBadge: document.getElementById("playerSourceBadge").textContent,
+          playbackItemId: livePlayback?.itemId ?? null,
         };
       })()`);
       assert.equal(result.foundCard, true);
@@ -1106,6 +1113,7 @@ async function runElectronChild() {
       assert.equal(result.playerTitle, downloadedItem.name);
       assert.equal(result.playerMeta, "Episode - Downloaded");
       assert.equal(result.sourceBadge, "Jellyfin");
+      assert.equal(result.playbackItemId, downloadedItem.itemId);
       const playbackState = playback.getState();
       assert.equal(playbackState.itemId, downloadedItem.itemId);
       assert.equal(playbackState.source, "server");
