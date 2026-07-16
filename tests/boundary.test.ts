@@ -108,17 +108,24 @@ describe("renderer and preload security boundary", () => {
     expect(preload).not.toMatch(/new WebSocket|\bfetch\s*\(/);
   });
 
-  it("uses a main-controlled native mpv window without failed Electron HWND embedding", async () => {
+  it("keeps legacy playback while gating a main-controlled Windows HWND host", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
+    const host = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
+    const main = await readFile("src/main/index.ts", "utf8");
     const input = await readFile("assets/mpv/input.conf", "utf8");
     expect(player).toContain('"--force-window=immediate"');
-    expect(player).toContain('"--title=LocalFirst Jellyfin Player"');
+    expect(player).toContain('"--title=Seeing Stone Player"');
     expect(player).toContain('"--geometry=1280x720"');
     expect(player).toContain("this.mainWindow.minimize()");
     expect(player).toContain("this.mainWindow.restore()");
     expect(player).toContain("this.mainWindow.show()");
     expect(player).not.toContain("this.mainWindow.hide()");
-    expect(player).not.toMatch(/--wid|new BaseWindow\s*\(|const host = new BrowserWindow\s*\(/);
+    expect(player).toContain("`--wid=${windowId}`");
+    expect(host).toContain("getNativeWindowHandle()");
+    expect(host).toContain("readUInt32LE(0)");
+    expect(host).toContain("setIgnoreMouseEvents(true)");
+    expect(main).toContain('process.env.SEEING_STONE_PLAYER === "embedded"');
+    expect(main).toContain("!app.isPackaged");
     expect(input).toContain("Ctrl+r script-message jellyfin-resync");
   });
 

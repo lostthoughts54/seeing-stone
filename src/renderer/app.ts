@@ -1655,12 +1655,28 @@ interface PlaybackPresentation {
   failureMessage: string;
 }
 
+async function syncPlayerViewport(visible = !playerView.classList.contains("is-hidden")): Promise<boolean> {
+  const bounds = videoPlayer.getBoundingClientRect();
+  const result = await window.jellyfin.playback.setViewport({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    visible: visible && bounds.width >= 16 && bounds.height >= 16,
+  }).catch(() => ({ embedded: false }));
+  return result.embedded;
+}
+
 async function startPresentedPlayback(presentation: PlaybackPresentation): Promise<void> {
   const requestId = ++state.playbackRequestId;
   state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   state.playbackItem = presentation.item;
   playerTitle.textContent = presentation.title;
   playerMeta.textContent = presentation.meta;
+  playerView.classList.remove("is-hidden");
+  document.body.classList.add("is-playing");
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await syncPlayerViewport(true);
 
   let resolved;
   try {
@@ -1715,6 +1731,7 @@ async function closePlayer(): Promise<void> {
   const playbackId = state.playbackId;
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
+  await syncPlayerViewport(false);
   state.playbackItem = null;
   state.playbackId = null;
   state.playbackSource = null;
@@ -1731,8 +1748,14 @@ window.jellyfin.playback.subscribe((playback) => {
   if (playback.playbackId || !state.playbackId) return;
   state.playbackId = null;
   state.playbackItem = null;
+  playerView.classList.add("is-hidden");
+  document.body.classList.remove("is-playing");
+  void syncPlayerViewport(false);
   state.lastFocusElement?.focus?.();
 });
+
+new ResizeObserver(() => { void syncPlayerViewport(); }).observe(videoPlayer);
+window.addEventListener("resize", () => { void syncPlayerViewport(); });
 
 function resetSignedInState(): void {
   if (state.searchTimer) clearTimeout(state.searchTimer);

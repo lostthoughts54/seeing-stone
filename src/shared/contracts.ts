@@ -100,6 +100,23 @@ export interface PlaybackStartResult {
   resumePositionTicks: number;
   durationTicks: number;
   source: "server" | "local";
+  sourceKind?: PlaybackSourceKind;
+}
+
+export type PlaybackSourceKind = "matched-local" | "downloaded" | "direct-play" | "direct-stream" | "transcode" | "offline-local";
+
+export interface PlaybackDiagnostics {
+  sourceKind: PlaybackSourceKind | null;
+  playbackRate: number;
+  bufferAheadTicks: number | null;
+  container: string | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  audioChannels: string | null;
+  resolution: string | null;
+  bitrate: number | null;
+  videoRange: string | null;
+  transcodeReason: string | null;
 }
 
 export interface PlaybackTrack {
@@ -115,6 +132,7 @@ export interface PlaybackState {
   itemId: string | null;
   phase: "idle" | "resolving" | "loading" | "playing" | "paused" | "buffering" | "ended" | "stopped" | "error";
   source: "server" | "local" | null;
+  diagnostics?: PlaybackDiagnostics;
   positionTicks: number;
   durationTicks: number;
   paused: boolean;
@@ -168,6 +186,7 @@ export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
 export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
 export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
+export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean }
 export interface DownloadStartInput { itemId: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
@@ -263,6 +282,7 @@ export interface JellyfinBridge {
     setFullscreen(input: PlaybackFullscreenInput): Promise<PlaybackState>;
     stop(input: PlaybackIdInput): Promise<PlaybackState>;
     getState(): Promise<PlaybackState>;
+    setViewport(input: PlaybackViewportInput): Promise<{ embedded: boolean }>;
     subscribe(listener: (state: PlaybackState) => void): () => void;
   };
   watchParties: {
@@ -315,7 +335,8 @@ export const IPC = {
   playbackSelectSubtitle: "playback:select-subtitle",
   playbackSetFullscreen: "playback:set-fullscreen",
   playbackStop: "playback:stop",
-  playbackGetState: "playback:get-state",
+    playbackGetState: "playback:get-state",
+    playbackSetViewport: "playback:set-viewport",
   playbackStateChanged: "playback:state-changed",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",

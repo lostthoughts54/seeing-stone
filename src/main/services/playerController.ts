@@ -36,7 +36,7 @@ export interface PlayerControllerEvent {
   state: PlaybackState;
 }
 
-export interface PlayerController {
+export interface PlaybackAdapter {
   onState(listener: (state: PlaybackState) => void): () => void;
   onEvent(listener: (event: PlayerControllerEvent) => void): () => void;
   getState(): PlaybackState;
@@ -55,6 +55,8 @@ export interface PlayerController {
   stop(playbackId: string, phase?: "stopped" | "ended", context?: PlayerCommandContext): Promise<PlaybackState>;
   clear(): Promise<void>;
 }
+
+export type PlayerController = PlaybackAdapter;
 
 export const localUserCommand = (): PlayerCommandContext => ({ origin: "local-user" });
 export const systemCommand = (): PlayerCommandContext => ({ origin: "system" });

@@ -25,6 +25,7 @@ import {
   type PlaybackStartResult,
   type PlaybackState,
   type PlaybackTrackInput,
+  type PlaybackViewportInput,
   type RpcResult,
   type SafeSession,
   type SearchInput,
@@ -111,6 +112,7 @@ const bridge: JellyfinBridge = {
     setFullscreen: (input: PlaybackFullscreenInput) => invoke<PlaybackState>(IPC.playbackSetFullscreen, input),
     stop: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackStop, input),
     getState: () => invoke<PlaybackState>(IPC.playbackGetState),
+    setViewport: (input: PlaybackViewportInput) => invoke<{ embedded: boolean }>(IPC.playbackSetViewport, input),
     subscribe: (listener: (state: PlaybackState) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, state: PlaybackState) => listener(state);
       ipcRenderer.on(IPC.playbackStateChanged, receive);

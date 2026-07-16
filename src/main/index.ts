@@ -36,6 +36,7 @@ import { MediaProbeService } from "./services/mediaProbe";
 import { OfflineSynchronizationService } from "./services/offlineSynchronization";
 import { IPC } from "../shared/contracts";
 import { SyncPlayService } from "./services/syncPlay";
+import { EmbeddedVideoHost } from "./services/embeddedVideoHost";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -127,7 +128,9 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   downloadManager.onChanged((downloads) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
   });
-  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
+  const embeddedRequested = !app.isPackaged && process.env.SEEING_STONE_PLAYER === "embedded";
+  const videoHost = embeddedRequested ? new EmbeddedVideoHost(mainWindow) : undefined;
+  const playback = new MpvPlayerService(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost);
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
@@ -175,6 +178,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     offlineSynchronization,
     activeSyncPlay,
     downloadLocationController,
+    videoHost,
   );
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {

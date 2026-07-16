@@ -20,6 +20,7 @@ import {
   playbackSeekSchema,
   playbackStartSchema,
   playbackTrackSchema,
+  playbackViewportSchema,
   searchSchema,
   serverUrlSchema,
   watchedStateSchema,
@@ -33,6 +34,7 @@ import type { OfflineSynchronizationService } from "./services/offlineSynchroniz
 import { AppError, toPublicError } from "./services/errors";
 import type { JellyfinApi } from "./services/jellyfinApi";
 import type { PlayerController } from "./services/playerController";
+import type { MpvVideoHost } from "./services/embeddedVideoHost";
 import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
 
@@ -83,6 +85,7 @@ export function registerIpcHandlers(
   synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched">,
   syncPlay?: SyncPlayService,
   downloadLocation?: DownloadLocationController,
+  videoHost?: MpvVideoHost,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -218,6 +221,11 @@ export function registerIpcHandlers(
     return playback.stop(value.playbackId, "stopped", { origin: "local-user" });
   });
   register(IPC.playbackGetState, () => playback.getState());
+  register(IPC.playbackSetViewport, (input) => {
+    const viewport = playbackViewportSchema.strict().parse(input);
+    videoHost?.updateViewport(viewport);
+    return { embedded: Boolean(videoHost) };
+  });
   const requireSyncPlay = (): SyncPlayService => {
     if (!syncPlay) throw new AppError("SYNCPLAY_UNAVAILABLE", "Watch parties are unavailable in this build.", 503);
     return syncPlay;

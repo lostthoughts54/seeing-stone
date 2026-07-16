@@ -20,6 +20,7 @@ import type {
 } from "./playerController";
 import type { PlaybackReportingService } from "./playbackReporting";
 import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackSession";
+import type { MpvVideoHost } from "./embeddedVideoHost";
 
 const TICKS_PER_SECOND = 10_000_000;
 
@@ -93,6 +94,7 @@ export class MpvPlayerService implements PlayerController {
     private readonly reporting: PlaybackReportingService,
     private readonly preferences: PlayerPreferencesStore,
     private readonly runtime: MpvRuntimePaths,
+    private readonly videoHost?: MpvVideoHost,
   ) {
     this.proxy = new PlaybackProxy(playback);
   }
@@ -165,7 +167,7 @@ export class MpvPlayerService implements PlayerController {
       const playbackTargets = await this.openPlaybackTarget(source);
       this.playbackTarget = playbackTargets;
       await this.launchProcess(playbackTargets, source.resumePositionTicks, false, this.windowMaximized);
-      if (!this.mainWindow.isDestroyed()) this.mainWindow.minimize();
+      if (!this.videoHost && !this.mainWindow.isDestroyed()) this.mainWindow.minimize();
       await this.report("start");
       this.update({ ...this.state, phase: this.state.paused ? "paused" : "playing" });
       this.startReportingTimer();
@@ -251,7 +253,8 @@ export class MpvPlayerService implements PlayerController {
   ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     this.pendingFullscreen = { fullscreen, expiresAt: performance.now() + 3000 };
-    await this.command(["set_property", "fullscreen", fullscreen]);
+    if (this.videoHost) this.videoHost.setFullscreen(fullscreen);
+    else await this.command(["set_property", "fullscreen", fullscreen]);
     this.update({ ...this.state, fullscreen }, "fullscreen", context);
     return this.getState();
   }
@@ -311,6 +314,7 @@ export class MpvPlayerService implements PlayerController {
       ipc?.close();
       if (process && !process.killed) process.kill();
       await this.proxy.close();
+      this.videoHost?.hide();
       this.playbackTarget = null;
       try { this.playback.stop(playbackId); } catch { /* Already cleared. */ }
       this.source = null;
@@ -350,18 +354,19 @@ export class MpvPlayerService implements PlayerController {
 
   private async launchProcess(playbackTargets: PlaybackTargets, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
     this.eofArmed = false;
-    const pipePath = `\\\\.\\pipe\\localfirst-jellyfin-${randomUUID()}`;
+    const pipePath = `\\\\.\\pipe\\seeing-stone-${randomUUID()}`;
+    const windowId = this.videoHost?.getWindowId();
     const args = [
       "--no-config",
       "--terminal=no",
       "--force-window=immediate",
       "--keep-open=yes",
       "--hwdec=auto-safe",
-      "--osc=yes",
-      "--input-default-bindings=yes",
-      "--title=LocalFirst Jellyfin Player",
-      "--geometry=1280x720",
-      `--window-maximized=${windowMaximized ? "yes" : "no"}`,
+      `--osc=${this.videoHost ? "no" : "yes"}`,
+      `--input-default-bindings=${this.videoHost ? "no" : "yes"}`,
+      `--input-vo-keyboard=${this.videoHost ? "no" : "yes"}`,
+      "--title=Seeing Stone Player",
+      ...(windowId ? [`--wid=${windowId}`] : ["--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
       `--input-conf=${this.runtime.inputConfig}`,
       `--input-ipc-server=${pipePath}`,
       `--start=${positionTicks / TICKS_PER_SECOND}`,
