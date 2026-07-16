@@ -18,7 +18,7 @@ describe("Windows release packaging boundary", () => {
     expect(packageJson.devDependencies["@electron/fuses"]).toBe("2.1.2");
     expect(packageJson.dependencies.ws).toBe("8.18.3");
 
-    expect(config).toContain("appId: com.localfirst.jellyfin");
+    expect(config).toContain("appId: app.seeingstone.client");
     expect(config).toContain("asar: true");
     expect(config).toContain('!dist/**/*.map');
     expect(config).toContain("dist/main/services/persistenceWorker.js");

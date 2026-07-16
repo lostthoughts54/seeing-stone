@@ -1,6 +1,6 @@
-appId: com.localfirst.jellyfin
-productName: LocalFirst Jellyfin
-executableName: LocalFirst Jellyfin
+appId: app.seeingstone.client
+productName: Seeing Stone
+executableName: Seeing Stone
 asar: true
 
 directories:
@@ -42,7 +42,7 @@ win:
       arch:
         - x64
   icon: build/icon.svg
-  artifactName: LocalFirst-Jellyfin-Setup-${version}-${arch}.${ext}
+  artifactName: Seeing-Stone-Setup-${version}-${arch}.${ext}
   requestedExecutionLevel: asInvoker
 
 nsis:
@@ -53,5 +53,5 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: LocalFirst Jellyfin
+  shortcutName: Seeing Stone
   buildUniversalInstaller: false

@@ -39,7 +39,7 @@ import { SyncPlayService } from "./services/syncPlay";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
-app.setAppUserModelId("com.localfirst.jellyfin");
+app.setAppUserModelId("app.seeingstone.client");
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
@@ -107,7 +107,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     moduleDirectory: __dirname,
   });
   const mediaProbe = new MediaProbeService(runtime);
-  const defaultDownloadStorageRoot = join(app.getPath("videos"), "LocalFirst Jellyfin Downloads");
+  const defaultDownloadStorageRoot = join(app.getPath("videos"), "Seeing Stone Downloads");
   const downloadLocation = new DownloadLocationService(app.getPath("userData"), defaultDownloadStorageRoot);
   const downloadStorageRoot = await downloadLocation.getActiveRoot();
   const downloadStorageRoots = await downloadLocation.getAuthorizedRoots();
@@ -139,7 +139,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     getSummary: () => downloadLocation.getSummary(),
     choose: async () => {
       const result = await dialog.showOpenDialog(mainWindow!, {
-        title: "Choose where LocalFirst Jellyfin stores downloads",
+        title: "Choose where Seeing Stone stores downloads",
         buttonLabel: "Use This Location",
         defaultPath: await downloadLocation.getActiveRoot(),
         properties: ["openDirectory", "createDirectory"],

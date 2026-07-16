@@ -1,13 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Seeing Stone orb">
   <defs>
-    <linearGradient id="background" x1="96" y1="64" x2="928" y2="960" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#a83cff"/>
-      <stop offset="0.55" stop-color="#e4549a"/>
-      <stop offset="1" stop-color="#ff9a3c"/>
-    </linearGradient>
+    <radialGradient id="bg" cx="38%" cy="32%" r="72%">
+      <stop offset="0" stop-color="#2d2142"/>
+      <stop offset="0.54" stop-color="#100d1b"/>
+      <stop offset="1" stop-color="#05060b"/>
+    </radialGradient>
+    <radialGradient id="orb" cx="38%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#f2dcff"/>
+      <stop offset="0.18" stop-color="#c795ff"/>
+      <stop offset="0.58" stop-color="#7a35bd"/>
+      <stop offset="1" stop-color="#260f49"/>
+    </radialGradient>
+    <filter id="glow" x="-45%" y="-45%" width="190%" height="190%">
+      <feGaussianBlur stdDeviation="24" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="clip"><circle cx="512" cy="512" r="296"/></clipPath>
   </defs>
-  <rect width="1024" height="1024" rx="224" fill="#090b10"/>
-  <rect x="48" y="48" width="928" height="928" rx="192" fill="url(#background)"/>
-  <path fill="#fff" d="M244 246h112v420h190v112H244V246Z"/>
-  <path fill="#fff" d="M568 246h248v112H680v104h122v112H680v204H568V246Z"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="326" fill="none" stroke="#9c5cda" stroke-opacity=".3" stroke-width="16" filter="url(#glow)"/>
+  <circle cx="512" cy="512" r="296" fill="url(#orb)" stroke="#d8b2ff" stroke-width="10" filter="url(#glow)"/>
+  <g clip-path="url(#clip)" fill="none" stroke-linecap="round">
+    <path d="M220 534C330 258 692 252 814 474S672 806 424 716 240 416 492 242" stroke="#f1ddff" stroke-opacity=".8" stroke-width="18"/>
+    <path d="M278 390C492 566 674 254 792 470S564 820 310 606 410 272 690 338" stroke="#c779ff" stroke-opacity=".82" stroke-width="14"/>
+    <path d="M232 624C408 430 568 714 796 510M344 242C260 482 704 430 700 770" stroke="#ffffff" stroke-opacity=".58" stroke-width="9"/>
+  </g>
+  <ellipse cx="426" cy="342" rx="108" ry="58" fill="#fff" opacity=".2" transform="rotate(-24 426 342)"/>
 </svg>

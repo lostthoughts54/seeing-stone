@@ -1,10 +1,11 @@
 {
-  "name": "localfirst-jellyfin",
-  "productName": "LocalFirst Jellyfin",
+  "name": "seeing-stone",
+  "productName": "Seeing Stone",
   "version": "0.4.3",
   "private": true,
-  "author": "LocalFirst Jellyfin",
-  "description": "A Windows-first, local-file-first Jellyfin client.",
+  "author": "Seeing Stone contributors",
+  "description": "Seeing Stone — a Windows-first, local-first Jellyfin client.",
+  "license": "GPL-2.0-or-later",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "pnpm run clean && pnpm run build:main && pnpm run build:preload && pnpm run build:renderer",
@@ -32,7 +33,9 @@
     "test:syncplay-spike": "pnpm run build:main && node scripts/syncplay-protocol-spike.cjs",
     "test:syncplay-service": "pnpm run build:main && node scripts/syncplay-service-acceptance.cjs",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "licenses:check": "node scripts/license-audit.mjs --check",
+    "licenses:write": "node scripts/license-audit.mjs --write"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
