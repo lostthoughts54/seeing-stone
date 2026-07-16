@@ -312,11 +312,15 @@ export class SyncPlayService {
     if (!this.state.joinedGroup || this.state.joinedGroup.groupId !== group.groupId) {
       throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while playback was loading.", 409);
     }
+    if (!state.playbackId || !state.source || !state.diagnostics?.sourceKind) {
+      throw new AppError("SYNCPLAY_PLAYBACK_SOURCE_UNKNOWN", "The shared item started without verified source diagnostics.", 500);
+    }
     return {
-      playbackId: state.playbackId!,
+      playbackId: state.playbackId,
       resumePositionTicks: state.positionTicks,
       durationTicks: state.durationTicks,
-      source: state.source!,
+      source: state.source,
+      sourceKind: state.diagnostics.sourceKind,
     };
   }
 

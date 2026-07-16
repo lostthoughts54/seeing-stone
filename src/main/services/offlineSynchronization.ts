@@ -30,7 +30,7 @@ type OfflineSyncPersistence = Pick<SqlitePersistenceService,
   | "getMediaItem"
   | "upsertMediaItem"
   | "getPlaybackHead"
-  | "listPendingProgress"
+  | "listPendingProgressForIdentity"
   | "markProgressSucceeded"
   | "markProgressFailed"
   | "markPlaybackSuperseded"
@@ -212,8 +212,11 @@ export class OfflineSynchronizationService {
     } catch {
       return;
     }
-    const pending = (await this.persistence.listPendingProgress(1000))
-      .filter((entry) => entry.serverId === identity.serverId && entry.userId === identity.userId);
+    const pending = await this.persistence.listPendingProgressForIdentity(
+      identity.serverId,
+      identity.userId,
+      1000,
+    );
     const groups = new Map<string, PlaybackRevisionRecord[]>();
     for (const entry of pending) {
       const key = identityKey(entry.serverId, entry.userId, entry.itemId);
@@ -238,6 +241,8 @@ export class OfflineSynchronizationService {
       }
       const selected = [...reportEntries, ...plan.selected]
         .sort((left, right) => left.localRevision - right.localRevision);
+      const automaticConflictCheckRequired = !this.activeItems.has(key)
+        || entries.some((entry) => entry.attemptCount > 0);
       for (const entry of selected) {
         if (!this.isCurrent(revision)) return;
         // Periodic automatic progress remains deferred while playback is active,
@@ -245,14 +250,18 @@ export class OfflineSynchronizationService {
         // order so a later report cannot advance the watermark past them.
         if (this.activeItems.has(key) && !entry.report && entry.actionKind === "progress") continue;
         const succeeded = entry.report
-          ? await this.synchronizeReportRevision(entry, revision)
+          ? await this.synchronizeReportRevision(entry, revision, automaticConflictCheckRequired)
           : await this.synchronizeRevision(entry, revision);
         if (!succeeded) break;
       }
     }
   }
 
-  private async synchronizeReportRevision(entry: PlaybackRevisionRecord, sessionRevision: number): Promise<boolean> {
+  private async synchronizeReportRevision(
+    entry: PlaybackRevisionRecord,
+    sessionRevision: number,
+    automaticConflictCheckRequired: boolean,
+  ): Promise<boolean> {
     if (!entry.report || !this.isCurrent(sessionRevision)) return false;
     const head = await this.persistence.getPlaybackHead(entry.serverId, entry.userId, entry.itemId);
     if (!head || !this.isCurrent(sessionRevision)) return false;
@@ -264,6 +273,34 @@ export class OfflineSynchronizationService {
         entry.localRevision,
       ).catch(() => undefined);
       return true;
+    }
+    if (entry.report.conflictPolicy === "automatic" && automaticConflictCheckRequired) {
+      if (entry.positionTicks < head.lastSucceededPositionTicks
+        || (head.lastSucceededWatched && !entry.watched)) {
+        await this.persistence.markPlaybackSuperseded(
+          entry.serverId,
+          entry.userId,
+          entry.itemId,
+          entry.localRevision,
+        ).catch(() => undefined);
+        return true;
+      }
+      try {
+        const remote = await this.api.getDetails(entry.itemId);
+        if ((remote.userData.played && !entry.watched)
+          || remote.userData.playbackPositionTicks > entry.positionTicks) {
+          await this.persistence.markPlaybackSuperseded(
+            entry.serverId,
+            entry.userId,
+            entry.itemId,
+            entry.localRevision,
+          ).catch(() => undefined);
+          return true;
+        }
+      } catch (error) {
+        await this.fail(entry, error);
+        return false;
+      }
     }
     try {
       await this.api.reportAuthoritativePlayback({

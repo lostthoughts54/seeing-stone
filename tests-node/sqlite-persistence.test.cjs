@@ -45,11 +45,114 @@ async function createSeededService(prefix = "lf-sqlite-") {
   return { directory, service };
 }
 
+test("schema v1 upgrades additively to v3 while preserving existing rows", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lf-sqlite-v1-upgrade-"));
+  const databasePath = path.join(directory, "localfirst.sqlite3");
+  const v1Schema = await fs.readFile(path.join(__dirname, "fixtures", "persistence-schema-v1.sql"), "utf8");
+  const seed = new DatabaseSync(databasePath);
+  try {
+    seed.exec(v1Schema);
+    seed.prepare("INSERT INTO servers VALUES (?, ?, ?, ?, ?)").run("server-v1", "http://127.0.0.1:8096", "Server", 1, 1);
+    seed.prepare("INSERT INTO profiles VALUES (?, ?, ?, ?, ?)").run("server-v1", "user-v1", "Viewer", 1, 1);
+    seed.prepare("INSERT INTO media_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "server-v1", "user-v1", "episode-v1", "Episode", "Episode", "series-v1", "season-v1", 1_000, 1, 1,
+    );
+    seed.prepare("INSERT INTO media_sources VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "server-v1", "user-v1", "episode-v1", "source-v1", "mkv", 100, 1, 1,
+    );
+    seed.prepare(`INSERT INTO download_jobs(
+      download_id, server_id, user_id, item_id, media_source_id, origin, state,
+      smart_managed, keep_downloaded, quality_profile, bytes_downloaded, expected_size,
+      retry_count, error_code, error_message, created_at, updated_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      "download-v1", "server-v1", "user-v1", "episode-v1", "source-v1", "manual", "paused",
+      0, 1, "original", 100, 100, 0, null, null, 1, 1, null,
+    );
+    seed.prepare(`INSERT INTO local_versions(
+      local_version_id, server_id, user_id, item_id, media_source_id, download_id,
+      storage_root, local_path, path_key, origin, smart_managed, keep_downloaded,
+      file_state, probe_state, expected_size, actual_size, container, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      "local-v1", "server-v1", "user-v1", "episode-v1", "source-v1", "download-v1",
+      "C:\\Synthetic", "C:\\Synthetic\\media.mkv", "c:\\synthetic\\media.mkv", "manual", 0, 1,
+      "finalized", "valid", 100, 100, "mkv", 1, 1,
+    );
+    seed.prepare("INSERT INTO playback_heads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "server-v1", "user-v1", "episode-v1", 1, "progress", 400, 0, 1, 0, 0, 0, 1,
+    );
+    seed.prepare(`INSERT INTO playback_revisions(
+      server_id, user_id, item_id, local_revision, action_kind, position_ticks,
+      watched, completion_event, occurred_at, sync_state, attempt_count, last_error, synced_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      "server-v1", "user-v1", "episode-v1", 1, "progress", 400, 0, 0, 1, "pending", 0, null, null,
+    );
+  } finally {
+    seed.close();
+  }
+
+  const service = new SqlitePersistenceService(directory);
+  try {
+    assert.equal((await service.open()).schemaVersion, 3);
+    const bundle = await service.getDownloadBundle("download-v1");
+    assert.equal(bundle.job.state, "paused");
+    assert.equal(bundle.localVersion.localVersionId, "local-v1");
+    const head = await service.getPlaybackHead("server-v1", "user-v1", "episode-v1");
+    assert.deepEqual(
+      { latestRevision: head.latestRevision, positionTicks: head.positionTicks, conflictPolicy: head.conflictPolicy },
+      { latestRevision: 1, positionTicks: 400, conflictPolicy: "automatic" },
+    );
+    const [legacyRevision] = await service.listPendingProgressForIdentity("server-v1", "user-v1", 10);
+    assert.equal(legacyRevision.localRevision, 1);
+    assert.equal(legacyRevision.report, null);
+    const v3Revision = await service.recordPlaybackRevision({
+      serverId: "server-v1",
+      userId: "user-v1",
+      itemId: "episode-v1",
+      actionKind: "progress",
+      positionTicks: 500,
+      watched: false,
+      occurredAt: 2,
+      report: {
+        kind: "progress",
+        mediaSourceId: "source-v1",
+        playMethod: "DirectPlay",
+        playSessionId: "session-v2",
+        paused: false,
+        canSeek: true,
+        audioStreamIndex: null,
+        subtitleStreamIndex: null,
+        conflictPolicy: "automatic",
+      },
+    });
+    assert.equal(v3Revision.localRevision, 2);
+    assert.equal(v3Revision.report.playSessionId, "session-v2");
+    assert.equal(v3Revision.report.conflictPolicy, "automatic");
+  } finally {
+    await service.close();
+  }
+
+  const verify = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 3);
+    const columns = verify.prepare("PRAGMA table_info(playback_revisions)").all().map((row) => row.name);
+    for (const name of [
+      "report_kind", "report_media_source_id", "report_play_method", "report_play_session_id",
+      "report_paused", "report_can_seek", "report_audio_stream_index", "report_subtitle_stream_index",
+      "report_conflict_policy",
+    ]) assert.ok(columns.includes(name), name);
+    assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM download_jobs").get().count, 1);
+    assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM local_versions").get().count, 1);
+    assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM playback_revisions").get().count, 2);
+  } finally {
+    verify.close();
+  }
+});
+
 test("SQLite runs off the main thread with WAL, foreign keys, migrations, and integrity checks", async () => {
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 2);
+    assert.equal(health.schemaVersion, 3);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -73,7 +176,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 3);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
@@ -320,6 +423,7 @@ test("authoritative playback reports survive a SQLite close and reopen", async (
     canSeek: true,
     audioStreamIndex: 2,
     subtitleStreamIndex: 4,
+    conflictPolicy: "explicit",
   };
   try {
     const captured = await service.recordPlaybackRevision({
@@ -333,6 +437,19 @@ test("authoritative playback reports survive a SQLite close and reopen", async (
       report,
     });
     assert.deepEqual(captured.report, report);
+    await service.recordPlaybackRevision({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      actionKind: "progress",
+      positionTicks: 130_000_000,
+      watched: false,
+      occurredAt: 1100,
+      report: { ...report, paused: false, conflictPolicy: "automatic" },
+    });
+    const pendingHead = await service.getPlaybackHead(identity.serverId, identity.userId, media.itemId);
+    assert.equal(pendingHead.positionTicks, 130_000_000);
+    assert.equal(pendingHead.conflictPolicy, "explicit");
   } finally {
     await service.close();
   }
@@ -340,11 +457,62 @@ test("authoritative playback reports survive a SQLite close and reopen", async (
   const reopened = new SqlitePersistenceService(directory);
   try {
     await reopened.open();
-    const [captured] = await reopened.listPendingProgress();
+    const pending = await reopened.listPendingProgress();
+    const captured = pending[0];
     assert.deepEqual(captured.report, report);
     assert.equal(captured.positionTicks, 123_000_000);
+    assert.equal((await reopened.getPlaybackHead(identity.serverId, identity.userId, media.itemId)).conflictPolicy, "explicit");
+    await reopened.markProgressSucceeded(identity.serverId, identity.userId, media.itemId, captured.localRevision, 1200);
+    assert.equal((await reopened.getPlaybackHead(identity.serverId, identity.userId, media.itemId)).conflictPolicy, "automatic");
   } finally {
     await reopened.close();
+  }
+});
+
+test("pending playback selection applies identity scope before its limit", async () => {
+  const { service } = await createSeededService("lf-pending-scope-");
+  const otherIdentity = {
+    serverId: "server-2",
+    serverAddress: "http://127.0.0.2:8096",
+    serverName: "Other Server",
+    userId: "user-2",
+    userName: "Other Viewer",
+  };
+  const otherMedia = {
+    ...media,
+    serverId: otherIdentity.serverId,
+    userId: otherIdentity.userId,
+    itemId: "episode-other",
+  };
+  try {
+    await service.upsertCatalogIdentity(otherIdentity);
+    await service.upsertMediaItem(otherMedia);
+    await service.recordPlaybackRevision({
+      serverId: otherIdentity.serverId,
+      userId: otherIdentity.userId,
+      itemId: otherMedia.itemId,
+      actionKind: "progress",
+      positionTicks: 100,
+      watched: false,
+      occurredAt: 1,
+    });
+    const current = await service.recordPlaybackRevision({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      actionKind: "progress",
+      positionTicks: 200,
+      watched: false,
+      occurredAt: 2,
+    });
+
+    const [globalFirst] = await service.listPendingProgress(1);
+    assert.equal(globalFirst.serverId, otherIdentity.serverId);
+    const [scopedFirst] = await service.listPendingProgressForIdentity(identity.serverId, identity.userId, 1);
+    assert.equal(scopedFirst.serverId, identity.serverId);
+    assert.equal(scopedFirst.localRevision, current.localRevision);
+  } finally {
+    await service.close();
   }
 });
 

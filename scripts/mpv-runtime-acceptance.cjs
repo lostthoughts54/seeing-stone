@@ -16,7 +16,7 @@ const fixture = join(root, ".runtime", "mpv-adapter-acceptance.mkv");
 const subtitleFixture = join(root, ".runtime", "mpv-adapter-acceptance.srt");
 
 void main().catch((error) => {
-  process.stderr.write(`${error?.stack || String(error)}\n`);
+  process.stderr.write(`mpv runtime acceptance failed: ${safeFailureMessage(error)}\n`);
   process.exitCode = 1;
 });
 
@@ -104,4 +104,11 @@ async function waitForProperty(ipc, property) {
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+function safeFailureMessage(error) {
+  return String(error?.message || error || "Unknown failure")
+    .replace(/https?:\/\/[^\s"')]+/gi, "<url>")
+    .replace(/[A-Za-z]:[\\/][^\r\n"')]+/g, "<path>")
+    .slice(0, 500);
 }

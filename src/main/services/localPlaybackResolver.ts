@@ -7,7 +7,7 @@ import type { AuthenticatedContext } from "./jellyfinApi";
 import type { MediaProbeService } from "./mediaProbe";
 import type { SqlitePersistenceService } from "./persistence";
 import type { LocalVersionRecord } from "./persistenceTypes";
-import type { ResolvedPlaybackSource } from "./playbackSession";
+import { selectAuthoritativeResume, type ResolvedPlaybackSource } from "./playbackSession";
 
 interface LocalPlaybackApi {
   getAuthenticatedContext(): AuthenticatedContext;
@@ -46,7 +46,11 @@ export class LocalPlaybackResolver {
     this.authorizedRoots.set(pathKey(normalized), normalized);
   }
 
-  async resolve(itemId: string, resumeMode: "resume" | "start-over"): Promise<ResolvedPlaybackSource | null> {
+  async resolve(
+    itemId: string,
+    resumeMode: "resume" | "start-over",
+    excludedLocalVersionIds: ReadonlySet<string> = new Set(),
+  ): Promise<ResolvedPlaybackSource | null> {
     const identity = this.api.getAuthenticatedContext();
     const [media, versions, head] = await Promise.all([
       this.persistence.getMediaItem(identity.serverId, identity.userId, itemId),
@@ -56,8 +60,13 @@ export class LocalPlaybackResolver {
     if (!media) return null;
 
     const candidates = versions
-      .filter((version) => version.fileState === "finalized" && version.probeState === "valid" && version.mediaSourceId)
-      .sort((left, right) => Number(right.keepDownloaded) - Number(left.keepDownloaded) || right.updatedAt - left.updatedAt);
+      .filter((version) => version.fileState === "finalized"
+        && version.probeState === "valid"
+        && version.mediaSourceId
+        && !excludedLocalVersionIds.has(version.localVersionId))
+      .sort((left, right) => Number(Boolean(left.downloadId)) - Number(Boolean(right.downloadId))
+        || Number(right.keepDownloaded) - Number(left.keepDownloaded)
+        || right.updatedAt - left.updatedAt);
 
     for (const candidate of candidates) {
       const authorized = this.authorize(candidate);
@@ -106,19 +115,27 @@ export class LocalPlaybackResolver {
         continue;
       }
 
-      const details = await this.withinDetailsTimeout(detailsPromise);
+      const fetchedDetails = await this.withinDetailsTimeout(detailsPromise);
+      // A live response is advisory for local playback. Never attach metadata
+      // or resume state from a response for a different Jellyfin item.
+      const details = fetchedDetails?.id === itemId ? fetchedDetails : null;
       const itemType = details?.type === "Episode" || details?.type === "Movie"
         ? details.type
         : media.itemType;
       const durationTicks = Math.max(0, Math.floor(details?.runTimeTicks || media.runTimeTicks));
-      const previousPositionTicks = Math.max(0, Math.floor(details?.userData.playbackPositionTicks ?? head?.positionTicks ?? 0));
+      const previous = details
+        ? selectAuthoritativeResume(details.userData.playbackPositionTicks, details.userData.played, head)
+        : { positionTicks: head?.positionTicks ?? 0, played: head?.watched ?? false };
+      const previousPositionTicks = Math.max(0, Math.floor(previous.positionTicks));
       const resumePositionTicks = resumeMode === "start-over"
         ? 0
         : Math.max(0, Math.min(durationTicks || Number.MAX_SAFE_INTEGER,
           previousPositionTicks));
-      const previouslyWatched = details?.userData.played ?? head?.watched ?? false;
+      const previouslyWatched = previous.played;
+      const playbackId = randomUUID();
       return {
-        playbackId: randomUUID(),
+        playbackId,
+        serverPlaySessionId: playbackId,
         itemId,
         itemType,
         seriesId: details?.seriesId ?? media.seriesId,
@@ -129,6 +146,8 @@ export class LocalPlaybackResolver {
         source: "local",
         sourceKind: details ? (candidate.downloadId ? "downloaded" : "matched-local") : "offline-local",
         delivery: "local",
+        usesServerTimelineOffset: false,
+        localVersionId: candidate.localVersionId,
         diagnostics: {
           sourceKind: details ? (candidate.downloadId ? "downloaded" : "matched-local") : "offline-local",
           playbackRate: 1,

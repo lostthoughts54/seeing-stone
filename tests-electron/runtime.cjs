@@ -501,6 +501,8 @@ async function runElectronChild() {
       clear: () => playback.clear(),
       setPaused: async () => { throw new Error("not used"); },
       seek: async () => { throw new Error("not used"); },
+      setPlaybackRate: async () => { throw new Error("not used"); },
+      setVolume: async () => { throw new Error("not used"); },
       selectAudio: async () => { throw new Error("not used"); },
       selectSubtitle: async () => { throw new Error("not used"); },
       setFullscreen: async () => { throw new Error("not used"); },
@@ -655,7 +657,7 @@ async function runElectronChild() {
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
-        playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setViewport", "start", "stop", "subscribe"],
+        playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "stop", "subscribe"],
         watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());

@@ -148,6 +148,7 @@ describe("LocalPlaybackResolver", () => {
       userId: identity.userId,
       itemId: "episode-1",
       latestRevision: 2,
+      conflictPolicy: "automatic" as const,
       actionKind: "progress" as const,
       positionTicks: 450,
       watched: false,
@@ -168,6 +169,82 @@ describe("LocalPlaybackResolver", () => {
     expect(resolved?.resumePositionTicks).toBe(450);
     expect(resolved?.source).toBe("local");
     expect(resolved?.sourceKind).toBe("offline-local");
+  });
+
+  it("prefers newer pending local progress over stale online server progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-stale-server-"));
+    const target = join(root, "download-1", "media.mkv");
+    await mkdir(join(root, "download-1"));
+    await writeFile(target, Buffer.alloc(100, 7));
+    const head: PlaybackHeadRecord = {
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: "episode-1",
+      latestRevision: 2,
+      conflictPolicy: "automatic",
+      actionKind: "progress",
+      positionTicks: 450,
+      watched: false,
+      occurredAt: 2,
+      lastSucceededRevision: 1,
+      lastSucceededPositionTicks: 200,
+      lastSucceededWatched: false,
+      updatedAt: 2,
+    };
+    const value = harness({ root, versions: [localVersion(root, target)], head });
+
+    const resolved = await value.resolver.resolve("episode-1", "resume");
+
+    expect(resolved?.resumePositionTicks).toBe(450);
+    expect(resolved?.sourceKind).toBe("downloaded");
+  });
+
+  it("ignores live metadata returned for a different item", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-mismatch-"));
+    const target = join(root, "download-1", "media.mkv");
+    await mkdir(join(root, "download-1"));
+    await writeFile(target, Buffer.alloc(100, 10));
+    const value = harness({
+      root,
+      versions: [localVersion(root, target)],
+      details: async () => mediaItem({
+        id: "different-episode",
+        seriesId: "different-series",
+        runTimeTicks: 9_999,
+        userData: { played: false, playbackPositionTicks: 8_000, playedPercentage: 80 },
+      }),
+    });
+
+    const resolved = await value.resolver.resolve("episode-1", "resume");
+
+    expect(resolved).toMatchObject({
+      itemId: "episode-1",
+      seriesId: "series-1",
+      durationTicks: 1_000,
+      resumePositionTicks: 0,
+      sourceKind: "offline-local",
+    });
+  });
+
+  it("selects matched local before downloaded and honors per-attempt exclusions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-order-"));
+    const matchedPath = join(root, "matched", "media.mkv");
+    const downloadedPath = join(root, "downloaded", "media.mkv");
+    await mkdir(join(root, "matched"));
+    await mkdir(join(root, "downloaded"));
+    await writeFile(matchedPath, Buffer.alloc(100, 8));
+    await writeFile(downloadedPath, Buffer.alloc(100, 9));
+    const versions = [
+      localVersion(root, downloadedPath, { localVersionId: "downloaded", downloadId: "download-1", updatedAt: 20 }),
+      localVersion(root, matchedPath, { localVersionId: "matched", downloadId: null, updatedAt: 10 }),
+    ];
+    const value = harness({ root, versions });
+
+    const matched = await value.resolver.resolve("episode-1", "resume");
+    const downloaded = await value.resolver.resolve("episode-1", "resume", new Set(["matched"]));
+
+    expect(matched).toMatchObject({ localVersionId: "matched", sourceKind: "matched-local", mediaUrl: matchedPath });
+    expect(downloaded).toMatchObject({ localVersionId: "downloaded", sourceKind: "downloaded", mediaUrl: downloadedPath });
   });
 
   it("marks missing, size-tampered, path-escaped, and probe-invalid copies unusable", async () => {

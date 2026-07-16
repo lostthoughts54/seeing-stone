@@ -28,6 +28,13 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error?.message || error);
+  console.error(`Media probe acceptance failed: ${safeFailureMessage(error)}`);
   process.exitCode = 1;
 });
+
+function safeFailureMessage(error) {
+  return String(error?.message || error || "Unknown failure")
+    .replace(/https?:\/\/[^\s"')]+/gi, "<url>")
+    .replace(/[A-Za-z]:[\\/][^\r\n"')]+/g, "<path>")
+    .slice(0, 500);
+}

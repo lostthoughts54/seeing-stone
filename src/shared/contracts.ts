@@ -108,7 +108,7 @@ export interface PlaybackStartResult {
   resumePositionTicks: number;
   durationTicks: number;
   source: "server" | "local";
-  sourceKind?: PlaybackSourceKind;
+  sourceKind: PlaybackSourceKind;
 }
 
 export type PlaybackSourceKind = "matched-local" | "downloaded" | "direct-play" | "direct-stream" | "transcode" | "offline-local";
@@ -153,6 +153,8 @@ export interface PlaybackState {
   paused: boolean;
   buffering: boolean;
   seekable: boolean;
+  /** Effective mpv volume on a 0-100 scale. */
+  volume: number;
   fullscreen: boolean;
   audioTracks: PlaybackTrack[];
   subtitleTracks: PlaybackTrack[];
@@ -199,6 +201,8 @@ export interface PlaybackStartInput { itemId: string; resumeMode: "resume" | "st
 export interface PlaybackIdInput { playbackId: string }
 export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
+export interface PlaybackRateInput extends PlaybackIdInput { rate: number }
+export interface PlaybackVolumeInput extends PlaybackIdInput { volume: number }
 export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
 export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
 export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean; revision: number }
@@ -300,6 +304,8 @@ export interface JellyfinBridge {
     start(input: PlaybackStartInput): Promise<PlaybackStartResult>;
     setPaused(input: PlaybackPauseInput): Promise<PlaybackState>;
     seek(input: PlaybackSeekInput): Promise<PlaybackState>;
+    setRate(input: PlaybackRateInput): Promise<PlaybackState>;
+    setVolume(input: PlaybackVolumeInput): Promise<PlaybackState>;
     selectAudio(input: PlaybackTrackInput): Promise<PlaybackState>;
     selectSubtitle(input: PlaybackTrackInput): Promise<PlaybackState>;
     setFullscreen(input: PlaybackFullscreenInput): Promise<PlaybackState>;
@@ -356,6 +362,8 @@ export const IPC = {
   playbackStart: "playback:start",
   playbackSetPaused: "playback:set-paused",
   playbackSeek: "playback:seek",
+  playbackSetRate: "playback:set-rate",
+  playbackSetVolume: "playback:set-volume",
   playbackSelectAudio: "playback:select-audio",
   playbackSelectSubtitle: "playback:select-subtitle",
   playbackSetFullscreen: "playback:set-fullscreen",

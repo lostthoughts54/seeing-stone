@@ -70,7 +70,7 @@ describe("PlaybackSessionService", () => {
     expect(started.delivery).toBe("local");
     expect(started.externalSubtitles).toEqual([expect.objectContaining({ streamIndex: 4, title: "English" })]);
     expect(started.initialAction).toBe("progress");
-    expect(local.resolve).toHaveBeenCalledWith("movie-1", "resume");
+    expect(local.resolve).toHaveBeenCalledWith("movie-1", "resume", expect.any(Set));
     expect(api.getDetails).not.toHaveBeenCalled();
     expect(api.getMediaSourceCapabilities).toHaveBeenCalledWith("movie-1", expect.any(AbortSignal));
     expect((await service.handle(new Request("jellyfin-media://stream/11111111-1111-4111-8111-111111111111"))).status).toBe(404);
@@ -102,9 +102,9 @@ describe("PlaybackSessionService", () => {
     const fetchExternalSubtitle = vi.fn(async () => new Response("subtitle", { headers: { "Content-Type": "application/x-subrip" } }));
     const subtitle = { streamIndex: 4, format: "srt" as const, title: "English", language: "eng", isDefault: false, isForced: false };
     const service = new PlaybackSessionService({
-      async getDetails() { return item; },
-      async getMediaSourceCapabilities() {
-        return { itemId: item.id, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true, externalSubtitles: [subtitle] }] };
+      async getDetails(itemId: string) { return { ...item, id: itemId }; },
+      async getMediaSourceCapabilities(itemId: string) {
+        return { itemId, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true, externalSubtitles: [subtitle] }] };
       },
       fetchStaticStream,
       fetchTranscodedStream,
@@ -145,6 +145,7 @@ describe("PlaybackSessionService", () => {
     };
     const upsertMediaItem = vi.fn(async () => undefined);
     const upsertMediaSource = vi.fn(async () => undefined);
+    const getPlaybackHead = vi.fn(async () => null);
     const service = new PlaybackSessionService({
       getAuthenticatedContext: () => ({ serverId: "server-1", userId: "user-1" }),
       async getDetails() { return played; },
@@ -153,7 +154,7 @@ describe("PlaybackSessionService", () => {
       },
       fetchStaticStream: vi.fn(),
       fetchTranscodedStream: vi.fn(),
-    }, undefined, { upsertMediaItem, upsertMediaSource } as never);
+    }, undefined, { upsertMediaItem, upsertMediaSource, getPlaybackHead } as never);
 
     const started = await service.start(played.id, "start-over");
     expect(started.initialAction).toBe("replay");
@@ -170,6 +171,84 @@ describe("PlaybackSessionService", () => {
       itemId: played.id,
       mediaSourceId: "source-1",
     }));
+  });
+
+  it("resumes from newer unsynchronized local progress instead of stale server progress", async () => {
+    const serverItem = {
+      ...item,
+      userData: { ...item.userData, playbackPositionTicks: 30000000 },
+    };
+    const persistence = {
+      upsertMediaItem: vi.fn(async () => undefined),
+      upsertMediaSource: vi.fn(async () => undefined),
+      getPlaybackHead: vi.fn(async () => ({
+        serverId: "server-1",
+        userId: "user-1",
+        itemId: item.id,
+        latestRevision: 2,
+        conflictPolicy: "automatic" as const,
+        actionKind: "progress" as const,
+        positionTicks: 70000000,
+        watched: false,
+        occurredAt: 2,
+        lastSucceededRevision: 1,
+        lastSucceededPositionTicks: 20000000,
+        lastSucceededWatched: false,
+        updatedAt: 2,
+      })),
+    };
+    const service = new PlaybackSessionService({
+      getAuthenticatedContext: () => ({ serverId: "server-1", userId: "user-1" }),
+      async getDetails() { return serverItem; },
+      async getMediaSourceCapabilities() {
+        return { itemId: item.id, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }] };
+      },
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    }, undefined, persistence);
+
+    const started = await service.start(item.id, "resume");
+    expect(started.resumePositionTicks).toBe(70000000);
+    expect(persistence.getPlaybackHead).toHaveBeenCalledWith("server-1", "user-1", item.id);
+  });
+
+  it("keeps an unsynchronized explicit rewind authoritative over later server progress", async () => {
+    const serverItem = {
+      ...item,
+      userData: { ...item.userData, playbackPositionTicks: 70000000 },
+    };
+    const persistence = {
+      upsertMediaItem: vi.fn(async () => undefined),
+      upsertMediaSource: vi.fn(async () => undefined),
+      getPlaybackHead: vi.fn(async () => ({
+        serverId: "server-1",
+        userId: "user-1",
+        itemId: item.id,
+        latestRevision: 3,
+        conflictPolicy: "explicit" as const,
+        actionKind: "progress" as const,
+        positionTicks: 20000000,
+        watched: false,
+        occurredAt: 3,
+        lastSucceededRevision: 1,
+        lastSucceededPositionTicks: 60000000,
+        lastSucceededWatched: false,
+        updatedAt: 3,
+      })),
+    };
+    const service = new PlaybackSessionService({
+      getAuthenticatedContext: () => ({ serverId: "server-1", userId: "user-1" }),
+      async getDetails() { return serverItem; },
+      async getMediaSourceCapabilities() {
+        return { itemId: item.id, sources: [{ id: "source-1", container: "mp4", size: 5, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }] };
+      },
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+    }, undefined, persistence);
+
+    const started = await service.start(item.id, "resume");
+
+    expect(started.resumePositionTicks).toBe(20000000);
   });
 
   it("carries episode identity main-side and delegates cross-season Next Up to Jellyfin", async () => {
@@ -242,25 +321,65 @@ describe("PlaybackSessionService", () => {
 
   it("uses Jellyfin direct stream distinctly when direct play is unavailable", async () => {
     const fetchStaticStream = vi.fn();
-    const fetchDirectStream = vi.fn(async () => new Response("remuxed", { headers: { "Content-Type": "video/mp4" } }));
+    const fetchDirectStream = vi.fn(async function (this: { bindingMarker?: string }) {
+      if (this.bindingMarker !== "direct-api") throw new Error("direct-stream method lost its receiver");
+      return new Response("remuxed", { headers: { "Content-Type": "video/mp4" } });
+    });
     const fetchTranscodedStream = vi.fn();
+    const service = new PlaybackSessionService({
+      async getDetails() { return item; },
+      async getMediaSourceCapabilities() {
+        return { itemId: item.id, sources: [{ id: "unused", container: "mkv", size: 5, supportsDirectPlay: false, supportsDirectStream: false, supportsTranscoding: false }] };
+      },
+      async getPlaybackSourceInfo() {
+        return {
+          playSessionId: "server-session-1",
+          capabilities: { itemId: item.id, sources: [{ id: "remux-source", container: "mkv", size: 5, supportsDirectPlay: false, supportsDirectStream: true, supportsTranscoding: true }] },
+        };
+      },
+      bindingMarker: "direct-api",
+      fetchStaticStream,
+      fetchDirectStream,
+      fetchTranscodedStream,
+    });
+    const started = await service.start(item.id, "resume");
+    const response = await service.handle(new Request(started.mediaUrl));
+    expect(started.sourceKind).toBe("direct-stream");
+    expect(started.playbackId).not.toBe(started.serverPlaySessionId);
+    expect(started.usesServerTimelineOffset).toBe(true);
+    expect(response.headers.get("Content-Type")).toBe("video/mp4");
+    expect(response.headers.has("Accept-Ranges")).toBe(false);
+    expect(fetchDirectStream).toHaveBeenNthCalledWith(1, "movie-1", "remux-source", "server-session-1", 50000000, expect.any(AbortSignal));
+    service.setStreamStart(started.playbackId, 75000000);
+    await service.handle(new Request(started.mediaUrl));
+    expect(fetchDirectStream).toHaveBeenNthCalledWith(2, "movie-1", "remux-source", "server-session-1", 75000000, expect.any(AbortSignal));
+    expect(fetchStaticStream).not.toHaveBeenCalled();
+    expect(fetchTranscodedStream).not.toHaveBeenCalled();
+  });
+
+  it("never labels a static stream as direct-stream when the direct-stream adapter is unavailable", async () => {
+    const fetchStaticStream = vi.fn();
+    const fetchTranscodedStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const service = new PlaybackSessionService({
       async getDetails() { return item; },
       async getMediaSourceCapabilities() {
         return { itemId: item.id, sources: [{ id: "remux-source", container: "mkv", size: 5, supportsDirectPlay: false, supportsDirectStream: true, supportsTranscoding: true }] };
       },
       fetchStaticStream,
-      fetchDirectStream,
       fetchTranscodedStream,
     });
-    const started = await service.start(item.id, "start-over");
-    const response = await service.handle(new Request(started.mediaUrl));
-    expect(started.sourceKind).toBe("direct-stream");
-    expect(response.headers.get("Content-Type")).toBe("video/mp4");
-    expect(response.headers.has("Accept-Ranges")).toBe(false);
-    expect(fetchDirectStream).toHaveBeenCalledWith("movie-1", "remux-source", started.playbackId, expect.any(AbortSignal));
+
+    const started = await service.start(item.id, "resume");
+    await service.handle(new Request(started.mediaUrl));
+    expect(started.sourceKind).toBe("transcode");
     expect(fetchStaticStream).not.toHaveBeenCalled();
-    expect(fetchTranscodedStream).not.toHaveBeenCalled();
+    expect(fetchTranscodedStream).toHaveBeenCalledWith(
+      item.id,
+      "remux-source",
+      started.serverPlaySessionId,
+      item.userData.playbackPositionTicks,
+      expect.any(AbortSignal),
+    );
   });
 
   it("fails clearly when Jellyfin offers neither direct delivery nor transcoding", async () => {
@@ -287,6 +406,6 @@ describe("PlaybackSessionService", () => {
     });
     const started = await service.start(item.id, "start-over");
     await service.handle(new Request(started.mediaUrl));
-    expect(fetchTranscodedStream).toHaveBeenCalledWith("movie-1", "mp4-transcode", started.playbackId, expect.any(AbortSignal));
+    expect(fetchTranscodedStream).toHaveBeenCalledWith("movie-1", "mp4-transcode", started.serverPlaySessionId, 0, expect.any(AbortSignal));
   });
 });

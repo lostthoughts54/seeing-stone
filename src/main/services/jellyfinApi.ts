@@ -63,6 +63,26 @@ function boundedNullableString(value: unknown, maximum: number): string | null {
   return nullableString(value)?.slice(0, maximum) ?? null;
 }
 
+const SENSITIVE_DIAGNOSTIC = /(?:https?:\/\/|file:\/\/|[a-z]:[\\/]|\\\\|\/[^\s,]+\/|api[_-]?key|access[_-]?token|authorization|bearer\s)/i;
+
+function safeOpaqueIdentifier(value: unknown, maximum = 256): string | null {
+  const result = asString(value).trim();
+  return result.length > 0 && result.length <= maximum && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(result)
+    ? result
+    : null;
+}
+
+function safeDiagnostic(value: unknown, maximum: number, allowed: RegExp): string | null {
+  const result = asString(value).trim().slice(0, maximum);
+  if (!result || SENSITIVE_DIAGNOSTIC.test(result) || !allowed.test(result)) return null;
+  return result;
+}
+
+const safeDiagnosticToken = (value: unknown, maximum = 64): string | null =>
+  safeDiagnostic(value, maximum, /^[A-Za-z0-9][A-Za-z0-9 .,_+()~-]*$/);
+const safeDiagnosticPhrase = (value: unknown, maximum = 256): string | null =>
+  safeDiagnostic(value, maximum, /^[A-Za-z0-9][A-Za-z0-9 .,_+():~-]*$/);
+
 export function seeingStoneMpvDeviceProfile(): JsonRecord {
   return {
     Name: "Seeing Stone mpv",
@@ -79,7 +99,7 @@ export function seeingStoneMpvDeviceProfile(): JsonRecord {
       AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus",
       Protocol: "http",
       Context: "Streaming",
-      CopyTimestamps: true,
+      CopyTimestamps: false,
       EnableSubtitlesInManifest: false,
       MaxAudioChannels: "8",
     }],
@@ -109,22 +129,22 @@ function mediaSourceCapabilities(itemId: string, value: unknown): MediaSourceCap
       const width = nullableNumber(video?.Width);
       const height = nullableNumber(video?.Height);
       const transcodeReasons = Array.isArray(source.TranscodingReasons)
-        ? source.TranscodingReasons.map((reason) => asString(reason).slice(0, 128)).filter(Boolean).slice(0, 16).join(", ")
-        : boundedNullableString(source.TranscodingReasons, 512);
+        ? source.TranscodingReasons.map((reason) => safeDiagnosticPhrase(reason, 128)).filter((reason): reason is string => Boolean(reason)).slice(0, 16).join(", ") || null
+        : safeDiagnosticPhrase(source.TranscodingReasons, 512);
       return {
-        id: asString(source.Id).slice(0, 256),
-        container: boundedNullableString(source.Container, 64),
+        id: safeOpaqueIdentifier(source.Id) ?? "",
+        container: safeDiagnosticToken(source.Container),
         size: nullableNumber(source.Size),
         supportsDirectPlay: source.SupportsDirectPlay === true,
         supportsDirectStream: source.SupportsDirectStream === true,
         supportsTranscoding: source.SupportsTranscoding === true,
-        videoCodec: boundedNullableString(video?.Codec, 64),
-        audioCodec: boundedNullableString(audio?.Codec, 64),
-        audioChannels: boundedNullableString(audio?.ChannelLayout, 64) ?? (nullableNumber(audio?.Channels)?.toString() ?? null),
+        videoCodec: safeDiagnosticToken(video?.Codec),
+        audioCodec: safeDiagnosticToken(audio?.Codec),
+        audioChannels: safeDiagnosticToken(audio?.ChannelLayout) ?? (nullableNumber(audio?.Channels)?.toString() ?? null),
         width,
         height,
         bitrate: nullableNumber(source.Bitrate) ?? nullableNumber(video?.BitRate),
-        videoRange: boundedNullableString(video?.VideoRange, 64),
+        videoRange: safeDiagnosticToken(video?.VideoRange),
         transcodeReason: transcodeReasons,
         externalSubtitles: externalSubtitles(source.MediaStreams),
       };
@@ -163,8 +183,8 @@ function externalSubtitles(value: unknown): ExternalSubtitleTrack[] {
     result.push({
       streamIndex: streamIndex as number,
       format: externalSubtitleFormat(stream.Codec),
-      title: (nullableString(stream.DisplayTitle) ?? nullableString(stream.Title))?.slice(0, 256) ?? null,
-      language: nullableString(stream.Language)?.slice(0, 32) ?? null,
+      title: safeDiagnosticPhrase(nullableString(stream.DisplayTitle) ?? nullableString(stream.Title), 256),
+      language: safeDiagnosticToken(stream.Language, 32),
       isDefault: stream.IsDefault === true,
       isForced: stream.IsForced === true,
     });
@@ -560,7 +580,7 @@ export class JellyfinApi {
     const result = await this.requestPlaybackInfo(itemId, signal);
     return {
       capabilities: mediaSourceCapabilities(itemId, result),
-      playSessionId: boundedNullableString(result.PlaySessionId, 256),
+      playSessionId: safeOpaqueIdentifier(result.PlaySessionId),
     };
   }
 
@@ -640,12 +660,21 @@ export class JellyfinApi {
     }
   }
 
-  async fetchDirectStream(itemId: string, mediaSourceId: string, playSessionId: string, signal?: AbortSignal): Promise<Response> {
+  async fetchDirectStream(
+    itemId: string,
+    mediaSourceId: string,
+    playSessionId: string,
+    startTimeTicks: number,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     return this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
       static: "false",
+      container: "mp4",
       mediaSourceId,
       deviceId: this.identity.deviceId,
       playSessionId,
+      startTimeTicks: String(Math.max(0, Math.floor(startTimeTicks))),
+      copyTimestamps: "false",
       enableAutoStreamCopy: "true",
       allowVideoStreamCopy: "true",
       allowAudioStreamCopy: "true",
@@ -677,6 +706,7 @@ export class JellyfinApi {
     itemId: string,
     mediaSourceId: string,
     playSessionId: string,
+    startTimeTicks: number,
     signal?: AbortSignal,
   ): Promise<Response> {
     const headersController = new AbortController();
@@ -692,6 +722,8 @@ export class JellyfinApi {
         mediaSourceId,
         deviceId: this.identity.deviceId,
         playSessionId,
+        startTimeTicks: String(Math.max(0, Math.floor(startTimeTicks))),
+        copyTimestamps: "false",
         videoCodec: "h264",
         audioCodec: "aac",
         audioBitRate: "256000",

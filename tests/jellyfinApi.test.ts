@@ -46,9 +46,22 @@ const unsafeItem = {
     SupportsDirectPlay: true,
     SupportsDirectStream: true,
     SupportsTranscoding: true,
+    TranscodingReasons: ["ContainerNotSupported", "https://server.invalid/?api_key=SECRET_TOKEN_SENTINEL"],
     TranscodingUrl: "/transcode?api_key=SECRET_TOKEN_SENTINEL",
     RequiredHttpHeaders: { Authorization: "SECRET_TOKEN_SENTINEL" },
     MediaStreams: [{
+      Type: "Video",
+      Codec: "https://server.invalid/SECRET_TOKEN_SENTINEL",
+      Width: 1920,
+      Height: 1080,
+      BitRate: 5_000_000,
+      VideoRange: "D:\\Sensitive\\range.txt",
+    }, {
+      Type: "Audio",
+      Codec: "aac",
+      ChannelLayout: "https://server.invalid/token",
+      Channels: 6,
+    }, {
       Type: 2,
       Index: 4,
       Codec: "subrip",
@@ -259,13 +272,13 @@ describe("JellyfinApi main-side boundary", () => {
       supportsDirectStream: true,
       supportsTranscoding: true,
       videoCodec: null,
-      audioCodec: null,
-      audioChannels: null,
-      width: null,
-      height: null,
-      bitrate: null,
+      audioCodec: "aac",
+      audioChannels: "6",
+      width: 1920,
+      height: 1080,
+      bitrate: 5_000_000,
       videoRange: null,
-      transcodeReason: null,
+      transcodeReason: "ContainerNotSupported",
       externalSubtitles: [{
         streamIndex: 4,
         format: "srt",
@@ -275,6 +288,7 @@ describe("JellyfinApi main-side boundary", () => {
         isForced: false,
       }],
     });
+    expect(JSON.stringify(capabilities)).not.toMatch(/SECRET_TOKEN_SENTINEL|Sensitive|https?:\/\//i);
     expect(observedHeaders.length).toBeGreaterThan(2);
     expect(new Set(observedHeaders.map((value) => value.match(/DeviceId="([^"]+)"/)?.[1])).size).toBe(1);
     expect(observedHeaders.every((value) => value.includes('Client="LocalFirst Jellyfin"') && value.includes('Version="0.4.3"'))).toBe(true);
@@ -302,8 +316,8 @@ describe("JellyfinApi main-side boundary", () => {
 
     vi.useFakeTimers();
     await api.fetchStaticStream("movie-1", "source-1");
-    await api.fetchDirectStream("movie-1", "source-1", "22222222-2222-4222-8222-222222222222");
-    const transcoded = await api.fetchTranscodedStream("movie-1", "source-1", "33333333-3333-4333-8333-333333333333");
+    await api.fetchDirectStream("movie-1", "source-1", "22222222-2222-4222-8222-222222222222", 120000000);
+    const transcoded = await api.fetchTranscodedStream("movie-1", "source-1", "33333333-3333-4333-8333-333333333333", 340000000);
     expect(await transcoded.text()).toBe("transcoded-video");
     await vi.advanceTimersByTimeAsync(15001);
     expect(streamSignal?.aborted).toBe(false);
@@ -313,11 +327,16 @@ describe("JellyfinApi main-side boundary", () => {
     const directStreamRequest = observedRequests.find(({ url }) => url.searchParams.get("playSessionId") === "22222222-2222-4222-8222-222222222222");
     expect(directStreamRequest?.url.pathname).toBe("/Videos/movie-1/stream");
     expect(directStreamRequest?.url.searchParams.get("enableAutoStreamCopy")).toBe("true");
+    expect(directStreamRequest?.url.searchParams.get("container")).toBe("mp4");
+    expect(directStreamRequest?.url.searchParams.get("startTimeTicks")).toBe("120000000");
+    expect(directStreamRequest?.url.searchParams.get("copyTimestamps")).toBe("false");
     expect(directStreamRequest?.url.searchParams.get("deviceId")).toBe(identity.deviceId);
     expect(transcodeRequest?.url.searchParams.get("static")).toBe("false");
     expect(transcodeRequest?.url.searchParams.get("mediaSourceId")).toBe("source-1");
     expect(transcodeRequest?.url.searchParams.get("deviceId")).toBe(identity.deviceId);
     expect(transcodeRequest?.url.searchParams.get("playSessionId")).toBe("33333333-3333-4333-8333-333333333333");
+    expect(transcodeRequest?.url.searchParams.get("startTimeTicks")).toBe("340000000");
+    expect(transcodeRequest?.url.searchParams.get("copyTimestamps")).toBe("false");
     expect(transcodeRequest?.url.searchParams.get("videoCodec")).toBe("h264");
     expect(transcodeRequest?.url.searchParams.get("audioCodec")).toBe("aac");
     expect(transcodeRequest?.url.searchParams.get("transcodingMaxAudioChannels")).toBe("2");

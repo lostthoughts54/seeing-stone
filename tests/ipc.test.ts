@@ -38,7 +38,7 @@ function createHarness() {
   };
   const artwork = { clear: vi.fn(), getUrl: vi.fn() };
   const playback = {
-    clear: vi.fn(), start: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), selectAudio: vi.fn(),
+    clear: vi.fn(), start: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), setRate: vi.fn(), setVolume: vi.fn(), selectAudio: vi.fn(),
     selectSubtitle: vi.fn(), setFullscreen: vi.fn(), stop: vi.fn(), getState: vi.fn(),
   };
   const downloads = {
@@ -178,5 +178,22 @@ describe("IPC authorization and allowlist", () => {
     }) as { ok: boolean };
     expect(rejected.ok).toBe(false);
     expect(synchronization.setWatched).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates bounded rate and volume controls before invoking the adapter", async () => {
+    const { handlers, validEvent, playback } = createHarness();
+    const playbackId = "55555555-5555-4555-8555-555555555555";
+    playback.setRate.mockResolvedValue({ playbackId });
+    playback.setVolume.mockResolvedValue({ playbackId });
+
+    await expect(handlers.get(IPC.playbackSetRate)?.(validEvent, { playbackId, rate: 1.5 })).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.playbackSetVolume)?.(validEvent, { playbackId, volume: 42 })).resolves.toMatchObject({ ok: true });
+    expect(playback.setRate).toHaveBeenCalledWith(playbackId, 1.5, { origin: "local-user" });
+    expect(playback.setVolume).toHaveBeenCalledWith(playbackId, 42, { origin: "local-user" });
+
+    await expect(handlers.get(IPC.playbackSetRate)?.(validEvent, { playbackId, rate: 4.01 })).resolves.toMatchObject({ ok: false });
+    await expect(handlers.get(IPC.playbackSetVolume)?.(validEvent, { playbackId, volume: 101 })).resolves.toMatchObject({ ok: false });
+    expect(playback.setRate).toHaveBeenCalledTimes(1);
+    expect(playback.setVolume).toHaveBeenCalledTimes(1);
   });
 });

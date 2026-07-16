@@ -38,6 +38,7 @@ export class PlaybackReportingService {
           canSeek: event.canSeek,
           audioStreamIndex: event.audioStreamIndex,
           subtitleStreamIndex: event.subtitleStreamIndex,
+          conflictPolicy: event.conflictPolicy,
         },
       });
       if (event.kind === "start") this.synchronization.setActive(revision, true);
@@ -49,7 +50,9 @@ export class PlaybackReportingService {
         const synchronized = await this.synchronization.flushCapture(revision);
         if (!synchronized) this.logger.warn("Authoritative playback reporting was deferred.", { kind: event.kind });
       } else {
-        await this.api.reportAuthoritativePlayback(event);
+        // Never bypass older durable rows when persistence itself is
+        // unavailable; a direct send here could reorder lifecycle events.
+        this.logger.warn("Authoritative playback reporting was not sent because durable capture was unavailable.", { kind: event.kind });
       }
     } catch (error) {
       this.logger.warn("Authoritative playback reporting was deferred.", { kind: event.kind, error });

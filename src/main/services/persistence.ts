@@ -305,12 +305,16 @@ export class SqlitePersistenceService {
       canSeek: input.report.canSeek === true,
       audioStreamIndex: optionalNonnegativeInteger(input.report.audioStreamIndex, "Audio stream index"),
       subtitleStreamIndex: optionalNonnegativeInteger(input.report.subtitleStreamIndex, "Subtitle stream index"),
+      conflictPolicy: input.report.conflictPolicy,
     } : null;
     if (report && !["start", "progress", "stop"].includes(report.kind)) {
       throw new AppError("INVALID_PERSISTENCE_INPUT", "Playback report kind is invalid.", 400);
     }
     if (report && !["DirectPlay", "DirectStream", "Transcode"].includes(report.playMethod)) {
       throw new AppError("INVALID_PERSISTENCE_INPUT", "Playback report method is invalid.", 400);
+    }
+    if (report && !["automatic", "explicit"].includes(report.conflictPolicy)) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Playback report conflict policy is invalid.", 400);
     }
     return this.invoke({
       kind: "recordPlaybackRevision",
@@ -332,6 +336,21 @@ export class SqlitePersistenceService {
   async listPendingProgress(limit = 100): Promise<PlaybackRevisionRecord[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new AppError("INVALID_PERSISTENCE_INPUT", "Pending progress limit is invalid.", 400);
     return this.invoke({ kind: "listPendingProgress", limit }) as Promise<PlaybackRevisionRecord[]>;
+  }
+
+  async listPendingProgressForIdentity(
+    serverId: string,
+    userId: string,
+    limit = 100,
+  ): Promise<PlaybackRevisionRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new AppError("INVALID_PERSISTENCE_INPUT", "Pending progress limit is invalid.", 400);
+    const identity = safeIdentity({ serverId, userId });
+    return this.invoke({
+      kind: "listPendingProgressForIdentity",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      limit,
+    }) as Promise<PlaybackRevisionRecord[]>;
   }
 
   async markProgressSucceeded(serverId: string, userId: string, itemId: string, localRevision: number, syncedAt = Date.now()): Promise<void> {

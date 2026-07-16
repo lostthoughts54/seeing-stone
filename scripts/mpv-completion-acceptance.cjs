@@ -57,7 +57,7 @@ async function verifyMovieCompletion() {
   } catch (error) {
     const state = harness.player.getState();
     if (state.playbackId) await harness.player.stop(state.playbackId).catch(() => undefined);
-    throw new Error(`Movie completion timed out: ${JSON.stringify({ state, reports: harness.reports, current: harness.playback.current })}`, { cause: error });
+    throw new Error("Movie completion timed out before mpv reached the ended state.", { cause: error });
   }
   const lifecycle = harness.reports.filter(({ kind }) => kind !== "progress");
   assert.deepEqual(lifecycle.map(({ kind, itemId }) => ({ kind, itemId })), [
@@ -120,6 +120,21 @@ function createHarness(paths) {
     { get: async () => ({ windowMaximized: true }), setWindowMaximized: async () => undefined },
     runtime,
   );
+  // Completion behavior does not require a visible legacy window. Append
+  // headless output flags after the production arguments so this autonomous
+  // harness cannot cover the desktop or take focus.
+  const spawnProcess = player.spawnProcess.bind(player);
+  player.spawnProcess = (executable, args) => {
+    const separator = args.indexOf("--");
+    const optionsEnd = separator < 0 ? args.length : separator;
+    return spawnProcess(executable, [
+      ...args.slice(0, optionsEnd),
+      "--force-window=no",
+      "--vo=null",
+      "--ao=null",
+      ...args.slice(optionsEnd),
+    ]);
+  };
   return { player, playback, reports, window };
 }
 
@@ -139,12 +154,15 @@ class FixturePlayback {
     this.current = { playbackId, itemId, itemType };
     return {
       playbackId,
+      serverPlaySessionId: `server-session-${this.sequence}`,
       itemId,
       itemType,
       seriesId: itemType === "Episode" ? "series-1" : null,
       mediaSourceId: `source-${itemId}`,
       mediaUrl: localSubtitle ? this.paths.movie : `jellyfin-media://stream/${playbackId}`,
       delivery: localSubtitle ? "local" : "direct",
+      sourceKind: localSubtitle ? "matched-local" : "direct-play",
+      usesServerTimelineOffset: false,
       resumePositionTicks: 0,
       durationTicks: 3 * TICKS_PER_SECOND,
       source: localSubtitle ? "local" : "server",
@@ -223,7 +241,7 @@ function createFixture(outputPath) {
     `--o=${outputPath}`,
     "av://lavfi:testsrc2=duration=3:size=640x360:rate=24",
   ], { cwd: root, encoding: "utf8", windowsHide: true });
-  if (result.status !== 0 || !existsSync(outputPath)) throw new Error(`Could not generate ${outputPath}.`);
+  if (result.status !== 0 || !existsSync(outputPath)) throw new Error("Could not generate the local completion fixture.");
 }
 
 async function waitFor(predicate, timeoutMilliseconds) {
@@ -240,6 +258,13 @@ function delay(milliseconds) {
 }
 
 void run().catch((error) => {
-  process.stderr.write(`${error?.stack || String(error)}\n`);
+  process.stderr.write(`mpv completion acceptance failed: ${safeFailureMessage(error)}\n`);
   process.exitCode = 1;
 });
+
+function safeFailureMessage(error) {
+  return String(error?.message || error || "Unknown failure")
+    .replace(/https?:\/\/[^\s"')]+/gi, "<url>")
+    .replace(/[A-Za-z]:[\\/][^\r\n"')]+/g, "<path>")
+    .slice(0, 500);
+}

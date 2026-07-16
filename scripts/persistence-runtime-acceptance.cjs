@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdtemp } = require("node:fs/promises");
+const { mkdtemp, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 
@@ -22,7 +22,7 @@ if (!process.versions.electron) {
   if (result.signal || result.status !== 0) process.exitCode = result.status || 1;
 } else {
   void runChild().catch((error) => {
-    process.stderr.write(`${error?.stack || String(error)}\n`);
+    process.stderr.write(`Persistence acceptance failed: ${safeFailureMessage(error)}\n`);
     process.exitCode = 1;
   });
 }
@@ -34,7 +34,7 @@ async function runChild() {
   const service = new SqlitePersistenceService(directory);
   try {
     const health = await service.open();
-    assert.equal(health.schemaVersion, 2);
+    assert.equal(health.schemaVersion, 3);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -44,5 +44,13 @@ async function runChild() {
     process.stdout.write(`Electron persistence acceptance passed (Electron ${process.versions.electron}, Node ${process.versions.node}, SQLite ${process.versions.sqlite}).\n`);
   } finally {
     await service.close();
+    await rm(directory, { recursive: true, force: true });
   }
+}
+
+function safeFailureMessage(error) {
+  return String(error?.message || error || "Unknown failure")
+    .replace(/https?:\/\/[^\s"')]+/gi, "<url>")
+    .replace(/[A-Za-z]:[\\/][^\r\n"')]+/g, "<path>")
+    .slice(0, 500);
 }

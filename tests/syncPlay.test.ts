@@ -20,6 +20,7 @@ function playbackState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     paused: false,
     buffering: false,
     seekable: true,
+    volume: 100,
     fullscreen: false,
     audioTracks: [],
     subtitleTracks: [],

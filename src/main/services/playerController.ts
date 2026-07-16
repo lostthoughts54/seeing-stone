@@ -9,6 +9,8 @@ export type PlayerAction =
   | "play"
   | "pause"
   | "seek"
+  | "rate"
+  | "volume"
   | "stop"
   | "buffering"
   | "stalled"
@@ -57,6 +59,7 @@ export interface PlaybackAdapter {
   play(playbackId: string, context?: PlaybackCommandContext): Promise<PlaybackState>;
   pause(playbackId: string, context?: PlaybackCommandContext): Promise<PlaybackState>;
   setRate(playbackId: string, rate: number, context?: PlaybackCommandContext): Promise<PlaybackState>;
+  setVolume(playbackId: string, volume: number, context?: PlaybackCommandContext): Promise<PlaybackState>;
   /** Compatibility name retained for existing SyncPlay code. */
   loadItem(itemId: string, resumeMode: "resume" | "start-over", context?: PlayerCommandContext): Promise<PlaybackStartResult>;
   setPaused(playbackId: string, paused: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;

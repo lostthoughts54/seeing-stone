@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { downloadIdSchema, downloadStartSchema, loginSchema, playbackStartSchema, searchSchema, watchedStateSchema } from "../src/shared/schemas";
+import {
+  downloadIdSchema,
+  downloadStartSchema,
+  loginSchema,
+  playbackRateSchema,
+  playbackStartSchema,
+  playbackVolumeSchema,
+  searchSchema,
+  watchedStateSchema,
+} from "../src/shared/schemas";
 
 describe("IPC input schemas", () => {
   it("rejects extra privileged-looking properties", () => {
@@ -19,6 +28,11 @@ describe("IPC input schemas", () => {
     })).toThrow();
     expect(() => searchSchema.strict().parse({ query: "movie", path: "D:\\Sensitive" })).toThrow();
     expect(() => playbackStartSchema.strict().parse({ itemId: "item", resumeMode: "resume", args: ["--script"] })).toThrow();
+    const playbackId = "55555555-5555-4555-8555-555555555555";
+    expect(playbackRateSchema.strict().parse({ playbackId, rate: 1.5 })).toEqual({ playbackId, rate: 1.5 });
+    expect(() => playbackRateSchema.strict().parse({ playbackId, rate: 4.01 })).toThrow();
+    expect(playbackVolumeSchema.strict().parse({ playbackId, volume: 42 })).toEqual({ playbackId, volume: 42 });
+    expect(() => playbackVolumeSchema.strict().parse({ playbackId, volume: -1 })).toThrow();
     expect(() => downloadStartSchema.strict().parse({ itemId: "item", url: "http://server/media", path: "D:\\Sensitive" })).toThrow();
     expect(() => watchedStateSchema.strict().parse({ itemId: "item", watched: true, positionTicks: 50 })).toThrow();
     expect(() => downloadIdSchema.strict().parse({ downloadId: "not-an-opaque-id" })).toThrow();

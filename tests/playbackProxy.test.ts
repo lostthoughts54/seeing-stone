@@ -71,6 +71,7 @@ describe("PlaybackProxy", () => {
     try {
       expect(targets.media).toBe(localSource.mediaUrl);
       expect(targets.subtitles).toHaveLength(1);
+      expect(targets.subtitles[0]!.streamIndex).toBe(4);
       const subtitleUrl = targets.subtitles[0]!.url;
       expect(subtitleUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}\.srt$/);
       expect(subtitleUrl).not.toContain(localSource.itemId);

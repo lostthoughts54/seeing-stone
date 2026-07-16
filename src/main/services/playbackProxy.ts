@@ -11,6 +11,7 @@ export interface PlaybackTargets {
     title: string | null;
     language: string | null;
     isDefault: boolean;
+    streamIndex: number;
   }>;
 }
 
@@ -54,6 +55,7 @@ export class PlaybackProxy {
         title: subtitle.title,
         language: subtitle.language,
         isDefault: subtitle.isDefault,
+        streamIndex: subtitle.streamIndex,
       })),
     };
   }

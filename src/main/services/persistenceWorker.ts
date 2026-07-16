@@ -193,6 +193,11 @@ ALTER TABLE playback_revisions ADD COLUMN report_subtitle_stream_index INTEGER
   CHECK (report_subtitle_stream_index IS NULL OR report_subtitle_stream_index >= 0);
 `;
 
+const MIGRATION_3 = `
+ALTER TABLE playback_revisions ADD COLUMN report_conflict_policy TEXT
+  CHECK (report_conflict_policy IS NULL OR report_conflict_policy IN ('automatic', 'explicit'));
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -244,6 +249,12 @@ function initialize(): PersistenceHealth {
       transaction(() => {
         db().exec(MIGRATION_2);
         db().exec("PRAGMA user_version = 2");
+      });
+    }
+    if (version < 3) {
+      transaction(() => {
+        db().exec(MIGRATION_3);
+        db().exec("PRAGMA user_version = 3");
       });
     }
     const now = Date.now();
@@ -550,6 +561,7 @@ function playbackRevisionRow(row: Record<string, unknown>): PlaybackRevisionReco
       canSeek: row.report_can_seek === 1,
       audioStreamIndex: row.report_audio_stream_index === null ? null : Number(row.report_audio_stream_index),
       subtitleStreamIndex: row.report_subtitle_stream_index === null ? null : Number(row.report_subtitle_stream_index),
+      conflictPolicy: row.report_conflict_policy === "explicit" ? "explicit" : "automatic",
     },
     completionEvent: row.completion_event === 1,
     occurredAt: Number(row.occurred_at),
@@ -567,6 +579,7 @@ function playbackHeadRow(row: Record<string, unknown> | undefined): PlaybackHead
     userId: String(row.user_id),
     itemId: String(row.item_id),
     latestRevision: Number(row.latest_revision),
+    conflictPolicy: row.effective_conflict_policy === "explicit" ? "explicit" : "automatic",
     actionKind: row.action_kind as PlaybackHeadRecord["actionKind"],
     positionTicks: Number(row.position_ticks),
     watched: row.watched === 1,
@@ -580,7 +593,24 @@ function playbackHeadRow(row: Record<string, unknown> | undefined): PlaybackHead
 
 function getPlaybackHead(serverId: string, userId: string, itemId: string): PlaybackHeadRecord | null {
   return playbackHeadRow(db().prepare(`
-    SELECT * FROM playback_heads WHERE server_id = ? AND user_id = ? AND item_id = ?
+    SELECT playback_heads.*,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM playback_revisions
+        WHERE playback_revisions.server_id = playback_heads.server_id
+          AND playback_revisions.user_id = playback_heads.user_id
+          AND playback_revisions.item_id = playback_heads.item_id
+          AND playback_revisions.local_revision > playback_heads.last_succeeded_revision
+          AND playback_revisions.sync_state IN ('pending', 'failed')
+          AND (
+            playback_revisions.report_conflict_policy = 'explicit'
+            OR (
+              playback_revisions.report_conflict_policy IS NULL
+              AND playback_revisions.action_kind <> 'progress'
+            )
+          )
+      ) THEN 'explicit' ELSE 'automatic' END AS effective_conflict_policy
+    FROM playback_heads
+    WHERE playback_heads.server_id = ? AND playback_heads.user_id = ? AND playback_heads.item_id = ?
   `).get(serverId, userId, itemId) as Record<string, unknown> | undefined);
 }
 
@@ -594,8 +624,9 @@ function recordPlaybackRevision(input: Extract<PersistenceOperation, { kind: "re
         server_id, user_id, item_id, local_revision, action_kind, position_ticks, watched, completion_event,
         occurred_at, sync_state, attempt_count, last_error, synced_at,
         report_kind, report_media_source_id, report_play_method, report_play_session_id,
-        report_paused, report_can_seek, report_audio_stream_index, report_subtitle_stream_index
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+        report_paused, report_can_seek, report_audio_stream_index, report_subtitle_stream_index,
+        report_conflict_policy
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.serverId, input.userId, input.itemId, revision, input.actionKind, input.positionTicks,
       input.watched ? 1 : 0, completionEvent ? 1 : 0, input.occurredAt,
@@ -607,6 +638,7 @@ function recordPlaybackRevision(input: Extract<PersistenceOperation, { kind: "re
       input.report ? (input.report.canSeek ? 1 : 0) : null,
       input.report?.audioStreamIndex ?? null,
       input.report?.subtitleStreamIndex ?? null,
+      input.report?.conflictPolicy ?? null,
     );
     db().prepare(`
       INSERT INTO playback_heads(
@@ -628,13 +660,22 @@ function recordPlaybackRevision(input: Extract<PersistenceOperation, { kind: "re
   });
 }
 
+function listPendingProgressForIdentity(serverId: string, userId: string, limit: number): PlaybackRevisionRecord[] {
+  return (db().prepare(`
+      SELECT * FROM playback_revisions
+      WHERE server_id = ? AND user_id = ? AND sync_state IN ('pending', 'failed')
+      ORDER BY occurred_at, item_id, local_revision
+      LIMIT ?
+    `).all(serverId, userId, limit) as Record<string, unknown>[]).map(playbackRevisionRow);
+}
+
 function listPendingProgress(limit: number): PlaybackRevisionRecord[] {
   return (db().prepare(`
-    SELECT * FROM playback_revisions
-    WHERE sync_state IN ('pending', 'failed')
-    ORDER BY occurred_at, server_id, user_id, item_id, local_revision
-    LIMIT ?
-  `).all(limit) as Record<string, unknown>[]).map(playbackRevisionRow);
+      SELECT * FROM playback_revisions
+      WHERE sync_state IN ('pending', 'failed')
+      ORDER BY occurred_at, server_id, user_id, item_id, local_revision
+      LIMIT ?
+    `).all(limit) as Record<string, unknown>[]).map(playbackRevisionRow);
 }
 
 function markProgressSucceeded(serverId: string, userId: string, itemId: string, localRevision: number, syncedAt: number): null {
@@ -716,6 +757,9 @@ function execute(operation: PersistenceOperation): unknown {
     case "recordPlaybackRevision": return recordPlaybackRevision(operation.input);
     case "getPlaybackHead": return getPlaybackHead(operation.serverId, operation.userId, operation.itemId);
     case "listPendingProgress": return listPendingProgress(operation.limit);
+    case "listPendingProgressForIdentity": return listPendingProgressForIdentity(
+      operation.serverId, operation.userId, operation.limit,
+    );
     case "markProgressSucceeded": return markProgressSucceeded(
       operation.serverId, operation.userId, operation.itemId, operation.localRevision, operation.syncedAt,
     );

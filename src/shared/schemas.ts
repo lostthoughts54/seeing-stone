@@ -48,6 +48,14 @@ export const playbackSeekSchema = playbackIdSchema.extend({
   positionTicks: z.number().int().min(0).max(864000000000),
 });
 
+export const playbackRateSchema = playbackIdSchema.extend({
+  rate: z.number().finite().min(0.25).max(4),
+});
+
+export const playbackVolumeSchema = playbackIdSchema.extend({
+  volume: z.number().finite().min(0).max(100),
+});
+
 export const playbackTrackSchema = playbackIdSchema.extend({
   trackId: z.number().int().min(1).max(65535).nullable(),
 });

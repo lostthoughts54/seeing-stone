@@ -44,6 +44,7 @@ class MemoryPlaybackPersistence {
   revisions: PlaybackRevisionRecord[] = [];
   heads = new Map<string, PlaybackHeadRecord>();
   mediaItems = new Map<string, MediaItemRecord>();
+  pendingScopes: Array<{ serverId: string; userId: string; limit: number }> = [];
 
   async getMediaItem(_serverId: string, _userId: string, itemId: string): Promise<MediaItemRecord | null> {
     return structuredClone(this.mediaItems.get(itemId) ?? null);
@@ -70,6 +71,11 @@ class MemoryPlaybackPersistence {
     this.heads.set(input.itemId, {
       ...input,
       latestRevision: value.localRevision,
+      conflictPolicy: value.report?.conflictPolicy === "explicit"
+        || (value.actionKind !== "progress" && !value.report)
+        || (previous?.conflictPolicy === "explicit" && previous.latestRevision > previous.lastSucceededRevision)
+        ? "explicit"
+        : "automatic",
       lastSucceededRevision: previous?.lastSucceededRevision ?? 0,
       lastSucceededPositionTicks: previous?.lastSucceededPositionTicks ?? 0,
       lastSucceededWatched: previous?.lastSucceededWatched ?? false,
@@ -84,6 +90,15 @@ class MemoryPlaybackPersistence {
 
   async listPendingProgress(): Promise<PlaybackRevisionRecord[]> {
     return structuredClone(this.revisions.filter((entry) => entry.syncState === "pending" || entry.syncState === "failed"));
+  }
+
+  async listPendingProgressForIdentity(serverId: string, userId: string, limit: number): Promise<PlaybackRevisionRecord[]> {
+    this.pendingScopes.push({ serverId, userId, limit });
+    return structuredClone(this.revisions
+      .filter((entry) => entry.serverId === serverId
+        && entry.userId === userId
+        && (entry.syncState === "pending" || entry.syncState === "failed"))
+      .slice(0, limit));
   }
 
   async markProgressSucceeded(_serverId: string, _userId: string, itemId: string, localRevision: number): Promise<void> {
@@ -185,6 +200,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 6,
+      conflictPolicy: "automatic",
       actionKind: "progress",
       positionTicks: 250,
       watched: false,
@@ -210,6 +226,7 @@ describe("OfflineSynchronizationService", () => {
     await service.shutdown();
 
     expect(sent).toEqual(["completed", "replay", "progress"]);
+    expect(persistence.pendingScopes).toContainEqual({ serverId: context.serverId, userId: context.userId, limit: 1000 });
     expect(persistence.revisions.filter((entry) => entry.syncState === "superseded").map((entry) => entry.localRevision)).toEqual([1, 2, 5]);
     expect(persistence.heads.get("episode-1")?.lastSucceededRevision).toBe(6);
     expect(persistence.heads.get("episode-1")?.lastSucceededPositionTicks).toBe(250);
@@ -231,6 +248,7 @@ describe("OfflineSynchronizationService", () => {
           canSeek: true,
           audioStreamIndex: 1,
           subtitleStreamIndex: null,
+          conflictPolicy: "explicit",
         },
       }),
     ];
@@ -239,6 +257,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 2,
+      conflictPolicy: "explicit",
       actionKind: "progress",
       positionTicks: 300,
       watched: false,
@@ -263,6 +282,79 @@ describe("OfflineSynchronizationService", () => {
     expect(persistence.revisions.map((entry) => entry.syncState)).toEqual(["succeeded", "succeeded"]);
   });
 
+  it("replays exact lifecycle reports in order after an outage and service restart", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const report = (kind: "start" | "progress" | "stop", paused: boolean) => ({
+      kind,
+      mediaSourceId: "source-1",
+      playMethod: "DirectStream" as const,
+      playSessionId: "play-session-1",
+      paused,
+      canSeek: true,
+      audioStreamIndex: 2,
+      subtitleStreamIndex: 4,
+      conflictPolicy: "automatic" as const,
+    });
+    const entries = [
+      revision(1, { positionTicks: 100, report: report("start", false) }),
+      revision(2, { positionTicks: 200, report: report("progress", true) }),
+      revision(3, { positionTicks: 700, report: report("progress", false) }),
+      revision(4, { positionTicks: 900, report: report("stop", true) }),
+    ];
+    persistence.seed(entries, {
+      serverId: context.serverId,
+      userId: context.userId,
+      itemId: "episode-1",
+      latestRevision: 4,
+      conflictPolicy: "automatic",
+      actionKind: "progress",
+      positionTicks: 900,
+      watched: false,
+      occurredAt: 4,
+      lastSucceededRevision: 0,
+      lastSucceededPositionTicks: 0,
+      lastSucceededWatched: false,
+      updatedAt: 4,
+    });
+    let online = false;
+    const sent: Array<Record<string, unknown>> = [];
+    const api = {
+      getAuthenticatedContext: () => context,
+      getDetails: vi.fn(async () => remoteItem(0, false)),
+      synchronizeOfflinePlayback: vi.fn(),
+      reportAuthoritativePlayback: vi.fn(async (input: Record<string, unknown>) => {
+        if (!online) throw Object.assign(new Error("offline"), { code: "NETWORK_ERROR" });
+        sent.push(structuredClone(input));
+      }),
+    };
+    const first = new OfflineSynchronizationService(api, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    first.activate();
+    await first.syncNow();
+    await first.shutdown();
+    expect(persistence.revisions[0]).toMatchObject({ syncState: "failed", attemptCount: 1, lastError: "NETWORK_ERROR" });
+    expect(persistence.revisions.slice(1).every((entry) => entry.syncState === "pending")).toBe(true);
+
+    online = true;
+    const restarted = new OfflineSynchronizationService(api, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    restarted.activate();
+    await restarted.syncNow();
+    await restarted.shutdown();
+
+    expect(sent.map((entry) => [entry.kind, entry.paused, entry.positionTicks])).toEqual([
+      ["start", false, 100],
+      ["progress", true, 200],
+      ["progress", false, 700],
+      ["stop", true, 900],
+    ]);
+    expect(sent.every((entry) => entry.playSessionId === "play-session-1"
+      && entry.mediaSourceId === "source-1"
+      && entry.playMethod === "DirectStream"
+      && entry.canSeek === true
+      && entry.audioStreamIndex === 2
+      && entry.subtitleStreamIndex === 4)).toBe(true);
+    expect(persistence.revisions.every((entry) => entry.syncState === "succeeded")).toBe(true);
+  });
+
   it("never sends stale automatic progress but permits a newer explicit lower revision", async () => {
     const persistence = new MemoryPlaybackPersistence();
     const entries = [
@@ -274,6 +366,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 3,
+      conflictPolicy: "explicit",
       actionKind: "start_over",
       positionTicks: 0,
       watched: false,
@@ -308,6 +401,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 2,
+      conflictPolicy: "automatic",
       actionKind: "progress",
       positionTicks: 600,
       watched: false,
@@ -332,6 +426,55 @@ describe("OfflineSynchronizationService", () => {
     expect(persistence.heads.get("episode-1")?.lastSucceededPositionTicks).toBe(500);
   });
 
+  it("supersedes a stale exact automatic report but preserves an explicit local report", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const report = (conflictPolicy: "automatic" | "explicit") => ({
+      kind: "progress" as const,
+      mediaSourceId: "source-1",
+      playMethod: "DirectPlay" as const,
+      playSessionId: "play-session-1",
+      paused: false,
+      canSeek: true,
+      audioStreamIndex: null,
+      subtitleStreamIndex: null,
+      conflictPolicy,
+    });
+    persistence.seed([
+      revision(2, { positionTicks: 600, report: report("automatic") }),
+      revision(3, { positionTicks: 550, report: report("explicit") }),
+    ], {
+      serverId: context.serverId,
+      userId: context.userId,
+      itemId: "episode-1",
+      latestRevision: 3,
+      conflictPolicy: "explicit",
+      actionKind: "progress",
+      positionTicks: 550,
+      watched: false,
+      occurredAt: 3,
+      lastSucceededRevision: 1,
+      lastSucceededPositionTicks: 500,
+      lastSucceededWatched: false,
+      updatedAt: 3,
+    });
+    const reportAuthoritativePlayback = vi.fn(async () => undefined);
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getDetails: vi.fn(async () => remoteItem(800, false)),
+      synchronizeOfflinePlayback: vi.fn(),
+      reportAuthoritativePlayback,
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+
+    service.activate();
+    await service.syncNow();
+    await service.shutdown();
+
+    expect(persistence.revisions[0].syncState).toBe("superseded");
+    expect(persistence.revisions[1].syncState).toBe("succeeded");
+    expect(reportAuthoritativePlayback).toHaveBeenCalledOnce();
+    expect(reportAuthoritativePlayback).toHaveBeenCalledWith(expect.objectContaining({ positionTicks: 550 }));
+  });
+
   it("skips active playback, then retries a failed synchronization after playback stops", async () => {
     const persistence = new MemoryPlaybackPersistence();
     const pending = revision(1, { positionTicks: 400 });
@@ -340,6 +483,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 1,
+      conflictPolicy: "automatic",
       actionKind: "progress",
       positionTicks: 400,
       watched: false,
@@ -380,6 +524,7 @@ describe("OfflineSynchronizationService", () => {
       userId: context.userId,
       itemId: "episode-1",
       latestRevision: 1,
+      conflictPolicy: "automatic",
       actionKind: "progress",
       positionTicks: 400,
       watched: false,

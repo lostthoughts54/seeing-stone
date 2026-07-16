@@ -35,6 +35,7 @@ function harness() {
     paused: false,
     buffering: false,
     seekable: true,
+    volume: 100,
     fullscreen: false,
     audioTracks: [],
     subtitleTracks: [],
@@ -87,12 +88,27 @@ describe("PlayerController mpv adapter", () => {
     expect(h.events.every((event) => event.monotonicTimestampMs >= 0)).toBe(true);
   });
 
-  it("supports only bounded drift-correction playback rates", async () => {
+  it("supports user playback speeds while bounding automatic drift correction", async () => {
     const h = harness();
     await h.player.setPlaybackRate("playback-1", 1.05, { origin: "remote-sync", commandRevision: 3 });
     expect(h.player.getPlaybackRate()).toBe(1.05);
     expect(h.commands).toContainEqual(["set_property", "speed", 1.05]);
-    await expect(h.player.setPlaybackRate("playback-1", 1.5)).rejects.toMatchObject({ code: "INVALID_PLAYBACK_RATE" });
+    await expect(h.player.setPlaybackRate("playback-1", 1.5, { origin: "remote-sync" })).rejects.toMatchObject({ code: "INVALID_PLAYBACK_RATE" });
+    await expect(h.player.setRate("playback-1", 1.5)).resolves.toMatchObject({
+      diagnostics: expect.objectContaining({ playbackRate: 1.5 }),
+    });
+  });
+
+  it("sets bounded volume and publishes the new state immediately", async () => {
+    const h = harness();
+    const states: number[] = [];
+    h.player.onState((state) => states.push(state.volume));
+
+    await expect(h.player.setVolume("playback-1", 42)).resolves.toMatchObject({ volume: 42 });
+    expect(h.commands).toContainEqual(["set_property", "volume", 42]);
+    expect(states).toEqual([42]);
+    expect(h.events.at(-1)).toMatchObject({ action: "volume", origin: "local-user", state: { volume: 42 } });
+    await expect(h.player.setVolume("playback-1", 101)).rejects.toMatchObject({ code: "INVALID_PLAYBACK_VOLUME" });
   });
 
   it("turns the native Ctrl+R message into a local resync request and can show safe feedback", async () => {

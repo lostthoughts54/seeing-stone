@@ -1,4 +1,4 @@
-export const DATABASE_SCHEMA_VERSION = 2;
+export const DATABASE_SCHEMA_VERSION = 3;
 
 export interface CatalogIdentityInput {
   serverId: string;
@@ -134,6 +134,8 @@ export interface DurablePlaybackReport {
   canSeek: boolean;
   audioStreamIndex: number | null;
   subtitleStreamIndex: number | null;
+  /** Whether this report may outrank an older remote timeline on reconnect. */
+  conflictPolicy: "automatic" | "explicit";
 }
 
 export interface RecordPlaybackRevisionInput {
@@ -159,6 +161,8 @@ export interface PlaybackRevisionRecord extends Omit<RecordPlaybackRevisionInput
 
 export interface PlaybackHeadRecord extends Omit<RecordPlaybackRevisionInput, "report"> {
   latestRevision: number;
+  /** Effective precedence across all still-pending revisions for this item. */
+  conflictPolicy: "automatic" | "explicit";
   lastSucceededRevision: number;
   lastSucceededPositionTicks: number;
   lastSucceededWatched: boolean;
@@ -197,6 +201,7 @@ export type PersistenceOperation =
   | { kind: "recordPlaybackRevision"; input: RecordPlaybackRevisionInput }
   | { kind: "getPlaybackHead"; serverId: string; userId: string; itemId: string }
   | { kind: "listPendingProgress"; limit: number }
+  | { kind: "listPendingProgressForIdentity"; serverId: string; userId: string; limit: number }
   | { kind: "markProgressSucceeded"; serverId: string; userId: string; itemId: string; localRevision: number; syncedAt: number }
   | { kind: "markProgressFailed"; serverId: string; userId: string; itemId: string; localRevision: number; error: string }
   | { kind: "markPlaybackSuperseded"; serverId: string; userId: string; itemId: string; localRevision: number }

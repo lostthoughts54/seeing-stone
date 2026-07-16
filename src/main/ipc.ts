@@ -17,10 +17,12 @@ import {
   playbackFullscreenSchema,
   playbackIdSchema,
   playbackPauseSchema,
+  playbackRateSchema,
   playbackSeekSchema,
   playbackStartSchema,
   playbackTrackSchema,
   playbackViewportSchema,
+  playbackVolumeSchema,
   playbackAdapterPreferenceSchema,
   searchSchema,
   serverUrlSchema,
@@ -205,6 +207,14 @@ export function registerIpcHandlers(
     const value = playbackSeekSchema.strict().parse(input);
     if (syncPlay?.isJoined()) return syncPlay.requestSeek(value.positionTicks);
     return playback.seek(value.playbackId, value.positionTicks, { origin: "local-user" });
+  });
+  register(IPC.playbackSetRate, (input) => {
+    const value = playbackRateSchema.strict().parse(input);
+    return playback.setRate(value.playbackId, value.rate, { origin: "local-user" });
+  });
+  register(IPC.playbackSetVolume, (input) => {
+    const value = playbackVolumeSchema.strict().parse(input);
+    return playback.setVolume(value.playbackId, value.volume, { origin: "local-user" });
   });
   register(IPC.playbackSelectAudio, (input) => {
     const value = playbackTrackSchema.strict().parse(input);
