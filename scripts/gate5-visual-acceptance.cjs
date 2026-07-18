@@ -44,6 +44,9 @@ async function runChild() {
   const root = resolve(__dirname, "..");
   const rendererEntry = resolve(root, "dist/renderer/index.html");
   if (!existsSync(rendererEntry)) throw new Error("Build the renderer before Gate 5 visual acceptance.");
+  // Capture provenance before this harness creates its own untracked evidence.
+  const sourceRevision = git(root, ["rev-parse", "HEAD"]);
+  const sourceTree = git(root, ["status", "--porcelain"]) ? "working-tree" : "clean";
 
   app.commandLine.appendSwitch("disable-gpu");
   app.commandLine.appendSwitch("force-device-scale-factor", "1");
@@ -157,8 +160,8 @@ async function runChild() {
     gate: 5,
     fixture: "isolated-watchparty-visual-fixture",
     appVersion: app.getVersion(),
-    sourceRevision: git(root, ["rev-parse", "HEAD"]),
-    sourceTree: git(root, ["status", "--porcelain"]) ? "working-tree" : "clean",
+    sourceRevision,
+    sourceTree,
     platform: { platform: process.platform, arch: process.arch, electron: process.versions.electron, chrome: process.versions.chrome },
     screenshot: {
       filename: screenshotName,
