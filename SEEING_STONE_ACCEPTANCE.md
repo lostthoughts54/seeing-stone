@@ -5,7 +5,7 @@ This record contains only sanitized, synthetic, or repository-owned evidence. It
 ## Safety boundary
 
 - The packaged application always selects the legacy external mpv adapter.
-- The embedded adapter is available only in unpackaged development builds through the persisted developer preference or explicit development override.
+- Unpackaged development builds default to the validated embedded adapter after the Gate 3 checks; the persisted developer preference or explicit development override can select the legacy fallback.
 - The legacy adapter remains implemented and selectable.
 - No Windows binary or release is published by this work.
 - No libmpv artifact is built.
@@ -206,7 +206,7 @@ Safety and limitations:
 - No authenticated or destructive request was sent to the user's Jellyfin server. No server, service, plugin, or production configuration was modified, restarted, upgraded, installed, or load-tested.
 - `Local playback available` is last-known catalog state; the file is freshly revalidated at open rather than polled continuously. A file deleted outside Seeing Stone can remain listed until that open attempt.
 - Offline artwork uses a placeholder because only safe artwork references, not image bytes, are cached in this milestone.
-- Packaged builds remain hard-wired to the legacy external adapter, the embedded adapter remains a development-only preference, enhanced telemetry remains disabled, no binary or release is published, and Gate 7 is not started.
+- Packaged builds remain hard-wired to the legacy external adapter, unpackaged development builds default to embedded with the legacy fallback still selectable, enhanced telemetry remains disabled, no binary or release is published, and Gate 7 is not started.
 
 Deferred manual evidence:
 

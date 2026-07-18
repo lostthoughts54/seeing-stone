@@ -28,15 +28,17 @@ export interface AdapterPreferencePersistence {
   setAdapterMode(mode: PlayerAdapterMode): Promise<void>;
 }
 
-const DEFAULTS: PlayerPreferences = { windowMaximized: true, adapterMode: "legacy" };
-
 export class PlayerPreferencesService implements PlayerPreferencesStore {
   private readonly preferencesPath: string;
   private cached: PlayerPreferences | null = null;
   private initialization: Promise<PlayerPreferences> | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
-  constructor(userDataPath: string, private readonly durablePreferences?: AdapterPreferencePersistence) {
+  constructor(
+    userDataPath: string,
+    private readonly durablePreferences?: AdapterPreferencePersistence,
+    private readonly defaultAdapterMode: PlayerAdapterMode = "legacy",
+  ) {
     this.preferencesPath = join(userDataPath, "player-preferences.json");
   }
 
@@ -78,11 +80,11 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
       if (parsed.success) this.cached = { windowMaximized: parsed.data.windowMaximized, adapterMode: parsed.data.adapterMode };
       else {
         const legacy = legacyPreferencesSchema.parse(raw);
-        this.cached = { windowMaximized: legacy.windowMaximized, adapterMode: "legacy" };
+        this.cached = { windowMaximized: legacy.windowMaximized, adapterMode: this.defaultAdapterMode };
         await this.persist(this.cached);
       }
     } catch {
-      this.cached = { ...DEFAULTS };
+      this.cached = { windowMaximized: true, adapterMode: this.defaultAdapterMode };
       await this.persist(this.cached);
     }
     const durableMode = await this.durablePreferences?.getAdapterMode().catch(() => null) ?? null;
@@ -96,7 +98,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
   }
 
   private async persist(preferences: PlayerPreferences): Promise<void> {
-    const safe = preferencesSchema.parse({ schemaVersion: 2, ...preferences, adapterMode: preferences.adapterMode ?? "legacy" });
+    const safe = preferencesSchema.parse({ schemaVersion: 2, ...preferences, adapterMode: preferences.adapterMode ?? this.defaultAdapterMode });
     await mkdir(dirname(this.preferencesPath), { recursive: true });
     const temporaryPath = `${this.preferencesPath}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(safe, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });

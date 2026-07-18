@@ -108,7 +108,11 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
-  const playerPreferences = new PlayerPreferencesService(app.getPath("userData"), applicationPreferences);
+  const playerPreferences = new PlayerPreferencesService(
+    app.getPath("userData"),
+    applicationPreferences,
+    app.isPackaged ? "legacy" : "embedded",
+  );
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
   await rendererSession.protocol.handle("jellyfin-artwork", async (request) => {

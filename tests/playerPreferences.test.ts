@@ -27,6 +27,25 @@ describe("PlayerPreferencesService", () => {
     expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8")).windowMaximized).toBe(true);
   });
 
+  it("allows validated development builds to default to embedded without changing the packaged default", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-player-preferences-development-default-"));
+    const service = new PlayerPreferencesService(directory, undefined, "embedded");
+
+    await expect(service.get()).resolves.toEqual({ windowMaximized: true, adapterMode: "embedded" });
+    expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8"))).toEqual({
+      schemaVersion: 2,
+      windowMaximized: true,
+      adapterMode: "embedded",
+    });
+
+    const legacyDirectory = await mkdtemp(join(tmpdir(), "seeing-stone-player-preferences-development-legacy-"));
+    await writeFile(join(legacyDirectory, "player-preferences.json"), JSON.stringify({ schemaVersion: 1, windowMaximized: false }));
+    await expect(new PlayerPreferencesService(legacyDirectory, undefined, "embedded").get()).resolves.toEqual({
+      windowMaximized: false,
+      adapterMode: "embedded",
+    });
+  });
+
   it("serializes concurrent updates without leaving a temporary file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "lf-player-preferences-"));
     const service = new PlayerPreferencesService(directory);

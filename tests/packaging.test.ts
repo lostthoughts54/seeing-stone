@@ -38,6 +38,8 @@ describe("Windows release packaging boundary", () => {
     const hook = await readFile("scripts/after-pack.cjs", "utf8");
 
     expect(main).toContain("await resolveVerifiedPersistenceWorkerPath(process.resourcesPath, __dirname)");
+    expect(main).toContain('app.isPackaged ? "legacy" : "embedded"');
+    expect(main).toContain('const embeddedRequested = !app.isPackaged && requestedMode === "embedded"');
     expect(persistence).toContain("new Worker(this.workerPath");
     expect(workerIntegrity).toContain('"persistence-worker-integrity.json"');
     expect(workerIntegrity).toContain('createHash("sha256")');
