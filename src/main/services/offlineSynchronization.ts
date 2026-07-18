@@ -1,4 +1,4 @@
-import type { MediaItem, WatchedStateResult } from "../../shared/contracts";
+import type { JellyfinConnectionDiagnostics, MediaItem, WatchedStateResult } from "../../shared/contracts";
 import { AppError } from "./errors";
 import type { AuthenticatedContext } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
@@ -12,6 +12,8 @@ import type {
 
 interface OfflineSyncApi {
   getAuthenticatedContext(): AuthenticatedContext;
+  getConnectionDiagnostics?(): JellyfinConnectionDiagnostics;
+  onConnectionDiagnostics?(listener: (diagnostics: JellyfinConnectionDiagnostics) => void): () => void;
   getDetails(itemId: string): Promise<MediaItem>;
   synchronizeOfflinePlayback(input: {
     itemId: string;
@@ -77,13 +79,18 @@ export class OfflineSynchronizationService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private running: Promise<void> | null = null;
   private readonly activeItems = new Set<string>();
+  private readonly unsubscribeConnection: (() => void) | null;
 
   constructor(
     private readonly api: OfflineSyncApi,
     private readonly persistence: OfflineSyncPersistence,
     private readonly logger: AppLogger,
     private readonly intervalMilliseconds = 30_000,
-  ) {}
+  ) {
+    this.unsubscribeConnection = api.onConnectionDiagnostics?.((diagnostics) => {
+      if (diagnostics.state === "connected") void this.syncNow();
+    }) ?? null;
+  }
 
   activate(): void {
     this.enabled = true;
@@ -105,6 +112,7 @@ export class OfflineSynchronizationService {
 
   async shutdown(): Promise<void> {
     this.deactivate();
+    this.unsubscribeConnection?.();
     await this.running?.catch(() => undefined);
   }
 
@@ -141,6 +149,7 @@ export class OfflineSynchronizationService {
         seriesId: item.seriesId,
         seasonId: item.seasonId,
         runTimeTicks: Math.max(0, Math.floor(item.runTimeTicks)),
+        metadata: item,
       });
     }
     const revision = await this.capture({
@@ -196,6 +205,7 @@ export class OfflineSynchronizationService {
 
   syncNow(): Promise<void> {
     if (!this.enabled) return Promise.resolve();
+    if (this.shouldDeferNetwork()) return Promise.resolve();
     if (this.running) return this.running;
     const revision = this.sessionRevision;
     const run = this.synchronize(revision).finally(() => {
@@ -226,7 +236,7 @@ export class OfflineSynchronizationService {
     }
 
     for (const [key, entries] of groups) {
-      if (!this.isCurrent(revision)) return;
+      if (!this.isCurrent(revision) || this.shouldDeferNetwork()) return;
       const reportEntries = entries.filter((entry) => entry.report != null)
         .sort((left, right) => left.localRevision - right.localRevision);
       const plan = coalescePlaybackRevisions(entries.filter((entry) => entry.report == null));
@@ -244,7 +254,7 @@ export class OfflineSynchronizationService {
       const automaticConflictCheckRequired = !this.activeItems.has(key)
         || entries.some((entry) => entry.attemptCount > 0);
       for (const entry of selected) {
-        if (!this.isCurrent(revision)) return;
+        if (!this.isCurrent(revision) || this.shouldDeferNetwork()) return;
         // Periodic automatic progress remains deferred while playback is active,
         // but explicit local actions and exact lifecycle reports retain revision
         // order so a later report cannot advance the watermark past them.
@@ -262,9 +272,9 @@ export class OfflineSynchronizationService {
     sessionRevision: number,
     automaticConflictCheckRequired: boolean,
   ): Promise<boolean> {
-    if (!entry.report || !this.isCurrent(sessionRevision)) return false;
+    if (!entry.report || !this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     const head = await this.persistence.getPlaybackHead(entry.serverId, entry.userId, entry.itemId);
-    if (!head || !this.isCurrent(sessionRevision)) return false;
+    if (!head || !this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     if (entry.localRevision <= head.lastSucceededRevision) {
       await this.persistence.markPlaybackSuperseded(
         entry.serverId,
@@ -287,6 +297,7 @@ export class OfflineSynchronizationService {
       }
       try {
         const remote = await this.api.getDetails(entry.itemId);
+        if (!this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
         if ((remote.userData.played && !entry.watched)
           || remote.userData.playbackPositionTicks > entry.positionTicks) {
           await this.persistence.markPlaybackSuperseded(
@@ -302,6 +313,7 @@ export class OfflineSynchronizationService {
         return false;
       }
     }
+    if (!this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     try {
       await this.api.reportAuthoritativePlayback({
         ...entry.report,
@@ -323,8 +335,9 @@ export class OfflineSynchronizationService {
   }
 
   private async synchronizeRevision(entry: PlaybackRevisionRecord, sessionRevision: number): Promise<boolean> {
+    if (!this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     const head = await this.persistence.getPlaybackHead(entry.serverId, entry.userId, entry.itemId);
-    if (!head || !this.isCurrent(sessionRevision)) return false;
+    if (!head || !this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     if (entry.localRevision <= head.lastSucceededRevision) {
       await this.persistence.markPlaybackSuperseded(
         entry.serverId,
@@ -348,6 +361,7 @@ export class OfflineSynchronizationService {
       }
       try {
         const remote = await this.api.getDetails(entry.itemId);
+        if (!this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
         if ((remote.userData.played && !entry.watched)
           || remote.userData.playbackPositionTicks > entry.positionTicks) {
           await this.persistence.markPlaybackSuperseded(
@@ -364,6 +378,7 @@ export class OfflineSynchronizationService {
       }
     }
 
+    if (!this.isCurrent(sessionRevision) || this.shouldDeferNetwork()) return false;
     try {
       await this.api.synchronizeOfflinePlayback({
         itemId: entry.itemId,
@@ -397,6 +412,11 @@ export class OfflineSynchronizationService {
       actionKind: entry.actionKind,
       error: safeFailureCode(error),
     });
+  }
+
+  private shouldDeferNetwork(): boolean {
+    const state = this.api.getConnectionDiagnostics?.().state;
+    return state === "offline" || state === "reconnecting";
   }
 
   private isCurrent(revision: number): boolean {

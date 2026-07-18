@@ -9,6 +9,7 @@ import { AppError } from "./errors";
 import type { SqlitePersistenceService } from "./persistence";
 interface PlaybackApi {
   getAuthenticatedContext?(): { serverId: string; userId: string };
+  getConnectionDiagnostics?(): import("../../shared/contracts").JellyfinConnectionDiagnostics;
   getDetails(itemId: string): Promise<import("../../shared/contracts").MediaItem>;
   getNextUpForSeries?(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null>;
   getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<import("../../shared/contracts").MediaSourceCapabilities>;
@@ -143,11 +144,14 @@ export class PlaybackSessionService {
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     if (local) {
       let externalSubtitleTracks: ExternalSubtitleTrack[] = [];
-      try {
-        const capabilities = await this.api.getMediaSourceCapabilities(itemId, AbortSignal.timeout(1500));
-        externalSubtitleTracks = capabilities.sources.find((source) => source.id === local.mediaSourceId)?.externalSubtitles ?? [];
-      } catch {
-        // A verified local video remains playable when Jellyfin is offline or subtitle metadata is unavailable.
+      const connectionState = this.api.getConnectionDiagnostics?.().state ?? "unknown";
+      if (connectionState !== "offline" && connectionState !== "reconnecting") {
+        try {
+          const capabilities = await this.api.getMediaSourceCapabilities(itemId, AbortSignal.timeout(1500));
+          externalSubtitleTracks = capabilities.sources.find((source) => source.id === local.mediaSourceId)?.externalSubtitles ?? [];
+        } catch {
+          // A verified local video remains playable when Jellyfin is offline or subtitle metadata is unavailable.
+        }
       }
       if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
       const resolvedLocal = {
@@ -228,6 +232,19 @@ export class PlaybackSessionService {
       throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
     }
     const itemType = details.type === "Episode" ? "Episode" : details.type === "Movie" ? "Movie" : "Video";
+    const diagnostics: import("../../shared/contracts").PlaybackDiagnostics = {
+      sourceKind,
+      playbackRate: 1,
+      bufferAheadTicks: null,
+      container: source.container,
+      videoCodec: source.videoCodec ?? null,
+      audioCodec: source.audioCodec ?? null,
+      audioChannels: source.audioChannels ?? null,
+      resolution: source.width && source.height ? `${source.width}×${source.height}` : null,
+      bitrate: source.bitrate ?? null,
+      videoRange: source.videoRange ?? null,
+      transcodeReason: sourceKind === "transcode" ? source.transcodeReason ?? null : null,
+    };
     if (this.persistence) {
       await this.persistence.upsertMediaItem({
         serverId: identity!.serverId,
@@ -238,6 +255,7 @@ export class PlaybackSessionService {
         seriesId: details.seriesId,
         seasonId: details.seasonId,
         runTimeTicks: Math.max(0, Math.floor(details.runTimeTicks)),
+        metadata: details,
       });
       await this.persistence.upsertMediaSource({
         serverId: identity!.serverId,
@@ -246,6 +264,7 @@ export class PlaybackSessionService {
         mediaSourceId: source.id,
         container: source.container,
         expectedSize: source.size,
+        diagnostics,
       });
     }
     const head = await playbackHeadPromise;
@@ -290,19 +309,7 @@ export class PlaybackSessionService {
       sourceKind,
       delivery,
       usesServerTimelineOffset: sourceKind === "direct-stream" || sourceKind === "transcode",
-      diagnostics: {
-        sourceKind,
-        playbackRate: 1,
-        bufferAheadTicks: null,
-        container: source.container,
-        videoCodec: source.videoCodec ?? null,
-        audioCodec: source.audioCodec ?? null,
-        audioChannels: source.audioChannels ?? null,
-        resolution: source.width && source.height ? `${source.width}×${source.height}` : null,
-        bitrate: source.bitrate ?? null,
-        videoRange: source.videoRange ?? null,
-        transcodeReason: sourceKind === "transcode" ? source.transcodeReason ?? null : null,
-      },
+      diagnostics,
       externalSubtitles: externalSubtitleTracks,
       initialAction: initialAction(resumeMode, previous.played, previous.positionTicks),
     };

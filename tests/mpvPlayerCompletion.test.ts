@@ -231,6 +231,40 @@ describe("MpvPlayerService natural completion", () => {
     expect(h.playback.stop).not.toHaveBeenCalled();
   });
 
+  it("does not resurrect playback when stop wins a deferred start-report race", async () => {
+    const h = harness();
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    const candidate = source("episode-1", "deferred-start");
+    h.playback.start.mockResolvedValue(candidate);
+    h.internals.openPlaybackTarget = vi.fn(async () => ({ media: candidate.mediaUrl, subtitles: [] }));
+    h.internals.launchProcess = vi.fn(async () => undefined);
+    let releaseStart!: () => void;
+    let observeStart!: () => void;
+    const startObserved = new Promise<void>((resolve) => { observeStart = resolve; });
+    const blockedStart = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const accepted: string[] = [];
+    h.internals.reporting = {
+      acceptAuthoritativeEvent: vi.fn(async (event: { kind: string }) => {
+        accepted.push(event.kind);
+        if (event.kind === "start") {
+          observeStart();
+          await blockedStart;
+        }
+      }),
+    };
+
+    const starting = h.player.start("episode-1", "resume");
+    await startObserved;
+    await h.player.stop(candidate.playbackId);
+    releaseStart();
+
+    await expect(starting).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    expect(accepted).toEqual(["start", "stop"]);
+    expect(h.player.getState()).toMatchObject({ playbackId: null, itemId: null, phase: "stopped" });
+    expect(h.internals.reportingActive).toBe(false);
+  });
+
   it("does not loop when the server launch also fails after local fallback", async () => {
     const h = harness();
     h.internals.source = null;

@@ -177,4 +177,39 @@ Deferred manual evidence:
 
 ## Gate 6 — Offline player completion
 
-Status: in progress. Gate 6 evidence will be added only after its offline launch, reconnection, conflict, persistence, and sanitized visual checks pass.
+Status: accepted for guarded development use with the packaged legacy fallback retained.
+
+Implemented behavior:
+
+- SQLite schema 5 additively stores strict, bounded, sanitized media metadata, Next Up metadata, and source diagnostics without changing or deleting existing download, local-version, playback-head, or revision rows.
+- The authenticated identity can list every last-known verified local or downloaded item through a path-free `Local playback available` catalog. Legacy rows without full metadata retain their durable resume head.
+- Every offline open revalidates the authorized root, containment, file existence, exact recorded size, and real mpv probe before the path is given to the main-owned player. Missing or altered files fail safely and are marked unusable.
+- Explicit `Offline` or `Reconnecting` state suppresses Jellyfin details, capability, subtitle, artwork, and reporting requests. Offline cards use cached text and local placeholders because artwork bytes are not cached.
+- Authoritative start, progress, pause, seek, completion, and stop events commit to SQLite before returning. They remain pending without a transport attempt while offline, drain on a verified connected transition, and stop the whole drain as soon as any request proves the connection unavailable.
+- Reconnection refreshes the current item's sanitized metadata, watched state, and Next Up without stopping, seeking, reopening, or replacing active local playback. A partial Next Up failure preserves the last verified cache.
+- Conflict materialization uses pending explicit local actions when authoritative, protects newer remote watched/progress state once local revisions are synchronized, and retains the best durable head for pre-schema-5 cache rows.
+- `Offline`, `Reconnecting`, `Connected`, `Local playback available`, and `Offline Local` are visible states. Unavailable request latency, buffer, codecs, and server-only metadata remain omitted rather than invented.
+
+Autonomous evidence:
+
+- All three TypeScript targets, both Vite builds, the main build, generated worker integrity, and deterministic license policy passed.
+- The complete unit suite passed 232 tests across 33 files, including network-free offline capture, mid-drain disconnect, stop-during-start cancellation, legacy resume, remote-conflict precedence, partial Next Up preservation, placeholder-only offline catalog rendering, and sanitized cache validation.
+- All 23 compiled core/SQLite checks passed, including additive v1-to-v5 migration, identity isolation, path-free offline listing, durable download metadata, and outage/reconnect conflict synchronization.
+- All 21 hidden Electron integration and security checks passed after updating the frozen bridge and offline-card fixtures for the additive Gate 6 APIs.
+- Electron schema-5 persistence acceptance and real-mpv media probing passed.
+- `artifacts/gate-6/offline-runtime-acceptance.json` records a real pinned-mpv launch, advancing playback, durable stop, zero playback-resolution or reporting Jellyfin calls before reconnection, ordered start/stop synchronization afterward, no pending rows after recovery, and no exposed local path.
+- `artifacts/gate-6/gate6-visual-acceptance.json` and three sanitized screenshots record clear Offline, Reconnecting, and Connected states; stable `Offline Local` source; unchanged playback identity; cached metadata; zero sensitive-looking text; and zero renderer errors in the isolated visual fixture.
+- An independent read-only safety review found and verified fixes for synchronized-head precedence, reporting-time network attempts, stale start resurrection, offline artwork fetches, partial Next Up erasure, mid-drain disconnects, and legacy cache resume. Its final verdict was safe to checkpoint.
+
+Safety and limitations:
+
+- No authenticated or destructive request was sent to the user's Jellyfin server. No server, service, plugin, or production configuration was modified, restarted, upgraded, installed, or load-tested.
+- `Local playback available` is last-known catalog state; the file is freshly revalidated at open rather than polled continuously. A file deleted outside Seeing Stone can remain listed until that open attempt.
+- Offline artwork uses a placeholder because only safe artwork references, not image bytes, are cached in this milestone.
+- Packaged builds remain hard-wired to the legacy external adapter, the embedded adapter remains a development-only preference, enhanced telemetry remains disabled, no binary or release is published, and Gate 7 is not started.
+
+Deferred manual evidence:
+
+- Physical multi-device SyncPlay across independent networks.
+- Unusual GPU and driver combinations, HDR output and tone mapping, and mixed-DPI physical monitors.
+- Long-duration playback, subjective motion and visual approval, preferred screen-reader testing, and physical keyboard/media-key variations.

@@ -321,7 +321,7 @@ const systemConnectionClock: JellyfinConnectionClock = {
 interface ConnectionMeasurement {
   requestSequence: number;
   sessionRevision: number;
-  state: "connected" | "offline";
+  state: "connected" | "offline" | "reconnecting";
   requestLatencyMs: number | null;
   measuredAt: string;
 }
@@ -334,6 +334,7 @@ export class JellyfinApi {
   private readonly pendingConnections = new Map<string, PendingConnection>();
   private requestMeasurementSequence = 0;
   private connectionMeasurement: ConnectionMeasurement | null = null;
+  private readonly connectionListeners = new Set<(diagnostics: JellyfinConnectionDiagnostics) => void>();
 
   constructor(
     private readonly identity: DeviceIdentity,
@@ -463,6 +464,11 @@ export class JellyfinApi {
       requestLatencyMs: measurement?.requestLatencyMs ?? null,
       measuredAt: measurement?.measuredAt ?? null,
     };
+  }
+
+  onConnectionDiagnostics(listener: (diagnostics: JellyfinConnectionDiagnostics) => void): () => void {
+    this.connectionListeners.add(listener);
+    return () => this.connectionListeners.delete(listener);
   }
 
   getAuthenticatedContext(): AuthenticatedContext {
@@ -876,6 +882,16 @@ export class JellyfinApi {
     const sessionRevision = this.sessionRevision;
     const requestSequence = ++this.requestMeasurementSequence;
     const startedAt = this.connectionClock.monotonicNow();
+    if (this.connectionMeasurement?.sessionRevision === sessionRevision
+      && this.connectionMeasurement.state === "offline") {
+      this.recordConnectionMeasurement({
+        requestSequence,
+        sessionRevision,
+        state: "reconnecting",
+        requestLatencyMs: null,
+        measuredAt: new Date(this.connectionClock.wallNow()).toISOString(),
+      });
+    }
     const url = new URL(`${session.serverUrl}${path}`);
     for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
     const signals = [sessionController.signal];
@@ -948,12 +964,21 @@ export class JellyfinApi {
     this.session = session;
     this.sessionRevision += 1;
     this.connectionMeasurement = null;
+    this.emitConnectionDiagnostics();
   }
 
   private recordConnectionMeasurement(measurement: ConnectionMeasurement): void {
     if (measurement.sessionRevision !== this.sessionRevision) return;
     if (this.connectionMeasurement && measurement.requestSequence < this.connectionMeasurement.requestSequence) return;
     this.connectionMeasurement = measurement;
+    this.emitConnectionDiagnostics();
+  }
+
+  private emitConnectionDiagnostics(): void {
+    const diagnostics = this.getConnectionDiagnostics();
+    for (const listener of this.connectionListeners) {
+      try { listener(diagnostics); } catch { /* Connection observers cannot affect authenticated requests. */ }
+    }
   }
 
   private async runSessionMutation<T>(operation: () => Promise<T>): Promise<T> {

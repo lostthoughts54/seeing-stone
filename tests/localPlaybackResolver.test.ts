@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { MediaItem } from "../src/shared/contracts";
+import type { JellyfinConnectionState, MediaItem, PlaybackDiagnostics } from "../src/shared/contracts";
 import { AppError } from "../src/main/services/errors";
 import { LocalPlaybackResolver } from "../src/main/services/localPlaybackResolver";
 import type { LocalVersionRecord, MediaItemRecord, PlaybackHeadRecord } from "../src/main/services/persistenceTypes";
@@ -44,7 +44,7 @@ function mediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   };
 }
 
-function mediaRecord(): MediaItemRecord {
+function mediaRecord(overrides: Partial<MediaItemRecord> = {}): MediaItemRecord {
   return {
     serverId: identity.serverId,
     userId: identity.userId,
@@ -54,8 +54,11 @@ function mediaRecord(): MediaItemRecord {
     seriesId: "series-1",
     seasonId: "season-1",
     runTimeTicks: 1_000,
+    metadata: null,
+    nextUp: null,
     createdAt: 1,
     updatedAt: 1,
+    ...overrides,
   };
 }
 
@@ -91,26 +94,49 @@ function harness(options: {
   head?: PlaybackHeadRecord | null;
   probe?: (root: string, target: string) => Promise<{ actualSize: number; container: string | null }>;
   detailsTimeout?: number;
+  connectionState?: JellyfinConnectionState;
+  record?: MediaItemRecord;
+  sourceDiagnostics?: PlaybackDiagnostics | null;
 }) {
   const updates: unknown[] = [];
   const api = {
     getAuthenticatedContext: () => identity,
-    getDetails: options.details ?? (async () => mediaItem()),
+    getConnectionDiagnostics: vi.fn(() => ({
+      state: options.connectionState ?? "unknown",
+      serverName: "Server",
+      serverVersion: "10.11.11",
+      requestLatencyMs: null,
+      measuredAt: null,
+    })),
+    getDetails: vi.fn(options.details ?? (async () => mediaItem())),
   };
   const persistence = {
-    getMediaItem: vi.fn(async () => mediaRecord()),
+    getMediaItem: vi.fn(async () => options.record ?? mediaRecord()),
+    getMediaSource: vi.fn(async () => ({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: "episode-1",
+      mediaSourceId: "source-1",
+      container: "mkv",
+      expectedSize: 100,
+      diagnostics: options.sourceDiagnostics ?? null,
+      createdAt: 1,
+      updatedAt: 1,
+    })),
     listLocalVersions: vi.fn(async () => options.versions),
     getPlaybackHead: vi.fn(async () => options.head ?? null),
     updateLocalVersion: vi.fn(async (input: unknown) => {
       updates.push(input);
       return options.versions[0];
     }),
+    upsertMediaItem: vi.fn(async () => undefined),
+    upsertMediaSource: vi.fn(async () => undefined),
   };
   const probe = {
     probe: vi.fn(options.probe ?? (async (_root: string, target: string) => ({ actualSize: options.versions.find((entry) => entry.localPath === target)?.actualSize ?? 100, container: "mkv" }))),
   };
   const resolver = new LocalPlaybackResolver(api, persistence as never, probe as never, [options.root], options.detailsTimeout ?? 20);
-  return { resolver, persistence, probe, updates };
+  return { resolver, api, persistence, probe, updates };
 }
 
 describe("LocalPlaybackResolver", () => {
@@ -169,6 +195,69 @@ describe("LocalPlaybackResolver", () => {
     expect(resolved?.resumePositionTicks).toBe(450);
     expect(resolved?.source).toBe("local");
     expect(resolved?.sourceKind).toBe("offline-local");
+  });
+
+  it("opens a known verified local item offline without making a Jellyfin request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-zero-network-"));
+    const target = join(root, "download-1", "media.mkv");
+    await mkdir(join(root, "download-1"));
+    await writeFile(target, Buffer.alloc(100, 11));
+    const head: PlaybackHeadRecord = {
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: "episode-1",
+      latestRevision: 2,
+      conflictPolicy: "automatic",
+      actionKind: "progress",
+      positionTicks: 450,
+      watched: false,
+      occurredAt: 2,
+      lastSucceededRevision: 1,
+      lastSucceededPositionTicks: 300,
+      lastSucceededWatched: false,
+      updatedAt: 2,
+    };
+    const sourceDiagnostics: PlaybackDiagnostics = {
+      sourceKind: "downloaded",
+      playbackRate: 1,
+      bufferAheadTicks: null,
+      container: "mkv",
+      videoCodec: "hevc",
+      audioCodec: "eac3",
+      audioChannels: "5.1",
+      resolution: "3840×2160",
+      bitrate: 18_000_000,
+      videoRange: "HDR10",
+      transcodeReason: null,
+    };
+    const value = harness({
+      root,
+      versions: [localVersion(root, target)],
+      connectionState: "offline",
+      head,
+      record: mediaRecord({ metadata: mediaItem({ overview: "Full cached overview" }) }),
+      sourceDiagnostics,
+      details: async () => { throw new Error("must not be called while offline"); },
+    });
+
+    const resolved = await value.resolver.resolve("episode-1", "resume");
+
+    expect(value.api.getDetails).not.toHaveBeenCalled();
+    expect(resolved).toMatchObject({
+      source: "local",
+      sourceKind: "offline-local",
+      resumePositionTicks: 450,
+      durationTicks: 1_000,
+      diagnostics: {
+        sourceKind: "offline-local",
+        videoCodec: "hevc",
+        audioCodec: "eac3",
+        resolution: "3840×2160",
+        videoRange: "HDR10",
+        bufferAheadTicks: null,
+        transcodeReason: null,
+      },
+    });
   });
 
   it("prefers newer pending local progress over stale online server progress", async () => {

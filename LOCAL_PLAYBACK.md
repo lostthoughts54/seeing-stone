@@ -1,15 +1,16 @@
 # Unified local-first playback
 
-Milestone 6 keeps one Play action throughout Home, libraries, search, details, seasons, episode rows, and the Downloads panel. Playable Home, library, and search cards include a quick Play action without replacing details navigation. When Jellyfin cannot be reached, finalized downloads appear in a Downloaded Media row on Home as well as in the Downloads panel. The renderer submits only a Jellyfin item ID and receives only sanitized playback state.
+Milestone 6 keeps one Play action throughout Home, libraries, search, details, seasons, episode rows, and the Downloads panel. When Jellyfin cannot be reached, all last-known verified local items appear in a `Local playback available` row with cached title, episode, watched, and resume metadata. Availability is revalidated before every open, so a copy moved or deleted outside Seeing Stone is rejected and removed from future verified results. The renderer submits only a Jellyfin item ID and receives only sanitized playback state.
 
 ## Resolution order
 
 1. Look up finalized local versions scoped to the active Jellyfin server, user, and exact item ID.
-2. Prefer the newest protected verified version when more than one exists.
+2. Use the same deterministic preference as online local playback: matched/imported local, Keep Downloaded, then newest.
 3. Revalidate the configured download root, path containment, file existence, recorded actual size, expected size when available, and media usability through a fresh hidden mpv probe.
 4. Give the validated path directly to the main-controlled mpv process.
-5. When Jellyfin is reachable, attach matching external text subtitles from the selected Jellyfin media source through a separate authenticated main-process proxy. Subtitle lookup failure never disqualifies the verified local video.
-6. If no local candidate passes, use the existing Jellyfin Direct Stream or transcode resolver and attach its matching external Jellyfin subtitles through the same proxy.
+5. When connection state is explicitly Offline or Reconnecting, make no Jellyfin details or capability request and open from the cached identity, metadata, diagnostics, and local resume head.
+6. When Jellyfin is reachable, attach matching external text subtitles from the selected Jellyfin media source through a separate authenticated main-process proxy. Subtitle lookup failure never disqualifies the verified local video.
+7. If no local candidate passes, use the existing Jellyfin Direct Play, Direct Stream, or transcode resolver and attach its matching external Jellyfin subtitles through the same proxy.
 
 Titles and filenames are never used to substitute a different item. Missing, changed, path-escaped, or probe-invalid copies are marked unusable but never deleted automatically.
 
@@ -23,6 +24,8 @@ Titles and filenames are never used to substitute a different item. Missing, cha
 
 ## Resume and reporting
 
-When Jellyfin is reachable, its current authoritative resume metadata is used. If a verified local file is available while Jellyfin is unreachable, the newest local playback head is used, falling back to the beginning when no position has been recorded.
+When Jellyfin is reachable, its current authoritative resume metadata is merged with the durable conflict rules. If a verified local file is available while Jellyfin is unreachable, the newest authoritative local playback head is used, falling back to cached server metadata and then the beginning.
 
-Authoritative mpv events report local playback to Jellyfin as `DirectPlay`. Server direct delivery reports `DirectStream`, and transcoding reports `Transcode`. Every authoritative event is also written to the durable main-side journal before the live report is attempted. See [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md) for retry and conflict behavior.
+The player and Session Panel expose `Offline`, `Reconnecting`, `Connected`, and `Offline Local` without inventing latency or buffer values. A successful reconnect refreshes current metadata, watched state, and Next Up in the background without changing the active playback ID or reopening the local file. A partial Next Up failure preserves the last verified cache instead of erasing it. Cached image tags are retained, but artwork bytes are not cached in this milestone, so the offline catalog deliberately uses placeholders and makes no artwork request.
+
+Authoritative mpv events report local and server direct-play delivery as `DirectPlay`, direct-stream delivery as `DirectStream`, and transcoding as `Transcode`. Every authoritative event is also written to the durable main-side journal before the live report is attempted. See [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md) for retry and conflict behavior.

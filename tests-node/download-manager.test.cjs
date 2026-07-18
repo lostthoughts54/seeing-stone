@@ -19,14 +19,31 @@ const identity = {
 const logger = { info() {}, warn() {}, error() {} };
 
 function mediaItem(itemId) {
+  const movie = itemId.startsWith("movie");
   return {
     id: itemId,
     name: `Title ${itemId}`,
-    type: itemId.startsWith("movie") ? "Movie" : "Episode",
-    seriesId: itemId.startsWith("movie") ? null : "series-1",
-    seasonId: itemId.startsWith("movie") ? null : "season-1",
+    type: movie ? "Movie" : "Episode",
+    overview: "Download test metadata",
+    productionYear: 2026,
+    premiereYear: 2026,
+    officialRating: null,
+    communityRating: null,
     runTimeTicks: 1_800_000_000,
+    genres: [],
+    primaryImageAspectRatio: null,
+    imageTags: {},
+    backdropImageTag: null,
+    parentThumbItemId: null,
+    parentThumbImageTag: null,
+    seriesId: movie ? null : "series-1",
+    seriesName: movie ? null : "Test Series",
+    seasonId: movie ? null : "season-1",
+    indexNumber: movie ? null : 1,
+    parentIndexNumber: movie ? null : 1,
     userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
+    hasTrailer: false,
+    playable: true,
   };
 }
 
@@ -126,7 +143,14 @@ test("manual download finalizes only after size and probe checks, exposes no pat
     assert.equal(completed.expectedSize, content.length, "Content-Length becomes the durable expected size");
     assert.equal(completed.bytesDownloaded, content.length);
     assert.equal(completed.canDelete, true);
+    assert.equal(completed.localPlaybackAvailable, true);
+    assert.equal(completed.item.overview, "Download test metadata");
     assert.doesNotMatch(JSON.stringify(completed), /localPath|storageRoot|127\.0\.0\.1|token|\.mkv/i);
+    const offlinePlayable = await value.manager.listOfflinePlayable();
+    assert.equal(offlinePlayable.length, 1);
+    assert.equal(offlinePlayable[0].item.id, "movie-1");
+    assert.equal(offlinePlayable[0].sourceKind, "offline-local");
+    assert.doesNotMatch(JSON.stringify(offlinePlayable), /localPath|storageRoot|pathKey|token|mediaUrl|streamUrl/i);
 
     const bundle = await value.persistence.getDownloadBundle(completed.downloadId);
     assert.deepEqual(await fs.readFile(bundle.localVersion.localPath), content);

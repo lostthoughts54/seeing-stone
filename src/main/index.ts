@@ -150,12 +150,15 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const playback = videoHost
     ? new EmbeddedMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost)
     : new LegacyExternalMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
-  const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback);
+  const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);
   const openSourceLicenses = new OpenSourceLicensesService();
   activePlayback = playback;
   activeVideoHost = videoHost ?? null;
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
+  });
+  soloSessionDiagnostics.onState((snapshot) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.sessionPanelSoloChanged, snapshot);
   });
   activeSyncPlay = new SyncPlayService(api, playback, logger, 5000, applicationPreferences);
   activeSyncPlay.onState((state) => {

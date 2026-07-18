@@ -76,6 +76,48 @@ describe("PlaybackSessionService", () => {
     expect((await service.handle(new Request("jellyfin-media://stream/11111111-1111-4111-8111-111111111111"))).status).toBe(404);
   });
 
+  it("does not request subtitle capabilities for a verified local item while offline", async () => {
+    const getMediaSourceCapabilities = vi.fn(async () => { throw new Error("must not be called"); });
+    const service = new PlaybackSessionService({
+      getConnectionDiagnostics: () => ({
+        state: "offline",
+        serverName: "Test Jellyfin",
+        serverVersion: "10.11.11",
+        requestLatencyMs: null,
+        measuredAt: null,
+      }),
+      getDetails: vi.fn(),
+      getMediaSourceCapabilities,
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+      fetchExternalSubtitle: vi.fn(),
+    }, {
+      resolve: vi.fn(async () => ({
+        playbackId: "22222222-2222-4222-8222-222222222222",
+        serverPlaySessionId: "22222222-2222-4222-8222-222222222222",
+        itemId: "movie-1",
+        itemType: "Movie" as const,
+        seriesId: null,
+        mediaSourceId: "source-1",
+        mediaUrl: "D:\\Authorized Downloads\\movie-1\\media.mkv",
+        resumePositionTicks: 50_000_000,
+        durationTicks: 100_000_000,
+        source: "local" as const,
+        sourceKind: "offline-local" as const,
+        delivery: "local" as const,
+        usesServerTimelineOffset: false,
+        externalSubtitles: [],
+        initialAction: "progress" as const,
+      })),
+    });
+
+    const started = await service.start("movie-1", "resume");
+
+    expect(started.sourceKind).toBe("offline-local");
+    expect(started.externalSubtitles).toEqual([]);
+    expect(getMediaSourceCapabilities).not.toHaveBeenCalled();
+  });
+
   it("falls back to the existing Jellyfin resolver when no valid local copy is available", async () => {
     const local = { resolve: vi.fn(async () => null) };
     const getDetails = vi.fn(async () => item);
@@ -164,12 +206,14 @@ describe("PlaybackSessionService", () => {
       itemId: played.id,
       itemType: "Movie",
       name: played.name,
+      metadata: played,
     }));
     expect(upsertMediaSource).toHaveBeenCalledWith(expect.objectContaining({
       serverId: "server-1",
       userId: "user-1",
       itemId: played.id,
       mediaSourceId: "source-1",
+      diagnostics: expect.objectContaining({ sourceKind: "direct-play", container: "mkv" }),
     }));
   });
 

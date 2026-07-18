@@ -8,6 +8,8 @@ import {
   type DownloadJobState,
   type LocalVersionRecord,
   type MediaItemRecord,
+  type MediaSourceRecord,
+  type OfflinePlayableRecord,
   type PersistenceHealth,
   type PersistenceOperation,
   type PersistenceRequest,
@@ -208,6 +210,18 @@ CREATE TABLE application_preferences (
 ) STRICT, WITHOUT ROWID;
 `;
 
+const MIGRATION_5 = `
+ALTER TABLE media_items ADD COLUMN metadata_json TEXT
+  CHECK (metadata_json IS NULL OR length(metadata_json) BETWEEN 2 AND 65536);
+ALTER TABLE media_items ADD COLUMN next_up_json TEXT
+  CHECK (next_up_json IS NULL OR length(next_up_json) BETWEEN 2 AND 65536);
+ALTER TABLE media_sources ADD COLUMN diagnostics_json TEXT
+  CHECK (diagnostics_json IS NULL OR length(diagnostics_json) BETWEEN 2 AND 16384);
+CREATE INDEX local_versions_offline_idx
+  ON local_versions(server_id, user_id, updated_at DESC, item_id)
+  WHERE file_state = 'finalized' AND probe_state = 'valid' AND media_source_id IS NOT NULL;
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -273,6 +287,12 @@ function initialize(): PersistenceHealth {
         db().exec("PRAGMA user_version = 4");
       });
     }
+    if (version < 5) {
+      transaction(() => {
+        db().exec(MIGRATION_5);
+        db().exec("PRAGMA user_version = 5");
+      });
+    }
     const now = Date.now();
     db().prepare(`
       UPDATE download_jobs
@@ -335,20 +355,24 @@ function upsertCatalogIdentity(input: Extract<PersistenceOperation, { kind: "ups
 
 function upsertMediaItem(input: Extract<PersistenceOperation, { kind: "upsertMediaItem" }>["input"]): null {
   const now = Date.now();
+  const metadataJson = input.metadata === undefined ? null : input.metadata === null ? null : JSON.stringify(input.metadata);
   db().prepare(`
-    INSERT INTO media_items(server_id, user_id, item_id, item_type, name, series_id, season_id, runtime_ticks, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO media_items(server_id, user_id, item_id, item_type, name, series_id, season_id, runtime_ticks, metadata_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(server_id, user_id, item_id) DO UPDATE SET
       item_type = excluded.item_type, name = excluded.name, series_id = excluded.series_id,
-      season_id = excluded.season_id, runtime_ticks = excluded.runtime_ticks, updated_at = excluded.updated_at
-  `).run(input.serverId, input.userId, input.itemId, input.itemType, input.name, input.seriesId, input.seasonId, input.runTimeTicks, now, now);
+      season_id = excluded.season_id, runtime_ticks = excluded.runtime_ticks,
+      metadata_json = COALESCE(excluded.metadata_json, media_items.metadata_json), updated_at = excluded.updated_at
+  `).run(input.serverId, input.userId, input.itemId, input.itemType, input.name, input.seriesId, input.seasonId, input.runTimeTicks, metadataJson, now, now);
   return null;
 }
 
-function getMediaItem(serverId: string, userId: string, itemId: string): MediaItemRecord | null {
-  const row = db().prepare(`
-    SELECT * FROM media_items WHERE server_id = ? AND user_id = ? AND item_id = ?
-  `).get(serverId, userId, itemId) as Record<string, unknown> | undefined;
+function parseCachedJson<T>(value: unknown): T | null {
+  if (typeof value !== "string" || !value) return null;
+  try { return JSON.parse(value) as T; } catch { return null; }
+}
+
+function mediaItemRow(row: Record<string, unknown> | undefined): MediaItemRecord | null {
   if (!row) return null;
   return {
     serverId: String(row.server_id),
@@ -359,20 +383,62 @@ function getMediaItem(serverId: string, userId: string, itemId: string): MediaIt
     seriesId: row.series_id === null ? null : String(row.series_id),
     seasonId: row.season_id === null ? null : String(row.season_id),
     runTimeTicks: Number(row.runtime_ticks),
+    metadata: parseCachedJson<NonNullable<MediaItemRecord["metadata"]>>(row.metadata_json),
+    nextUp: parseCachedJson<NonNullable<MediaItemRecord["nextUp"]>>(row.next_up_json),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
 }
 
+function getMediaItem(serverId: string, userId: string, itemId: string): MediaItemRecord | null {
+  const row = db().prepare(`
+    SELECT * FROM media_items WHERE server_id = ? AND user_id = ? AND item_id = ?
+  `).get(serverId, userId, itemId) as Record<string, unknown> | undefined;
+  return mediaItemRow(row);
+}
+
+function setMediaItemNextUp(serverId: string, userId: string, itemId: string, nextUp: Extract<PersistenceOperation, { kind: "setMediaItemNextUp" }>["nextUp"]): null {
+  const result = db().prepare(`
+    UPDATE media_items SET next_up_json = ?, updated_at = ?
+    WHERE server_id = ? AND user_id = ? AND item_id = ?
+  `).run(nextUp === null ? null : JSON.stringify(nextUp), Date.now(), serverId, userId, itemId);
+  if (result.changes !== 1) throw new PersistenceWorkerError("MEDIA_ITEM_NOT_FOUND", "The cached media item no longer exists.");
+  return null;
+}
+
 function upsertMediaSource(input: Extract<PersistenceOperation, { kind: "upsertMediaSource" }>["input"]): null {
   const now = Date.now();
+  const diagnosticsJson = input.diagnostics === undefined ? null : input.diagnostics === null ? null : JSON.stringify(input.diagnostics);
   db().prepare(`
-    INSERT INTO media_sources(server_id, user_id, item_id, media_source_id, container, expected_size, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO media_sources(server_id, user_id, item_id, media_source_id, container, expected_size, diagnostics_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(server_id, user_id, item_id, media_source_id) DO UPDATE SET
-      container = excluded.container, expected_size = excluded.expected_size, updated_at = excluded.updated_at
-  `).run(input.serverId, input.userId, input.itemId, input.mediaSourceId, input.container, input.expectedSize, now, now);
+      container = excluded.container, expected_size = excluded.expected_size,
+      diagnostics_json = COALESCE(excluded.diagnostics_json, media_sources.diagnostics_json), updated_at = excluded.updated_at
+  `).run(input.serverId, input.userId, input.itemId, input.mediaSourceId, input.container, input.expectedSize, diagnosticsJson, now, now);
   return null;
+}
+
+function mediaSourceRow(row: Record<string, unknown> | undefined): MediaSourceRecord | null {
+  if (!row) return null;
+  return {
+    serverId: String(row.server_id),
+    userId: String(row.user_id),
+    itemId: String(row.item_id),
+    mediaSourceId: String(row.media_source_id),
+    container: row.container === null ? null : String(row.container),
+    expectedSize: row.expected_size === null ? null : Number(row.expected_size),
+    diagnostics: parseCachedJson<NonNullable<MediaSourceRecord["diagnostics"]>>(row.diagnostics_json),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function getMediaSource(serverId: string, userId: string, itemId: string, mediaSourceId: string): MediaSourceRecord | null {
+  return mediaSourceRow(db().prepare(`
+    SELECT * FROM media_sources
+    WHERE server_id = ? AND user_id = ? AND item_id = ? AND media_source_id = ?
+  `).get(serverId, userId, itemId, mediaSourceId) as Record<string, unknown> | undefined);
 }
 
 function downloadRow(row: Record<string, unknown> | undefined): DownloadJobRecord | null {
@@ -411,15 +477,15 @@ function getLocalVersionByDownload(downloadId: string): LocalVersionRecord | nul
 function getDownloadBundle(downloadId: string): DownloadBundleRecord | null {
   const job = getDownload(downloadId);
   if (!job) return null;
-  const item = db().prepare(`
-    SELECT name, item_type FROM media_items WHERE server_id = ? AND user_id = ? AND item_id = ?
-  `).get(job.serverId, job.userId, job.itemId) as Record<string, unknown> | undefined;
+  const item = getMediaItem(job.serverId, job.userId, job.itemId);
   if (!item) throw new PersistenceWorkerError("MEDIA_ITEM_NOT_FOUND", "The download media item no longer exists.");
   return {
     job,
     localVersion: getLocalVersionByDownload(downloadId),
-    itemName: String(item.name),
-    itemType: item.item_type as DownloadBundleRecord["itemType"],
+    itemName: item.name,
+    itemType: item.itemType,
+    item,
+    playbackHead: getPlaybackHead(job.serverId, job.userId, job.itemId),
   };
 }
 
@@ -652,6 +718,35 @@ function getPlaybackHead(serverId: string, userId: string, itemId: string): Play
   `).get(serverId, userId, itemId) as Record<string, unknown> | undefined);
 }
 
+function listOfflinePlayableItems(serverId: string, userId: string): OfflinePlayableRecord[] {
+  const rows = db().prepare(`
+    WITH ranked AS (
+      SELECT local_versions.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY server_id, user_id, item_id
+          ORDER BY (download_id IS NOT NULL) ASC, keep_downloaded DESC, updated_at DESC, local_version_id DESC
+        ) AS preference_rank
+      FROM local_versions
+      WHERE server_id = ? AND user_id = ?
+        AND file_state = 'finalized' AND probe_state = 'valid' AND media_source_id IS NOT NULL
+    )
+    SELECT * FROM ranked WHERE preference_rank = 1
+    ORDER BY updated_at DESC, local_version_id DESC
+  `).all(serverId, userId) as Record<string, unknown>[];
+  return rows.map((row) => {
+    const local = localVersionRow(row);
+    const item = getMediaItem(serverId, userId, local.itemId);
+    if (!item) throw new PersistenceWorkerError("MEDIA_ITEM_NOT_FOUND", "The cached local media item no longer exists.");
+    return {
+      item,
+      mediaSource: local.mediaSourceId ? getMediaSource(serverId, userId, local.itemId, local.mediaSourceId) : null,
+      playbackHead: getPlaybackHead(serverId, userId, local.itemId),
+      downloaded: local.downloadId !== null,
+      updatedAt: local.updatedAt,
+    };
+  });
+}
+
 function recordPlaybackRevision(input: Extract<PersistenceOperation, { kind: "recordPlaybackRevision" }>["input"]): PlaybackRevisionRecord {
   return transaction(() => {
     const head = getPlaybackHead(input.serverId, input.userId, input.itemId);
@@ -782,7 +877,9 @@ function execute(operation: PersistenceOperation): unknown {
     case "upsertCatalogIdentity": return upsertCatalogIdentity(operation.input);
     case "upsertMediaItem": return upsertMediaItem(operation.input);
     case "getMediaItem": return getMediaItem(operation.serverId, operation.userId, operation.itemId);
+    case "setMediaItemNextUp": return setMediaItemNextUp(operation.serverId, operation.userId, operation.itemId, operation.nextUp);
     case "upsertMediaSource": return upsertMediaSource(operation.input);
+    case "getMediaSource": return getMediaSource(operation.serverId, operation.userId, operation.itemId, operation.mediaSourceId);
     case "createDownload": return createDownload(operation.input);
     case "createDownloadBundle": return createDownloadBundle(operation);
     case "transitionDownload": return transitionDownload(operation.input);
@@ -794,6 +891,7 @@ function execute(operation: PersistenceOperation): unknown {
     case "registerLocalVersion": return registerLocalVersion(operation.input);
     case "updateLocalVersion": return updateLocalVersion(operation.input);
     case "listLocalVersions": return listLocalVersions(operation.serverId, operation.userId, operation.itemId);
+    case "listOfflinePlayableItems": return listOfflinePlayableItems(operation.serverId, operation.userId);
     case "recordPlaybackRevision": return recordPlaybackRevision(operation.input);
     case "getPlaybackHead": return getPlaybackHead(operation.serverId, operation.userId, operation.itemId);
     case "listPendingProgress": return listPendingProgress(operation.limit);

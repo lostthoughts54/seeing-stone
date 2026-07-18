@@ -93,6 +93,14 @@ let playback = {
 };
 const playbackListeners = new Set();
 const watchPartyListeners = new Set();
+const soloListeners = new Set();
+let connectionDiagnostics = {
+  state: "connected",
+  serverName: "Isolated visual harness",
+  serverVersion: "test-fixture",
+  requestLatencyMs: null,
+  measuredAt: null,
+};
 
 function copy(value) { return structuredClone(value); }
 function emitPlayback() { for (const listener of playbackListeners) listener(copy(playback)); }
@@ -117,8 +125,20 @@ function playbackItem() {
   return playback.itemId === nextItem.id ? nextItem : item;
 }
 
+function soloSnapshot() {
+  return {
+    playback: copy(playback),
+    connection: copy(connectionDiagnostics),
+    item: copy(playbackItem()),
+    nextUp: playback.itemId === nextItem.id ? null : copy(nextItem),
+  };
+}
+
+function emitSolo() { for (const listener of soloListeners) listener(soloSnapshot()); }
+
 const downloads = Object.freeze({
   list: async () => [],
+  listOfflinePlayable: async () => [],
   getLocation: async () => ({ mode: "default", label: "Windows Videos folder" }),
   chooseLocation: async () => null,
   useDefaultLocation: async () => ({ mode: "default", label: "Windows Videos folder" }),
@@ -197,12 +217,8 @@ const bridge = Object.freeze({
     subscribe(listener) { playbackListeners.add(listener); queueMicrotask(() => listener(copy(playback))); return () => playbackListeners.delete(listener); },
   }),
   sessionPanel: Object.freeze({
-    getSolo: async () => ({
-      playback: copy(playback),
-      connection: { state: "connected", serverName: "Isolated visual harness", serverVersion: "test-fixture", requestLatencyMs: null, measuredAt: null },
-      item: copy(playbackItem()),
-      nextUp: playback.itemId === nextItem.id ? null : copy(nextItem),
-    }),
+    getSolo: async () => soloSnapshot(),
+    subscribeSolo(listener) { soloListeners.add(listener); queueMicrotask(() => listener(soloSnapshot())); return () => soloListeners.delete(listener); },
   }),
   licenses: Object.freeze({ list: async () => ({ schemaVersion: 1, projectName: "Seeing Stone", projectLicense: "GPL-2.0-or-later", entries: [] }) }),
   watchParties: Object.freeze({
@@ -273,4 +289,30 @@ contextBridge.exposeInMainWorld("seeingStoneVisualAcceptance", Object.freeze({
     seekable: false,
     error: "Visual fixture termination",
   }),
+  setGate6Connection: (state) => {
+    connectionDiagnostics = {
+      ...connectionDiagnostics,
+      state,
+      requestLatencyMs: state === "connected" ? 18 : null,
+      measuredAt: state === "unknown" ? null : "2026-07-17T00:00:00.000Z",
+    };
+    if (state === "offline" || state === "reconnecting") {
+      updatePlayback({
+        source: "local",
+        diagnostics: {
+          ...playback.diagnostics,
+          sourceKind: "offline-local",
+          container: "mkv",
+          videoCodec: "hevc",
+          audioCodec: "eac3",
+          audioChannels: "5.1",
+          resolution: "3840×2160",
+          bitrate: 18_000_000,
+          videoRange: "HDR10",
+          transcodeReason: null,
+        },
+      });
+    }
+    emitSolo();
+  },
 }));

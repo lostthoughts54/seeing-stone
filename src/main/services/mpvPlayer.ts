@@ -251,8 +251,10 @@ export class MpvPlayerService implements PlayerController {
       }
     }
     try {
+      if (!this.isCurrent(revision, source)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
       if (!this.videoHost && !this.mainWindow.isDestroyed()) this.mainWindow.minimize();
       await this.report("start");
+      if (!this.isCurrent(revision, source)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
       this.update({ ...this.state, phase: this.state.buffering ? "buffering" : this.state.paused ? "paused" : "playing" });
       this.startReportingTimer();
       this.emitEvent("load-item", context);
@@ -264,7 +266,7 @@ export class MpvPlayerService implements PlayerController {
         sourceKind: source.sourceKind,
       };
     } catch (error) {
-      await this.failAndClean(error);
+      if (this.isCurrent(revision, source)) await this.failAndClean(error);
       throw error;
     }
   }
@@ -1143,22 +1145,24 @@ export class MpvPlayerService implements PlayerController {
     actionKind?: "progress" | "completed" | "start_over" | "replay" | "mark_watched" | "mark_unwatched",
     conflictPolicy?: "automatic" | "explicit",
   ): Promise<void> {
-    if (!this.source) return;
+    const source = this.source;
+    if (!source) return;
     if (kind !== "start" && !this.reportingActive) return;
-    if (kind === "stop") this.reportingActive = false;
+    if (kind === "start") this.reportingActive = true;
+    else if (kind === "stop") this.reportingActive = false;
     const selectedAudio = this.state.audioTracks.find((track) => track.selected);
     const selectedSubtitle = this.state.subtitleTracks.find((track) => track.selected);
-    const resolvedActionKind = actionKind ?? (kind === "start" ? this.source.initialAction : "progress");
+    const resolvedActionKind = actionKind ?? (kind === "start" ? source.initialAction : "progress");
     await this.reporting.acceptAuthoritativeEvent({
       kind,
-      itemId: this.source.itemId,
-      mediaSourceId: this.source.mediaSourceId,
-      playMethod: this.source.source === "local" || this.source.sourceKind === "direct-play"
+      itemId: source.itemId,
+      mediaSourceId: source.mediaSourceId,
+      playMethod: source.source === "local" || source.sourceKind === "direct-play"
         ? "DirectPlay"
-        : this.source.delivery === "transcode" ? "Transcode" : "DirectStream",
+        : source.delivery === "transcode" ? "Transcode" : "DirectStream",
       positionTicks: this.state.positionTicks,
       paused: this.state.paused,
-      playSessionId: this.source.serverPlaySessionId,
+      playSessionId: source.serverPlaySessionId,
       canSeek: this.state.seekable,
       audioStreamIndex: selectedAudio?.streamIndex ?? null,
       subtitleStreamIndex: selectedSubtitle?.external
@@ -1169,7 +1173,6 @@ export class MpvPlayerService implements PlayerController {
       conflictPolicy: conflictPolicy
         ?? (resolvedActionKind !== "progress" ? "explicit" : "automatic"),
     });
-    if (kind === "start") this.reportingActive = true;
   }
 
   private update(

@@ -175,7 +175,14 @@ export function registerIpcHandlers(
   });
   register(IPC.artworkGetUrl, (input) => artwork.getUrl(artworkSchema.strict().parse(input)));
   register(IPC.mediaSourcesGetCapabilities, (input) => api.getMediaSourceCapabilities(itemIdSchema.strict().parse(input).itemId));
-  register(IPC.downloadsList, () => downloads.list());
+  register(IPC.downloadsList, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return downloads.list();
+  });
+  register(IPC.downloadsListOfflinePlayable, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return downloads.listOfflinePlayable();
+  });
   register(IPC.downloadsGetLocation, (input) => {
     emptySchema.strict().parse(input ?? {});
     if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);

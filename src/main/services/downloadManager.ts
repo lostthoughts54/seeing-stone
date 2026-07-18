@@ -1,6 +1,7 @@
 import { mkdir, open, rename, rm, stat, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import type { DownloadSummary, MediaItem, MediaSourceCapabilities } from "../../shared/contracts";
+import type { DownloadSummary, MediaItem, MediaSourceCapabilities, OfflinePlayableSummary, PlaybackDiagnostics } from "../../shared/contracts";
+import { materializeCachedMediaItem } from "./cachedMedia";
 import { AppError, toPublicError } from "./errors";
 import type { AuthenticatedContext, JellyfinApi } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
@@ -51,6 +52,25 @@ function responseExpectedSize(response: Response, offset: number): number | null
 
 function isNoSpaceError(error: unknown): boolean {
   return (error as { code?: unknown })?.code === "ENOSPC";
+}
+
+function cachedSourceDiagnostics(
+  source: MediaSourceCapabilities["sources"][number],
+  sourceKind: PlaybackDiagnostics["sourceKind"],
+): PlaybackDiagnostics {
+  return {
+    sourceKind,
+    playbackRate: 1,
+    bufferAheadTicks: null,
+    container: source.container,
+    videoCodec: source.videoCodec ?? null,
+    audioCodec: source.audioCodec ?? null,
+    audioChannels: source.audioChannels ?? null,
+    resolution: source.width && source.height ? `${source.width}×${source.height}` : null,
+    bitrate: source.bitrate ?? null,
+    videoRange: source.videoRange ?? null,
+    transcodeReason: null,
+  };
 }
 
 export class DownloadManager {
@@ -150,6 +170,20 @@ export class DownloadManager {
     return this.listFor(identity);
   }
 
+  async listOfflinePlayable(): Promise<OfflinePlayableSummary[]> {
+    const identity = this.requireIdentity();
+    const records = await this.persistence.listOfflinePlayableItems(identity.serverId, identity.userId);
+    return records.map((record) => {
+      const item = materializeCachedMediaItem(record.item, record.playbackHead);
+      return {
+        item,
+        resumePositionTicks: item.userData.playbackPositionTicks,
+        sourceKind: "offline-local",
+        localPlaybackAvailable: true,
+      };
+    });
+  }
+
   async start(itemId: string): Promise<DownloadSummary> {
     const identity = this.requireIdentity();
     const storageRoot = this.storageRoot;
@@ -179,6 +213,7 @@ export class DownloadManager {
       seriesId: item.seriesId,
       seasonId: item.seasonId,
       runTimeTicks: Math.max(0, Math.floor(item.runTimeTicks)),
+      metadata: item,
     });
     await this.persistence.upsertMediaSource({
       serverId: identity.serverId,
@@ -187,6 +222,7 @@ export class DownloadManager {
       mediaSourceId: source.id,
       container: source.container,
       expectedSize,
+      diagnostics: cachedSourceDiagnostics(source, "downloaded"),
     });
     const bundle = await this.persistence.createDownloadBundle({
       downloadId,
@@ -611,11 +647,29 @@ export class DownloadManager {
     const progressPercent = job.expectedSize && job.expectedSize > 0
       ? Math.max(0, Math.min(100, Math.round((job.bytesDownloaded / job.expectedSize) * 1000) / 10))
       : null;
+    const item = materializeCachedMediaItem(bundle.item ?? {
+      serverId: job.serverId,
+      userId: job.userId,
+      itemId: job.itemId,
+      itemType: bundle.itemType,
+      name: bundle.itemName,
+      seriesId: null,
+      seasonId: null,
+      runTimeTicks: 0,
+      metadata: null,
+      nextUp: null,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    }, bundle.playbackHead);
+    const localPlaybackAvailable = state === "downloaded";
     return {
       downloadId: job.downloadId,
       itemId: job.itemId,
       name: bundle.itemName,
       itemType: bundle.itemType,
+      item,
+      resumePositionTicks: item.userData.playbackPositionTicks,
+      localPlaybackAvailable,
       state,
       bytesDownloaded: job.bytesDownloaded,
       expectedSize: job.expectedSize,

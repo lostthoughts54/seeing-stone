@@ -55,6 +55,8 @@ describe("Jellyfin connection diagnostics", () => {
       requestLatencyMs: 37,
       measuredAt: "2026-07-17T12:00:00.000Z",
     });
+    const transitions: string[] = [];
+    const unsubscribe = api.onConnectionDiagnostics((diagnostics) => transitions.push(diagnostics.state));
 
     mode = "offline";
     wall += 1_000;
@@ -69,6 +71,8 @@ describe("Jellyfin connection diagnostics", () => {
     wall += 1_000;
     await api.getLibraries();
     expect(api.getConnectionDiagnostics()).toMatchObject({ state: "connected", requestLatencyMs: 37 });
+    expect(transitions).toEqual(["offline", "reconnecting", "connected"]);
+    unsubscribe();
   });
 
   it("does not let a slower older request overwrite the newest measurement", async () => {

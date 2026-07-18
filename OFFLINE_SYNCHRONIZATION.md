@@ -1,6 +1,6 @@
 # Offline playback synchronization
 
-Milestone 7 makes playback progress durable without adding a renderer reporting API. Authoritative mpv events are recorded in SQLite under the active Jellyfin server, user, and item identity before a live report is attempted.
+Milestone 6 makes playback progress durable without adding a renderer reporting API. Authoritative mpv events are recorded in SQLite under the active Jellyfin server, user, and item identity before a live report is attempted.
 
 ## Ownership and lifecycle
 
@@ -8,7 +8,8 @@ Milestone 7 makes playback progress durable without adding a renderer reporting 
 - SQLite remains isolated in its worker thread; synchronization uses asynchronous network calls.
 - The renderer receives sanitized playback state but cannot submit progress, authoritative playback reports, credentials, URLs, paths, or synchronization targets.
 - The renderer may request the narrow explicit user action `{ itemId, watched }`; main validates the item and creates the authoritative local revision. It cannot supply a position, percentage, report kind, URL, or target server.
-- Synchronization activates only for an authenticated session, runs immediately and every 30 seconds, and is cancelled across logout or session revision changes.
+- Synchronization activates only for an authenticated session, runs when the connection is eligible and every 30 seconds, and is cancelled across logout or session revision changes.
+- While connection state is explicitly `Offline` or `Reconnecting`, start, progress, pause, seek, completion, and stop return after their SQLite capture without attempting Jellyfin. A verified `Connected` transition triggers a drain; a failed request stops the entire drain before another item can issue a request.
 - An actively playing item is not synchronized from the durable queue. Its queued revisions are considered after authoritative playback stops.
 
 ## Coalescing and ordering
@@ -30,3 +31,5 @@ A newer explicit local revision may intentionally lower the position or change w
 Movie and episode detail controls use this explicit action. Series pages expose it per episode; whole-series watched changes are intentionally not inferred from a single item action.
 
 Network and server failures leave the revision retryable. Logs and renderer-visible errors receive only bounded safe error codes; tokens, authenticated URLs, paths, and response bodies are not logged.
+
+Gate 6 emits sanitized `Offline → Reconnecting → Connected` connection transitions. Reconnection refreshes the active item's cached metadata, watched state, and Next Up independently of media playback, then drains the existing revision queue under the conflict rules above. The refresh never stops, seeks, or replaces an active verified local mpv session.

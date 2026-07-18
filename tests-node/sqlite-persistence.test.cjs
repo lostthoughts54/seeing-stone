@@ -35,6 +35,49 @@ const source = {
   expectedSize: 100,
 };
 
+function cachedItem(id, name, overrides = {}) {
+  return {
+    id,
+    name,
+    type: "Episode",
+    overview: "Cached episode overview",
+    productionYear: 2026,
+    premiereYear: 2026,
+    officialRating: "TV-14",
+    communityRating: 8.4,
+    runTimeTicks: 1_800_000_000,
+    genres: ["Adventure"],
+    primaryImageAspectRatio: 0.67,
+    imageTags: { Primary: `primary-${id}` },
+    backdropImageTag: `backdrop-${id}`,
+    parentThumbItemId: "series-1",
+    parentThumbImageTag: "series-thumb",
+    seriesId: "series-1",
+    seriesName: "Echoes Beyond",
+    seasonId: "season-1",
+    indexNumber: 1,
+    parentIndexNumber: 1,
+    userData: { played: false, playbackPositionTicks: 120_000_000, playedPercentage: 6.67 },
+    hasTrailer: false,
+    playable: true,
+    ...overrides,
+  };
+}
+
+const cachedDiagnostics = {
+  sourceKind: "downloaded",
+  playbackRate: 1,
+  bufferAheadTicks: null,
+  container: "mkv",
+  videoCodec: "h264",
+  audioCodec: "aac",
+  audioChannels: "5.1",
+  resolution: "1920×1080",
+  bitrate: 5_000_000,
+  videoRange: "SDR",
+  transcodeReason: null,
+};
+
 async function createSeededService(prefix = "lf-sqlite-") {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   const service = new SqlitePersistenceService(directory);
@@ -45,7 +88,7 @@ async function createSeededService(prefix = "lf-sqlite-") {
   return { directory, service };
 }
 
-test("schema v1 upgrades additively to v4 while preserving existing rows", async () => {
+test("schema v1 upgrades additively to v5 while preserving existing rows", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lf-sqlite-v1-upgrade-"));
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const v1Schema = await fs.readFile(path.join(__dirname, "fixtures", "persistence-schema-v1.sql"), "utf8");
@@ -92,7 +135,7 @@ test("schema v1 upgrades additively to v4 while preserving existing rows", async
 
   const service = new SqlitePersistenceService(directory);
   try {
-    assert.equal((await service.open()).schemaVersion, 4);
+    assert.equal((await service.open()).schemaVersion, 5);
     const bundle = await service.getDownloadBundle("download-v1");
     assert.equal(bundle.job.state, "paused");
     assert.equal(bundle.localVersion.localVersionId, "local-v1");
@@ -104,7 +147,7 @@ test("schema v1 upgrades additively to v4 while preserving existing rows", async
     const [legacyRevision] = await service.listPendingProgressForIdentity("server-v1", "user-v1", 10);
     assert.equal(legacyRevision.localRevision, 1);
     assert.equal(legacyRevision.report, null);
-    const v4Revision = await service.recordPlaybackRevision({
+    const v5Revision = await service.recordPlaybackRevision({
       serverId: "server-v1",
       userId: "user-v1",
       itemId: "episode-v1",
@@ -124,9 +167,9 @@ test("schema v1 upgrades additively to v4 while preserving existing rows", async
         conflictPolicy: "automatic",
       },
     });
-    assert.equal(v4Revision.localRevision, 2);
-    assert.equal(v4Revision.report.playSessionId, "session-v2");
-    assert.equal(v4Revision.report.conflictPolicy, "automatic");
+    assert.equal(v5Revision.localRevision, 2);
+    assert.equal(v5Revision.report.playSessionId, "session-v2");
+    assert.equal(v5Revision.report.conflictPolicy, "automatic");
     await service.setApplicationPreference("player.adapter-mode", { mode: "embedded" });
     assert.equal(JSON.parse((await service.getApplicationPreference("player.adapter-mode")).valueJson).mode, "embedded");
   } finally {
@@ -135,13 +178,18 @@ test("schema v1 upgrades additively to v4 while preserving existing rows", async
 
   const verify = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 4);
+    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 5);
     const columns = verify.prepare("PRAGMA table_info(playback_revisions)").all().map((row) => row.name);
     for (const name of [
       "report_kind", "report_media_source_id", "report_play_method", "report_play_session_id",
       "report_paused", "report_can_seek", "report_audio_stream_index", "report_subtitle_stream_index",
       "report_conflict_policy",
     ]) assert.ok(columns.includes(name), name);
+    const mediaColumns = verify.prepare("PRAGMA table_info(media_items)").all().map((row) => row.name);
+    for (const name of ["metadata_json", "next_up_json"]) assert.ok(mediaColumns.includes(name), name);
+    const sourceColumns = verify.prepare("PRAGMA table_info(media_sources)").all().map((row) => row.name);
+    assert.ok(sourceColumns.includes("diagnostics_json"));
+    assert.ok(verify.prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'local_versions_offline_idx'").get());
     assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM download_jobs").get().count, 1);
     assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM local_versions").get().count, 1);
     assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM playback_revisions").get().count, 2);
@@ -154,7 +202,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 4);
+    assert.equal(health.schemaVersion, 5);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -178,7 +226,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 4);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 5);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
@@ -186,6 +234,91 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
     ]) assert.ok(tables.includes(expected), expected);
   } finally {
     database.close();
+  }
+});
+
+test("schema v5 caches sanitized media per identity and lists verified local playback without paths", async () => {
+  const { service } = await createSeededService("lf-sqlite-offline-cache-");
+  const metadata = cachedItem(media.itemId, media.name);
+  const nextUp = cachedItem("episode-2", "Episode 2", { indexNumber: 2 });
+  try {
+    await service.upsertMediaItem({ ...media, metadata });
+    await service.upsertMediaSource({ ...source, diagnostics: cachedDiagnostics });
+    await service.upsertMediaItem({
+      ...media,
+      itemId: nextUp.id,
+      name: nextUp.name,
+      metadata: nextUp,
+    });
+    await service.setMediaItemNextUp(identity.serverId, identity.userId, media.itemId, nextUp);
+    await service.registerLocalVersion({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      mediaSourceId: source.mediaSourceId,
+      downloadId: null,
+      storageRoot: "C:\\OfflineCache",
+      localPath: "C:\\OfflineCache\\episode-1.mkv",
+      origin: "imported",
+      smartManaged: false,
+      keepDownloaded: true,
+      fileState: "finalized",
+      probeState: "valid",
+      expectedSize: 100,
+      actualSize: 100,
+      container: "mkv",
+    });
+
+    const otherIdentity = { ...identity, userId: "user-2", userName: "Other Viewer" };
+    await service.upsertCatalogIdentity(otherIdentity);
+    const otherMetadata = cachedItem(media.itemId, "Other profile episode");
+    await service.upsertMediaItem({
+      ...media,
+      userId: otherIdentity.userId,
+      name: otherMetadata.name,
+      metadata: otherMetadata,
+    });
+    await service.upsertMediaSource({ ...source, userId: otherIdentity.userId, diagnostics: cachedDiagnostics });
+    await service.registerLocalVersion({
+      serverId: identity.serverId,
+      userId: otherIdentity.userId,
+      itemId: media.itemId,
+      mediaSourceId: source.mediaSourceId,
+      downloadId: null,
+      storageRoot: "C:\\OtherOfflineCache",
+      localPath: "C:\\OtherOfflineCache\\episode-1.mkv",
+      origin: "imported",
+      smartManaged: false,
+      keepDownloaded: true,
+      fileState: "finalized",
+      probeState: "valid",
+      expectedSize: 100,
+      actualSize: 100,
+      container: "mkv",
+    });
+
+    const stored = await service.getMediaItem(identity.serverId, identity.userId, media.itemId);
+    assert.deepEqual(stored.metadata, metadata);
+    assert.deepEqual(stored.nextUp, nextUp);
+    assert.deepEqual((await service.getMediaSource(identity.serverId, identity.userId, media.itemId, source.mediaSourceId)).diagnostics, cachedDiagnostics);
+
+    const playable = await service.listOfflinePlayableItems(identity.serverId, identity.userId);
+    assert.equal(playable.length, 1);
+    assert.equal(playable[0].item.metadata.name, media.name);
+    assert.equal(playable[0].downloaded, false);
+    assert.doesNotMatch(JSON.stringify(playable), /localPath|storageRoot|pathKey|accessToken|mediaUrl|streamUrl|authorization/i);
+    assert.equal((await service.listOfflinePlayableItems(identity.serverId, otherIdentity.userId))[0].item.metadata.name, otherMetadata.name);
+
+    await assert.rejects(service.upsertMediaItem({
+      ...media,
+      metadata: { ...metadata, localPath: "C:\\should-not-persist.mkv" },
+    }), { code: "INVALID_PERSISTENCE_INPUT" });
+    await assert.rejects(service.upsertMediaSource({
+      ...source,
+      diagnostics: { ...cachedDiagnostics, accessToken: "not-a-real-token" },
+    }), { code: "INVALID_PERSISTENCE_INPUT" });
+  } finally {
+    await service.close();
   }
 });
 

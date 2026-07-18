@@ -4,6 +4,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import { AppError } from "./errors";
 import { redactText } from "./logger";
+import { cachedMediaItemSchema, cachedPlaybackDiagnosticsSchema } from "../../shared/schemas";
+import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
 import type {
   ApplicationPreferenceKey,
   ApplicationPreferenceRecord,
@@ -14,7 +16,9 @@ import type {
   LocalVersionRecord,
   MediaItemRecord,
   MediaItemRecordInput,
+  MediaSourceRecord,
   MediaSourceRecordInput,
+  OfflinePlayableRecord,
   PersistenceHealth,
   PersistenceOperation,
   PersistenceRequest,
@@ -54,6 +58,61 @@ function safeIdentity(input: { serverId: string; userId: string; itemId?: string
     userId: boundedText(input.userId, "User identity", 256),
     ...(input.itemId === undefined ? {} : { itemId: boundedText(input.itemId, "Item identity", 256) }),
   };
+}
+
+function cacheValue<T>(
+  value: unknown,
+  parser: { safeParse(input: unknown): { success: true; data: T } | { success: false } },
+  name: string,
+  maximum: number,
+): T {
+  const parsed = parser.safeParse(value);
+  if (!parsed.success) throw new AppError("INVALID_PERSISTENCE_INPUT", `${name} is invalid.`, 400);
+  const valueJson = JSON.stringify(parsed.data);
+  if (!valueJson || valueJson.length > maximum || Buffer.byteLength(valueJson, "utf8") > maximum || valueJson.includes("\0")) {
+    throw new AppError("INVALID_PERSISTENCE_INPUT", `${name} is invalid.`, 400);
+  }
+  return parsed.data;
+}
+
+function cachedMediaItem(value: unknown, expectedItemId: string, name = "Cached media metadata"): MediaItem {
+  const item = cacheValue(value, cachedMediaItemSchema, name, 65_536);
+  if (item.id !== expectedItemId) {
+    throw new AppError("INVALID_PERSISTENCE_INPUT", `${name} has the wrong item identity.`, 400);
+  }
+  return item;
+}
+
+function cachedDiagnostics(value: unknown): PlaybackDiagnostics {
+  return cacheValue(value, cachedPlaybackDiagnosticsSchema, "Cached playback diagnostics", 16_384);
+}
+
+function normalizeMediaRecord(record: MediaItemRecord): MediaItemRecord {
+  const metadataResult = cachedMediaItemSchema.safeParse(record.metadata);
+  const metadata = metadataResult.success
+    && metadataResult.data.id === record.itemId
+    && metadataResult.data.playable
+    && (metadataResult.data.type === "Episode" ? "Episode" : metadataResult.data.type === "Movie" ? "Movie" : "Video") === record.itemType
+    && metadataResult.data.name === record.name
+    && metadataResult.data.seriesId === record.seriesId
+    && metadataResult.data.seasonId === record.seasonId
+    && metadataResult.data.runTimeTicks === record.runTimeTicks
+    ? metadataResult.data
+    : null;
+  const nextUpResult = cachedMediaItemSchema.safeParse(record.nextUp);
+  const nextUp = nextUpResult.success && nextUpResult.data.playable && nextUpResult.data.id !== record.itemId
+    ? nextUpResult.data
+    : null;
+  return { ...record, metadata, nextUp };
+}
+
+function normalizeMediaSourceRecord(record: MediaSourceRecord): MediaSourceRecord {
+  const diagnostics = cachedPlaybackDiagnosticsSchema.safeParse(record.diagnostics);
+  return { ...record, diagnostics: diagnostics.success ? diagnostics.data : null };
+}
+
+function normalizeDownloadBundle(bundle: DownloadBundleRecord): DownloadBundleRecord {
+  return { ...bundle, item: normalizeMediaRecord(bundle.item) };
 }
 
 function normalizeLocalVersion(
@@ -160,31 +219,65 @@ export class SqlitePersistenceService {
 
   async upsertMediaItem(input: MediaItemRecordInput): Promise<void> {
     const identity = safeIdentity(input);
+    const name = boundedText(input.name, "Media name", 1024);
+    const seriesId = optionalText(input.seriesId, "Series identity", 256);
+    const seasonId = optionalText(input.seasonId, "Season identity", 256);
+    const runTimeTicks = nonnegativeInteger(input.runTimeTicks, "Runtime");
+    const metadata = input.metadata === undefined
+      ? undefined
+      : input.metadata === null ? null : cachedMediaItem(input.metadata, identity.itemId!);
+    if (metadata) {
+      const itemType = metadata.type === "Episode" ? "Episode" : metadata.type === "Movie" ? "Movie" : "Video";
+      if (!metadata.playable || itemType !== input.itemType || metadata.name !== name
+        || metadata.seriesId !== seriesId || metadata.seasonId !== seasonId || metadata.runTimeTicks !== runTimeTicks) {
+        throw new AppError("INVALID_PERSISTENCE_INPUT", "Cached media metadata does not match its catalog record.", 400);
+      }
+    }
     await this.invoke({
       kind: "upsertMediaItem",
       input: {
         ...input,
         ...identity,
-        name: boundedText(input.name, "Media name", 1024),
-        seriesId: optionalText(input.seriesId, "Series identity", 256),
-        seasonId: optionalText(input.seasonId, "Season identity", 256),
-        runTimeTicks: nonnegativeInteger(input.runTimeTicks, "Runtime"),
+        name,
+        seriesId,
+        seasonId,
+        runTimeTicks,
+        metadata,
       },
     });
   }
 
   async getMediaItem(serverId: string, userId: string, itemId: string): Promise<MediaItemRecord | null> {
     const identity = safeIdentity({ serverId, userId, itemId });
-    return this.invoke({
+    const record = await this.invoke({
       kind: "getMediaItem",
       serverId: identity.serverId,
       userId: identity.userId,
       itemId: identity.itemId!,
-    }) as Promise<MediaItemRecord | null>;
+    }) as MediaItemRecord | null;
+    return record ? normalizeMediaRecord(record) : null;
+  }
+
+  async setMediaItemNextUp(serverId: string, userId: string, itemId: string, nextUp: MediaItem | null): Promise<void> {
+    const identity = safeIdentity({ serverId, userId, itemId });
+    const normalizedNextUp = nextUp === null ? null : cachedMediaItem(nextUp, nextUp.id, "Cached Next Up metadata");
+    if (normalizedNextUp && (!normalizedNextUp.playable || normalizedNextUp.id === identity.itemId)) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Cached Next Up metadata is invalid.", 400);
+    }
+    await this.invoke({
+      kind: "setMediaItemNextUp",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: identity.itemId!,
+      nextUp: normalizedNextUp,
+    });
   }
 
   async upsertMediaSource(input: MediaSourceRecordInput): Promise<void> {
     const identity = safeIdentity(input);
+    const diagnostics = input.diagnostics === undefined
+      ? undefined
+      : input.diagnostics === null ? null : cachedDiagnostics(input.diagnostics);
     await this.invoke({
       kind: "upsertMediaSource",
       input: {
@@ -193,8 +286,21 @@ export class SqlitePersistenceService {
         mediaSourceId: boundedText(input.mediaSourceId, "Media source identity", 256),
         container: optionalText(input.container, "Container", 64),
         expectedSize: optionalNonnegativeInteger(input.expectedSize, "Expected size"),
+        diagnostics,
       },
     });
+  }
+
+  async getMediaSource(serverId: string, userId: string, itemId: string, mediaSourceId: string): Promise<MediaSourceRecord | null> {
+    const identity = safeIdentity({ serverId, userId, itemId });
+    const record = await this.invoke({
+      kind: "getMediaSource",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: identity.itemId!,
+      mediaSourceId: boundedText(mediaSourceId, "Media source identity", 256),
+    }) as MediaSourceRecord | null;
+    return record ? normalizeMediaSourceRecord(record) : null;
   }
 
   async createDownload(input: CreateDownloadInput): Promise<DownloadJobRecord> {
@@ -235,14 +341,15 @@ export class SqlitePersistenceService {
       || normalizedLocalVersion.mediaSourceId !== normalizedDownload.mediaSourceId) {
       throw new AppError("INVALID_PERSISTENCE_INPUT", "Download and local-version identities do not match.", 400);
     }
-    return this.invoke({
+    const bundle = await this.invoke({
       kind: "createDownloadBundle",
       download: normalizedDownload,
       localVersion: {
         ...normalizedLocalVersion,
         downloadId,
       },
-    }) as Promise<DownloadBundleRecord>;
+    }) as DownloadBundleRecord;
+    return normalizeDownloadBundle(bundle);
   }
 
   async transitionDownload(input: TransitionDownloadInput): Promise<DownloadJobRecord> {
@@ -265,28 +372,32 @@ export class SqlitePersistenceService {
   }
 
   async getDownloadBundle(downloadId: string): Promise<DownloadBundleRecord | null> {
-    return this.invoke({ kind: "getDownloadBundle", downloadId: boundedText(downloadId, "Download identity", 256) }) as Promise<DownloadBundleRecord | null>;
+    const bundle = await this.invoke({ kind: "getDownloadBundle", downloadId: boundedText(downloadId, "Download identity", 256) }) as DownloadBundleRecord | null;
+    return bundle ? normalizeDownloadBundle(bundle) : null;
   }
 
   async listDownloadBundles(serverId: string, userId: string): Promise<DownloadBundleRecord[]> {
     const identity = safeIdentity({ serverId, userId });
-    return this.invoke({ kind: "listDownloadBundles", serverId: identity.serverId, userId: identity.userId }) as Promise<DownloadBundleRecord[]>;
+    const bundles = await this.invoke({ kind: "listDownloadBundles", serverId: identity.serverId, userId: identity.userId }) as DownloadBundleRecord[];
+    return bundles.map(normalizeDownloadBundle);
   }
 
   async setDownloadKeep(downloadId: string, keepDownloaded: boolean): Promise<DownloadBundleRecord> {
-    return this.invoke({
+    const bundle = await this.invoke({
       kind: "setDownloadKeep",
       downloadId: boundedText(downloadId, "Download identity", 256),
       keepDownloaded,
-    }) as Promise<DownloadBundleRecord>;
+    }) as DownloadBundleRecord;
+    return normalizeDownloadBundle(bundle);
   }
 
   async setDownloadExpectedSize(downloadId: string, expectedSize: number): Promise<DownloadBundleRecord> {
-    return this.invoke({
+    const bundle = await this.invoke({
       kind: "setDownloadExpectedSize",
       downloadId: boundedText(downloadId, "Download identity", 256),
       expectedSize: nonnegativeInteger(expectedSize, "Expected size"),
-    }) as Promise<DownloadBundleRecord>;
+    }) as DownloadBundleRecord;
+    return normalizeDownloadBundle(bundle);
   }
 
   async registerLocalVersion(input: RegisterLocalVersionInput): Promise<LocalVersionRecord> {
@@ -311,6 +422,20 @@ export class SqlitePersistenceService {
   async listLocalVersions(serverId: string, userId: string, itemId: string): Promise<LocalVersionRecord[]> {
     const identity = safeIdentity({ serverId, userId, itemId });
     return this.invoke({ kind: "listLocalVersions", serverId: identity.serverId, userId: identity.userId, itemId: identity.itemId! }) as Promise<LocalVersionRecord[]>;
+  }
+
+  async listOfflinePlayableItems(serverId: string, userId: string): Promise<OfflinePlayableRecord[]> {
+    const identity = safeIdentity({ serverId, userId });
+    const records = await this.invoke({
+      kind: "listOfflinePlayableItems",
+      serverId: identity.serverId,
+      userId: identity.userId,
+    }) as OfflinePlayableRecord[];
+    return records.map((record) => ({
+      ...record,
+      item: normalizeMediaRecord(record.item),
+      mediaSource: record.mediaSource ? normalizeMediaSourceRecord(record.mediaSource) : null,
+    }));
   }
 
   async recordPlaybackRevision(input: RecordPlaybackRevisionInput): Promise<PlaybackRevisionRecord> {

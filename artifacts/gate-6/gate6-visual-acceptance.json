@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "gate": 6,
+  "fixture": "isolated-offline-reconnect-visual-fixture",
+  "appVersion": "0.4.3",
+  "sourceRevision": "6f6d454126bfda66699a1b32198a14c1ec53f238",
+  "sourceTree": "working-tree",
+  "platform": {
+    "platform": "win32",
+    "arch": "x64",
+    "electron": "43.1.0",
+    "chrome": "150.0.7871.47"
+  },
+  "screenshots": [
+    {
+      "state": "offline",
+      "filename": "offline-local-player.png",
+      "width": 1424,
+      "height": 835,
+      "sha256": "ae287f9530510769b8ad7a3c6f5393cf9a6b2f5f225542d527fd1950fb83f6ec"
+    },
+    {
+      "state": "reconnecting",
+      "filename": "reconnecting-local-player.png",
+      "width": 1424,
+      "height": 835,
+      "sha256": "d4773032256ba928a1692267fa646a24d5b4c4041b279e4371b885d3f34bc13d"
+    },
+    {
+      "state": "connected",
+      "filename": "recovered-local-player.png",
+      "width": 1424,
+      "height": 835,
+      "sha256": "0d15fd8a00b353f912c290d9de6f35b629423d44bd1b12e2f448903056a943e8"
+    }
+  ],
+  "assertions": {
+    "cachedMetadataVisible": true,
+    "offlineLocalLabel": true,
+    "offlineStateVisible": true,
+    "reconnectingStateVisible": true,
+    "recoveredStateVisible": true,
+    "activePlaybackUninterrupted": true,
+    "sensitiveTextRejected": true,
+    "rendererErrors": 0
+  }
+}

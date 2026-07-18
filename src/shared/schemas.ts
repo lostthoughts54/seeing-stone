@@ -87,3 +87,60 @@ export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });
 export const bufferingPolicyPreferenceSchema = z.object({
   mode: z.enum(["wait-for-all", "continue"]),
 });
+
+const cachedIdentity = z.string().trim().min(1).max(256).refine((value) => !value.includes("\0"));
+const cachedOptionalText = (maximum: number) => z.string().max(maximum).refine((value) => !value.includes("\0")).nullable();
+const cachedNonnegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * Strict, path-free representation of already-sanitized Jellyfin metadata.
+ * This is intentionally separate from the raw Jellyfin response sanitizer so
+ * persistence never stores unknown server fields, stream URLs, or credentials.
+ */
+export const cachedMediaItemSchema = z.object({
+  id: cachedIdentity,
+  name: z.string().trim().min(1).max(1024).refine((value) => !value.includes("\0")),
+  type: z.enum(["Movie", "Series", "Season", "Episode", "BoxSet", "Video"]),
+  overview: z.string().max(32_768).refine((value) => !value.includes("\0")),
+  productionYear: z.number().int().min(0).max(9999).nullable(),
+  premiereYear: z.number().int().min(0).max(9999).nullable(),
+  officialRating: cachedOptionalText(32),
+  communityRating: z.number().finite().min(0).max(100).nullable(),
+  runTimeTicks: cachedNonnegativeInteger,
+  genres: z.array(z.string().trim().min(1).max(256).refine((value) => !value.includes("\0"))).max(32),
+  primaryImageAspectRatio: z.number().finite().positive().max(100).nullable(),
+  imageTags: z.object({
+    Primary: z.string().min(1).max(256).optional(),
+    Backdrop: z.string().min(1).max(256).optional(),
+    Thumb: z.string().min(1).max(256).optional(),
+  }).strict(),
+  backdropImageTag: cachedOptionalText(256),
+  parentThumbItemId: cachedOptionalText(256),
+  parentThumbImageTag: cachedOptionalText(256),
+  seriesId: cachedOptionalText(256),
+  seriesName: cachedOptionalText(1024),
+  seasonId: cachedOptionalText(256),
+  indexNumber: z.number().int().min(0).max(100_000).nullable(),
+  parentIndexNumber: z.number().int().min(0).max(100_000).nullable(),
+  userData: z.object({
+    played: z.boolean(),
+    playbackPositionTicks: cachedNonnegativeInteger,
+    playedPercentage: z.number().finite().min(0).max(100),
+  }).strict(),
+  hasTrailer: z.boolean(),
+  playable: z.boolean(),
+}).strict();
+
+export const cachedPlaybackDiagnosticsSchema = z.object({
+  sourceKind: z.enum(["matched-local", "downloaded", "direct-play", "direct-stream", "transcode", "offline-local"]).nullable(),
+  playbackRate: z.number().finite().min(0.25).max(4),
+  bufferAheadTicks: cachedNonnegativeInteger.nullable(),
+  container: cachedOptionalText(64),
+  videoCodec: cachedOptionalText(64),
+  audioCodec: cachedOptionalText(64),
+  audioChannels: cachedOptionalText(64),
+  resolution: cachedOptionalText(64),
+  bitrate: cachedNonnegativeInteger.nullable(),
+  videoRange: cachedOptionalText(64),
+  transcodeReason: cachedOptionalText(1024),
+}).strict();

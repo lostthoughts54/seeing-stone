@@ -1,6 +1,6 @@
 # SQLite persistence model
 
-Milestone 4 established the local data boundary. Milestones 5 through 7 use it for manual downloads, local-first playback, and durable progress synchronization without changing schema version 1.
+Milestone 4 established the local data boundary. The database is now schema version 5. Every change remains additive so existing catalog, download, local-version, and playback rows survive upgrades.
 
 ## Process boundary
 
@@ -12,7 +12,7 @@ Milestone 4 established the local data boundary. Milestones 5 through 7 use it f
 
 The connection uses WAL mode, foreign keys, a bounded busy timeout, defensive mode, disabled extension loading, transactional migrations, and startup integrity checks.
 
-## Schema version 1
+## Schema version 1 foundation
 
 ### Catalog identity
 
@@ -51,6 +51,16 @@ Milestone 6 playback resolution additionally confirms the configured authorized 
 - A late success for an older revision cannot move the stored successful head backward.
 
 Milestone 7 coalesces redundant automatic progress while retaining completion and explicit actions. Failed attempts stay retryable with a bounded safe error code; superseded revisions remain in the journal for ordering evidence. Successful revisions advance the stored head transactionally, and older late results cannot move it backward.
+
+## Additive schema versions 2 through 5
+
+- Version 2 adds durable Jellyfin playback-report fields to each revision.
+- Version 3 records whether a report is automatic or an explicit local action for conflict resolution.
+- Version 4 adds bounded application preferences for adapter selection and watchparty buffering policy. The legacy global diagnostics preference remains readable for compatibility but is not used by Gate 6.
+- Version 5 adds bounded nullable `metadata_json` and `next_up_json` fields per server/user/item, plus `diagnostics_json` per exact media source. Strict main-process validation rejects unknown or privileged fields before storage and discards malformed cached values after retrieval.
+- Version 5 also adds an identity-scoped partial index for verified local playback discovery. The renderer receives only sanitized item metadata and resume state; local roots, paths, local-version IDs, media-source IDs, stream URLs, and credentials remain main-only.
+
+Older rows with no version-5 cache remain valid and materialize as minimal safe item metadata until a successful Jellyfin request refreshes them.
 
 ## Migrations and failure behavior
 

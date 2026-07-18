@@ -1,4 +1,6 @@
-export const DATABASE_SCHEMA_VERSION = 4;
+import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
+
+export const DATABASE_SCHEMA_VERSION = 5;
 
 export type ApplicationPreferenceKey =
   | "player.adapter-mode"
@@ -28,9 +30,13 @@ export interface MediaItemRecordInput {
   seriesId: string | null;
   seasonId: string | null;
   runTimeTicks: number;
+  /** Already-sanitized, path-free metadata. Omitted values preserve an existing cache entry. */
+  metadata?: MediaItem | null;
 }
 
 export interface MediaItemRecord extends MediaItemRecordInput {
+  metadata: MediaItem | null;
+  nextUp: MediaItem | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +48,14 @@ export interface MediaSourceRecordInput {
   mediaSourceId: string;
   container: string | null;
   expectedSize: number | null;
+  /** Sanitized per-source diagnostics. Omitted values preserve an existing cache entry. */
+  diagnostics?: PlaybackDiagnostics | null;
+}
+
+export interface MediaSourceRecord extends MediaSourceRecordInput {
+  diagnostics: PlaybackDiagnostics | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type DownloadOrigin = "manual" | "smart";
@@ -131,6 +145,16 @@ export interface DownloadBundleRecord {
   localVersion: LocalVersionRecord | null;
   itemName: string;
   itemType: "Movie" | "Episode" | "Video";
+  item: MediaItemRecord;
+  playbackHead: PlaybackHeadRecord | null;
+}
+
+export interface OfflinePlayableRecord {
+  item: MediaItemRecord;
+  mediaSource: MediaSourceRecord | null;
+  playbackHead: PlaybackHeadRecord | null;
+  downloaded: boolean;
+  updatedAt: number;
 }
 
 export type PlaybackActionKind = "progress" | "completed" | "start_over" | "replay" | "mark_watched" | "mark_unwatched";
@@ -195,7 +219,9 @@ export type PersistenceOperation =
   | { kind: "upsertCatalogIdentity"; input: CatalogIdentityInput }
   | { kind: "upsertMediaItem"; input: MediaItemRecordInput }
   | { kind: "getMediaItem"; serverId: string; userId: string; itemId: string }
+  | { kind: "setMediaItemNextUp"; serverId: string; userId: string; itemId: string; nextUp: MediaItem | null }
   | { kind: "upsertMediaSource"; input: MediaSourceRecordInput }
+  | { kind: "getMediaSource"; serverId: string; userId: string; itemId: string; mediaSourceId: string }
   | { kind: "createDownload"; input: CreateDownloadInput & { downloadId: string } }
   | {
     kind: "createDownloadBundle";
@@ -211,6 +237,7 @@ export type PersistenceOperation =
   | { kind: "registerLocalVersion"; input: RegisterLocalVersionInput & { localVersionId: string; pathKey: string } }
   | { kind: "updateLocalVersion"; input: UpdateLocalVersionInput }
   | { kind: "listLocalVersions"; serverId: string; userId: string; itemId: string }
+  | { kind: "listOfflinePlayableItems"; serverId: string; userId: string }
   | { kind: "recordPlaybackRevision"; input: RecordPlaybackRevisionInput }
   | { kind: "getPlaybackHead"; serverId: string; userId: string; itemId: string }
   | { kind: "listPendingProgress"; limit: number }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  cachedMediaItemSchema,
+  cachedPlaybackDiagnosticsSchema,
   downloadIdSchema,
   downloadStartSchema,
   loginSchema,
@@ -36,5 +38,56 @@ describe("IPC input schemas", () => {
     expect(() => downloadStartSchema.strict().parse({ itemId: "item", url: "http://server/media", path: "D:\\Sensitive" })).toThrow();
     expect(() => watchedStateSchema.strict().parse({ itemId: "item", watched: true, positionTicks: 50 })).toThrow();
     expect(() => downloadIdSchema.strict().parse({ downloadId: "not-an-opaque-id" })).toThrow();
+  });
+});
+
+describe("offline cache schemas", () => {
+  const item = {
+    id: "episode-1",
+    name: "The First Door",
+    type: "Episode" as const,
+    overview: "Cached metadata",
+    productionYear: 2026,
+    premiereYear: 2026,
+    officialRating: "TV-14",
+    communityRating: 8.4,
+    runTimeTicks: 600_000_000,
+    genres: ["Adventure"],
+    primaryImageAspectRatio: 0.67,
+    imageTags: { Primary: "primary-tag" },
+    backdropImageTag: "backdrop-tag",
+    parentThumbItemId: "series-1",
+    parentThumbImageTag: "thumb-tag",
+    seriesId: "series-1",
+    seriesName: "Echoes Beyond",
+    seasonId: "season-1",
+    indexNumber: 1,
+    parentIndexNumber: 1,
+    userData: { played: false, playbackPositionTicks: 10_000_000, playedPercentage: 1.67 },
+    hasTrailer: false,
+    playable: true,
+  };
+  const diagnostics = {
+    sourceKind: "offline-local" as const,
+    playbackRate: 1,
+    bufferAheadTicks: null,
+    container: "mkv",
+    videoCodec: "h264",
+    audioCodec: "aac",
+    audioChannels: "5.1",
+    resolution: "1920×1080",
+    bitrate: 5_000_000,
+    videoRange: "SDR",
+    transcodeReason: null,
+  };
+
+  it("accepts bounded sanitized values and rejects privileged or unknown fields", () => {
+    expect(cachedMediaItemSchema.parse(item)).toEqual(item);
+    expect(cachedPlaybackDiagnosticsSchema.parse(diagnostics)).toEqual(diagnostics);
+    expect(() => cachedMediaItemSchema.parse({ ...item, localPath: "D:\\private\\media.mkv" })).toThrow();
+    expect(() => cachedMediaItemSchema.parse({ ...item, overview: "x".repeat(32_769) })).toThrow();
+    expect(() => cachedMediaItemSchema.parse({ ...item, userData: { ...item.userData, playedPercentage: Number.NaN } })).toThrow();
+    expect(() => cachedPlaybackDiagnosticsSchema.parse({ ...diagnostics, accessToken: "secret" })).toThrow();
+    expect(() => cachedPlaybackDiagnosticsSchema.parse({ ...diagnostics, bitrate: Number.POSITIVE_INFINITY })).toThrow();
   });
 });

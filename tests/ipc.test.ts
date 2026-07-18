@@ -42,7 +42,7 @@ function createHarness() {
     selectSubtitle: vi.fn(), setFullscreen: vi.fn(), stop: vi.fn(), getState: vi.fn(),
   };
   const downloads = {
-    activate: vi.fn(), deactivate: vi.fn(), list: vi.fn(), start: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    activate: vi.fn(), deactivate: vi.fn(), list: vi.fn(), listOfflinePlayable: vi.fn(), start: vi.fn(), pause: vi.fn(), resume: vi.fn(),
     retry: vi.fn(), cancel: vi.fn(), delete: vi.fn(), setKeep: vi.fn(),
   };
   const synchronization = {
@@ -108,6 +108,7 @@ describe("IPC authorization and allowlist", () => {
     const invokeChannels = Object.values(IPC).filter((channel) => ![
       IPC.playbackStateChanged,
       IPC.downloadsChanged,
+      IPC.sessionPanelSoloChanged,
       IPC.watchPartiesChanged,
     ].includes(channel));
     expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
@@ -168,6 +169,20 @@ describe("IPC authorization and allowlist", () => {
     expect(JSON.stringify(result)).not.toContain("SECRET_TOKEN_SENTINEL");
     expect(JSON.stringify(result)).not.toContain("Sensitive Folder");
     expect(downloads.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps offline playable discovery identity-owned and rejects renderer filters", async () => {
+    const { handlers, validEvent, downloads } = createHarness();
+    downloads.listOfflinePlayable.mockResolvedValue([]);
+    await expect(handlers.get(IPC.downloadsListOfflinePlayable)?.(validEvent)).resolves.toEqual({ ok: true, data: [] });
+    const rejected = await handlers.get(IPC.downloadsListOfflinePlayable)?.(validEvent, {
+      serverId: "other-server",
+      userId: "other-user",
+      localPath: "D:\\Sensitive\\media.mkv",
+    }) as { ok: boolean; error?: { message: string } };
+    expect(rejected.ok).toBe(false);
+    expect(JSON.stringify(rejected)).not.toContain("Sensitive");
+    expect(downloads.listOfflinePlayable).toHaveBeenCalledTimes(1);
   });
 
   it("changes download location only through the main-owned picker action", async () => {

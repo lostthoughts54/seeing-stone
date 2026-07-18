@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MediaItem } from "../src/shared/contracts";
+import type { JellyfinConnectionDiagnostics, MediaItem } from "../src/shared/contracts";
 import {
   coalescePlaybackRevisions,
   OfflineSynchronizationService,
@@ -183,6 +183,128 @@ describe("OfflineSynchronizationService", () => {
     const plan = coalescePlaybackRevisions(values);
     expect(plan.selected.map((entry) => entry.localRevision)).toEqual([3, 4, 6]);
     expect(plan.superseded.map((entry) => entry.localRevision)).toEqual([1, 2, 5]);
+  });
+
+  it("captures offline lifecycle reports without transport calls and drains them after reconnect", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    let connectionState: "offline" | "reconnecting" | "connected" = "offline";
+    let connectionListener: ((diagnostics: JellyfinConnectionDiagnostics) => void) | null = null;
+    const diagnostics = (): JellyfinConnectionDiagnostics => ({
+      state: connectionState,
+      serverName: "Server",
+      serverVersion: "10.11.0",
+      requestLatencyMs: connectionState === "connected" ? 12 : null,
+      measuredAt: null,
+    });
+    const reportAuthoritativePlayback = vi.fn(async () => undefined);
+    const unsubscribe = vi.fn();
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getConnectionDiagnostics: diagnostics,
+      onConnectionDiagnostics: (listener) => {
+        connectionListener = listener;
+        return unsubscribe;
+      },
+      getDetails: vi.fn(async () => remoteItem(0, false)),
+      synchronizeOfflinePlayback: vi.fn(async () => undefined),
+      reportAuthoritativePlayback,
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+    service.activate();
+    const captured = await service.capture({
+      itemId: "episode-1",
+      actionKind: "progress",
+      positionTicks: 250,
+      watched: false,
+      report: {
+        kind: "start",
+        mediaSourceId: "source-1",
+        playMethod: "DirectPlay",
+        playSessionId: "play-session-1",
+        paused: false,
+        canSeek: true,
+        audioStreamIndex: null,
+        subtitleStreamIndex: null,
+        conflictPolicy: "explicit",
+      },
+    });
+
+    await expect(service.flushCapture(captured)).resolves.toBe(false);
+    expect(reportAuthoritativePlayback).not.toHaveBeenCalled();
+    expect(persistence.revisions[0]).toMatchObject({ syncState: "pending", attemptCount: 0 });
+
+    connectionState = "reconnecting";
+    connectionListener?.(diagnostics());
+    await Promise.resolve();
+    expect(reportAuthoritativePlayback).not.toHaveBeenCalled();
+
+    connectionState = "connected";
+    connectionListener?.(diagnostics());
+    await vi.waitFor(() => expect(reportAuthoritativePlayback).toHaveBeenCalledOnce());
+    expect(persistence.revisions[0]).toMatchObject({ syncState: "succeeded", attemptCount: 1 });
+    await service.shutdown();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("stops a multi-item drain as soon as a request changes the connection to offline", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const report = {
+      kind: "start" as const,
+      mediaSourceId: "source-1",
+      playMethod: "DirectPlay" as const,
+      playSessionId: "play-session-1",
+      paused: false,
+      canSeek: true,
+      audioStreamIndex: null,
+      subtitleStreamIndex: null,
+      conflictPolicy: "explicit" as const,
+    };
+    const entries = [
+      revision(1, { itemId: "episode-1", report }),
+      revision(1, { itemId: "episode-2", report: { ...report, playSessionId: "play-session-2" } }),
+    ];
+    const head = (itemId: string): PlaybackHeadRecord => ({
+      serverId: context.serverId,
+      userId: context.userId,
+      itemId,
+      latestRevision: 1,
+      conflictPolicy: "explicit",
+      actionKind: "progress",
+      positionTicks: 100,
+      watched: false,
+      occurredAt: 1,
+      lastSucceededRevision: 0,
+      lastSucceededPositionTicks: 0,
+      lastSucceededWatched: false,
+      updatedAt: 1,
+    });
+    persistence.seed(entries, head("episode-1"));
+    persistence.heads.set("episode-2", head("episode-2"));
+    let connectionState: JellyfinConnectionDiagnostics["state"] = "connected";
+    const reportAuthoritativePlayback = vi.fn(async () => {
+      connectionState = "offline";
+      throw Object.assign(new Error("offline"), { code: "NETWORK_ERROR" });
+    });
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getConnectionDiagnostics: () => ({
+        state: connectionState,
+        serverName: "Server",
+        serverVersion: "10.11.0",
+        requestLatencyMs: connectionState === "connected" ? 12 : null,
+        measuredAt: null,
+      }),
+      getDetails: vi.fn(async () => remoteItem(0, false)),
+      synchronizeOfflinePlayback: vi.fn(async () => undefined),
+      reportAuthoritativePlayback,
+    }, persistence as never, { info() {}, warn() {}, error() {} }, 1_000_000);
+
+    service.activate();
+    await service.syncNow();
+    await service.shutdown();
+
+    expect(reportAuthoritativePlayback).toHaveBeenCalledOnce();
+    expect(persistence.revisions[0]).toMatchObject({ itemId: "episode-1", syncState: "failed", attemptCount: 1 });
+    expect(persistence.revisions[1]).toMatchObject({ itemId: "episode-2", syncState: "pending", attemptCount: 0 });
   });
 
   it("synchronizes completion, replay, and newest progress in revision order", async () => {

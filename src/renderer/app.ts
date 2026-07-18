@@ -6,6 +6,7 @@ import type {
   LibrarySummary,
   MediaItem,
   OpenSourceLicenseInventory,
+  OfflinePlayableSummary,
   PlaybackSourceKind,
   PlaybackState,
   PlaybackTrack,
@@ -230,6 +231,7 @@ interface RendererState {
   sessionPanelCollapsed: boolean;
   licenseInventory: OpenSourceLicenseInventory | null;
   downloads: DownloadSummary[];
+  offlinePlayable: OfflinePlayableSummary[];
   downloadLocation: DownloadLocationSummary | null;
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
@@ -274,6 +276,7 @@ const state: RendererState = {
   sessionPanelCollapsed: false,
   licenseInventory: null,
   downloads: [],
+  offlinePlayable: [],
   downloadLocation: null,
   lastFocusElement: null,
   searchTimer: null,
@@ -292,6 +295,7 @@ let licensesLastFocus: HTMLElement | null = null;
 let playerSettingsLastFocus: HTMLElement | null = null;
 let playerStructuralRenderKey = "";
 let playerDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
+let offlinePlayableRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 document.title = BRANDING.productName;
 
@@ -866,7 +870,7 @@ function renderConnectionFailure(): void {
   heading.textContent = "Could not reach Jellyfin";
 
   const copy = document.createElement("p");
-  copy.textContent = "Your protected session is still available. Downloaded media remains available while the server is offline.";
+  copy.textContent = "Your protected session is still available. Verified local media remains available while the server is offline.";
 
   const retryButton = document.createElement("button");
   retryButton.type = "button";
@@ -877,47 +881,18 @@ function renderConnectionFailure(): void {
 
   panel.append(heading, copy, retryButton);
   homeRows.replaceChildren(panel);
-  const offlineDownloads = state.downloads.filter((download) => download.state === "downloaded");
-  if (offlineDownloads.length) {
-    const byItemId = new Map(offlineDownloads.map((download) => [download.itemId, download]));
+  if (state.offlinePlayable.length) {
+    const byItemId = new Map(state.offlinePlayable.map((entry) => [entry.item.id, entry]));
     homeRows.append(createMediaRow({
-      title: "Downloaded Media",
-      items: offlineDownloads.map(downloadAsMediaItem),
+      title: "Local playback available",
+      items: state.offlinePlayable.map((entry) => entry.item),
       shape: "landscape",
     }, (item) => {
-      const download = byItemId.get(item.id);
-      if (download) void playDownloadedItem(download);
-    }, "Play offline"));
+      const local = byItemId.get(item.id);
+      if (local) void playOfflineItem(local);
+    }, "Play offline", false));
   }
   setRoute("home");
-}
-
-function downloadAsMediaItem(download: DownloadSummary): MediaItem {
-  return {
-    id: download.itemId,
-    name: download.name,
-    type: download.itemType,
-    overview: "Available offline",
-    productionYear: null,
-    premiereYear: null,
-    officialRating: null,
-    communityRating: null,
-    runTimeTicks: 0,
-    genres: [],
-    primaryImageAspectRatio: null,
-    imageTags: {},
-    backdropImageTag: null,
-    parentThumbItemId: null,
-    parentThumbImageTag: null,
-    seriesId: null,
-    seriesName: null,
-    seasonId: null,
-    indexNumber: null,
-    parentIndexNumber: null,
-    userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
-    hasTrailer: false,
-    playable: true,
-  };
 }
 
 async function retryConnection(trigger?: HTMLButtonElement): Promise<void> {
@@ -982,6 +957,7 @@ function createMediaRow(
   row: MediaRow,
   activate?: (item: MediaItem) => void,
   actionLabel?: string,
+  loadArtwork = true,
 ): HTMLElement {
   const section = document.createElement("section");
   const heading = document.createElement("div");
@@ -1000,7 +976,7 @@ function createMediaRow(
   rail.className = `media-rail ${row.shape}`;
   rail.setAttribute("tabindex", "0");
   rail.setAttribute("aria-label", row.title);
-  for (const item of row.items) rail.append(createMediaCard(item, row.shape, activate, actionLabel));
+  for (const item of row.items) rail.append(createMediaCard(item, row.shape, activate, actionLabel, loadArtwork));
 
   previous.className = "rail-arrow previous";
   previous.type = "button";
@@ -1024,6 +1000,7 @@ function createMediaCard(
   shape: "poster" | "landscape" = "poster",
   activate?: (item: MediaItem) => void,
   actionLabel?: string,
+  loadArtwork = true,
 ): HTMLElement {
   const shell = document.createElement("span");
   const button = document.createElement("button");
@@ -1058,10 +1035,14 @@ function createMediaCard(
     action.textContent = actionLabel;
     art.append(action);
   }
-  setImage(image, fallback, item, preferredArtwork(item, shape), {
-    width: shape === "poster" ? 460 : 760,
-    height: shape === "poster" ? 690 : 430,
-  });
+  if (loadArtwork) {
+    setImage(image, fallback, item, preferredArtwork(item, shape), {
+      width: shape === "poster" ? 460 : 760,
+      height: shape === "poster" ? 690 : 430,
+    });
+  } else {
+    image.classList.add("is-hidden");
+  }
 
   const percentage = Number(item.userData?.playedPercentage || 0);
   if (percentage > 0 && percentage < 100) {
@@ -1599,9 +1580,13 @@ function closeDownloads(): void {
 }
 
 async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
-  const downloads = await window.jellyfin.downloads.list();
+  const [downloads, offlinePlayable] = await Promise.all([
+    window.jellyfin.downloads.list(),
+    window.jellyfin.downloads.listOfflinePlayable(),
+  ]);
   if (!isCurrent()) return;
   state.downloads = downloads;
+  state.offlinePlayable = offlinePlayable;
   renderDownloads();
   syncVisibleDownloadButtons();
 }
@@ -2357,6 +2342,24 @@ function markPlayerActivity(): void {
   }, 2600);
 }
 
+function applySoloDiagnostics(snapshot: SoloSessionDiagnostics, expectedPlaybackId = state.playbackId): void {
+  if (!expectedPlaybackId || snapshot.playback.playbackId !== expectedPlaybackId || expectedPlaybackId !== state.playbackId) return;
+  state.soloDiagnostics = snapshot;
+  state.playbackState = snapshot.playback;
+  state.playbackSource = snapshot.playback.source;
+  state.playbackSourceKind = snapshot.playback.diagnostics?.sourceKind || state.playbackSourceKind;
+  if (snapshot.item) {
+    state.playbackItem = snapshot.item;
+    playerTitle.textContent = snapshot.item.type === "Episode" && snapshot.item.seriesName
+      ? snapshot.item.seriesName
+      : snapshot.item.name || "Now Playing";
+    playerMeta.textContent = snapshot.item.type === "Episode"
+      ? [episodeCode(snapshot.item), snapshot.item.name].filter(Boolean).join(" - ")
+      : metadataParts(snapshot.item).join(" - ");
+  }
+  renderPlayerState();
+}
+
 async function refreshSoloDiagnostics(force = false): Promise<void> {
   const expectedPlaybackId = state.playbackId;
   if (!expectedPlaybackId) return;
@@ -2367,21 +2370,7 @@ async function refreshSoloDiagnostics(force = false): Promise<void> {
   try {
     const snapshot = await window.jellyfin.sessionPanel.getSolo();
     if (requestId !== state.soloDiagnosticsRequestId || expectedPlaybackId !== state.playbackId) return;
-    if (snapshot.playback.playbackId !== expectedPlaybackId) return;
-    state.soloDiagnostics = snapshot;
-    state.playbackState = snapshot.playback;
-    state.playbackSource = snapshot.playback.source;
-    state.playbackSourceKind = snapshot.playback.diagnostics?.sourceKind || state.playbackSourceKind;
-    if (snapshot.item) {
-      state.playbackItem = snapshot.item;
-      playerTitle.textContent = snapshot.item.type === "Episode" && snapshot.item.seriesName
-        ? snapshot.item.seriesName
-        : snapshot.item.name || "Now Playing";
-      playerMeta.textContent = snapshot.item.type === "Episode"
-        ? [episodeCode(snapshot.item), snapshot.item.name].filter(Boolean).join(" - ")
-        : metadataParts(snapshot.item).join(" - ");
-    }
-    renderPlayerState();
+    applySoloDiagnostics(snapshot, expectedPlaybackId);
   } catch {
     if (requestId === state.soloDiagnosticsRequestId) renderPlayerState();
   }
@@ -2479,12 +2468,25 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
 async function playDownloadedItem(download: DownloadSummary): Promise<void> {
   if (download.state !== "downloaded") return;
   await startPresentedPlayback({
-    item: null,
+    item: download.item,
     itemId: download.itemId,
     resumeMode: "resume",
     title: download.name,
     meta: `${download.itemType} - Downloaded`,
     failureMessage: "The downloaded media could not be played.",
+  });
+}
+
+async function playOfflineItem(entry: OfflinePlayableSummary): Promise<void> {
+  await startPresentedPlayback({
+    item: entry.item,
+    itemId: entry.item.id,
+    resumeMode: "resume",
+    title: entry.item.type === "Episode" && entry.item.seriesName ? entry.item.seriesName : entry.item.name,
+    meta: entry.item.type === "Episode"
+      ? [episodeCode(entry.item), entry.item.name, "Offline Local"].filter(Boolean).join(" - ")
+      : `${entry.item.type} - Offline Local`,
+    failureMessage: "The verified local media could not be played.",
   });
 }
 
@@ -2552,6 +2554,10 @@ window.jellyfin.playback.subscribe((playback) => {
   void syncPlayerViewport(false);
   if (playback.phase === "disconnected") showToast("Playback disconnected. The external player remains available in developer settings.");
   else if (playback.phase === "error") showToast("Playback stopped because the player reported an error.");
+});
+
+window.jellyfin.sessionPanel.subscribeSolo((snapshot) => {
+  applySoloDiagnostics(snapshot);
 });
 
 new ResizeObserver(schedulePlayerViewport).observe(playerViewport);
@@ -2681,6 +2687,8 @@ function resetSignedInState(): void {
   state.sessionPanelCollapsed = false;
   state.lastFocusElement = null;
   state.watchParties = null;
+  state.downloads = [];
+  state.offlinePlayable = [];
 
   clearImage(featureImage);
   clearImage(detailBackdrop);
@@ -3113,6 +3121,13 @@ window.jellyfin.downloads.subscribe((downloads) => {
   renderDownloads();
   syncVisibleDownloadButtons();
   if (state.currentRoute === "library") renderLibraryGrid(state.libraryCache[state.libraryType] || []);
+  if (offlinePlayableRefreshTimer) clearTimeout(offlinePlayableRefreshTimer);
+  offlinePlayableRefreshTimer = setTimeout(() => {
+    offlinePlayableRefreshTimer = null;
+    void window.jellyfin.downloads.listOfflinePlayable().then((items) => {
+      state.offlinePlayable = items;
+    }).catch(() => undefined);
+  }, 500);
 });
 
 window.jellyfin.watchParties.subscribe((watchParties) => {

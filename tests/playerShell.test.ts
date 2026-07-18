@@ -110,6 +110,13 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("visible: visible && fullyInsideScrollport");
   });
 
+  it("keeps the offline catalog network-free by rendering cached placeholders", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain('}, "Play offline", false)');
+    expect(renderer).toContain("if (loadArtwork)");
+    expect(renderer).toContain('image.classList.add("is-hidden")');
+  });
+
   it("keeps essential text and state colors at readable contrast", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
     const token = (name: string): string => {

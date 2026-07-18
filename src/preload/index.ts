@@ -19,6 +19,7 @@ import {
   type MediaItem,
   type MediaSourceCapabilities,
   type OpenSourceLicenseInventory,
+  type OfflinePlayableSummary,
   type PlaybackIdInput,
   type PlaybackFullscreenInput,
   type PlaybackPauseInput,
@@ -93,6 +94,7 @@ const bridge: JellyfinBridge = {
   },
   downloads: {
     list: () => invoke<DownloadSummary[]>(IPC.downloadsList),
+    listOfflinePlayable: () => invoke<OfflinePlayableSummary[]>(IPC.downloadsListOfflinePlayable),
     getLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsGetLocation),
     chooseLocation: () => invoke<DownloadLocationSummary | null>(IPC.downloadsChooseLocation),
     useDefaultLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsUseDefaultLocation),
@@ -132,6 +134,11 @@ const bridge: JellyfinBridge = {
   },
   sessionPanel: {
     getSolo: () => invoke<SoloSessionDiagnostics>(IPC.sessionPanelGetSolo),
+    subscribeSolo: (listener: (snapshot: SoloSessionDiagnostics) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, snapshot: SoloSessionDiagnostics) => listener(snapshot);
+      ipcRenderer.on(IPC.sessionPanelSoloChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.sessionPanelSoloChanged, receive);
+    },
   },
   licenses: {
     list: () => invoke<OpenSourceLicenseInventory>(IPC.licensesList),

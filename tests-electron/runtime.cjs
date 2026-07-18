@@ -319,6 +319,14 @@ async function runElectronChild() {
       itemId: "runtime-offline-episode-id",
       name: "Runtime offline episode",
       itemType: "Episode",
+      item: {
+        ...runtimeEpisode,
+        id: "runtime-offline-episode-id",
+        name: "Runtime offline episode",
+        overview: "Cached offline episode metadata.",
+      },
+      resumePositionTicks: 0,
+      localPlaybackAvailable: true,
       state: "downloaded",
       bytesDownloaded: 4,
       expectedSize: 4,
@@ -337,11 +345,20 @@ async function runElectronChild() {
       itemId: runtimeItem.id,
       name: runtimeItem.name,
       itemType: "Movie",
+      item: runtimeItem,
     };
     const downloads = {
       async activate() {},
       async deactivate() {},
       async list() { return [downloadedItem, downloadedMovie]; },
+      async listOfflinePlayable() {
+        return [downloadedItem, downloadedMovie].map((download) => ({
+          item: download.item,
+          resumePositionTicks: download.resumePositionTicks,
+          sourceKind: "offline-local",
+          localPlaybackAvailable: true,
+        }));
+      },
       async start(itemId) {
         downloadStartCount += 1;
         downloadStartItems.push(itemId);
@@ -351,6 +368,7 @@ async function runElectronChild() {
           downloadId: `queued-${downloadStartCount}`,
           itemId,
           name: source.name,
+          item: source,
           state: "queued",
           bytesDownloaded: 0,
           expectedSize: null,
@@ -710,9 +728,9 @@ async function runElectronChild() {
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
-        downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
+        downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "listOfflinePlayable", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
         playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "stop", "subscribe"],
-        sessionPanel: ["getSolo"],
+        sessionPanel: ["getSolo", "subscribeSolo"],
         licenses: ["list"],
         watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setVisible", "subscribe", "wait"],
       };
@@ -1269,6 +1287,7 @@ async function runElectronChild() {
 
     await test("server-unavailable Home exposes a retry that restores the protected session", async () => {
       const homeCallsBefore = homeGetCount;
+      const artworkFetchesBefore = artworkFetchCount;
       homeUnavailable = true;
       const failed = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -1279,7 +1298,7 @@ async function runElectronChild() {
           await delay(20);
         }
         const retry = document.querySelector("[data-retry-connection]");
-        const offlineCard = document.querySelector('[aria-label="Play offline: Runtime offline episode"]');
+        const offlineCard = document.querySelector('#homeRows [data-media-item="runtime-offline-episode-id"]');
         return {
           retryVisible: Boolean(retry) && !retry.disabled,
           retryLabel: retry?.textContent.trim(),
@@ -1288,8 +1307,10 @@ async function runElectronChild() {
           mainVisible: !document.getElementById("mainView").classList.contains("is-hidden"),
           homeVisible: !document.getElementById("homeView").classList.contains("is-hidden"),
           offlineCardVisible: Boolean(offlineCard),
+          offlineActionLabel: offlineCard?.getAttribute("aria-label") ?? null,
+          offlineArtworkSource: offlineCard?.querySelector("img")?.getAttribute("src") ?? null,
           offlineRowTitle: [...document.querySelectorAll("#homeRows .row-heading h2")]
-            .map((heading) => heading.textContent.trim()).find((title) => title === "Downloaded Media"),
+            .map((heading) => heading.textContent.trim()).find((title) => title === "Local playback available"),
           downloadsPanelHidden: document.getElementById("downloadsPanel").classList.contains("is-hidden"),
         };
       })()`);
@@ -1301,8 +1322,11 @@ async function runElectronChild() {
       assert.equal(failed.mainVisible, true);
       assert.equal(failed.homeVisible, true);
       assert.equal(failed.offlineCardVisible, true);
-      assert.equal(failed.offlineRowTitle, "Downloaded Media");
+      assert.match(failed.offlineActionLabel, /^Play offline:/);
+      assert.equal(failed.offlineArtworkSource, null);
+      assert.equal(failed.offlineRowTitle, "Local playback available");
       assert.equal(failed.downloadsPanelHidden, true);
+      assert.equal(artworkFetchCount, artworkFetchesBefore);
       assert.equal(logoutCount, 0);
 
       homeUnavailable = false;

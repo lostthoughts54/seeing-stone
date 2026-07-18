@@ -206,6 +206,10 @@ export interface DownloadSummary {
   itemId: string;
   name: string;
   itemType: "Movie" | "Episode" | "Video";
+  /** Full sanitized cache entry; never contains a local path or Jellyfin URL. */
+  item: MediaItem;
+  resumePositionTicks: number;
+  localPlaybackAvailable: boolean;
   state: DownloadState;
   bytesDownloaded: number;
   expectedSize: number | null;
@@ -217,6 +221,13 @@ export interface DownloadSummary {
   canRetry: boolean;
   canCancel: boolean;
   canDelete: boolean;
+}
+
+export interface OfflinePlayableSummary {
+  item: MediaItem;
+  resumePositionTicks: number;
+  sourceKind: "offline-local";
+  localPlaybackAvailable: true;
 }
 
 export interface DownloadLocationSummary {
@@ -387,6 +398,7 @@ export interface JellyfinBridge {
   };
   downloads: {
     list(): Promise<DownloadSummary[]>;
+    listOfflinePlayable(): Promise<OfflinePlayableSummary[]>;
     getLocation(): Promise<DownloadLocationSummary>;
     chooseLocation(): Promise<DownloadLocationSummary | null>;
     useDefaultLocation(): Promise<DownloadLocationSummary>;
@@ -418,6 +430,7 @@ export interface JellyfinBridge {
   };
   sessionPanel: {
     getSolo(): Promise<SoloSessionDiagnostics>;
+    subscribeSolo(listener: (snapshot: SoloSessionDiagnostics) => void): () => void;
   };
   licenses: {
     list(): Promise<OpenSourceLicenseInventory>;
@@ -456,6 +469,7 @@ export const IPC = {
   artworkGetUrl: "artwork:get-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
   downloadsList: "downloads:list",
+  downloadsListOfflinePlayable: "downloads:list-offline-playable",
   downloadsGetLocation: "downloads:get-location",
   downloadsChooseLocation: "downloads:choose-location",
   downloadsUseDefaultLocation: "downloads:use-default-location",
@@ -483,6 +497,7 @@ export const IPC = {
     playbackSetAdapterPreference: "playback:set-adapter-preference",
   playbackStateChanged: "playback:state-changed",
   sessionPanelGetSolo: "session-panel:get-solo",
+  sessionPanelSoloChanged: "session-panel:solo-changed",
   licensesList: "licenses:list",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",
