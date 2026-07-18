@@ -1,7 +1,24 @@
 # Third-party notices
 
 Seeing Stone is licensed under GPL-2.0-or-later. Dependencies retain their own licenses.
-The table below is generated from the frozen installed dependency graph by `pnpm licenses:write`.
+These tables are generated from pinned component provenance and the frozen installed dependency graph by `pnpm licenses:write`.
+
+## Application, fonts, and native components
+
+| Category | Component | Version/revision | License | Redistribution status |
+| --- | --- | --- | --- | --- |
+| application | Seeing Stone | 0.4.3 | GPL-2.0-or-later | source-only |
+| font | Inter | 4.1 | OFL-1.1 | source-and-binary |
+| font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
+| native | mpv | v0.41.0-dev-ge5486b96d | GPL-2.0-or-later | internal-only-unverified-provenance |
+| native | FFmpeg | ff59522 | GPL-2.0-or-later | internal-only-unverified-provenance |
+| native | Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | internal-only-unverified-provenance |
+| native | AMD Advanced Media Framework headers | runtime-associated; exact revision not recorded upstream | MIT | internal-only-unverified-provenance |
+
+Each component's immutable source revision, artifact hashes, and license-file hash are recorded in `dependency-licenses.json`.
+The current native runtime remains internal-only because upstream did not record a complete linked-dependency source bill of materials.
+
+## JavaScript dependencies
 
 | Package | Version | License |
 | --- | --- | --- |
@@ -294,7 +311,7 @@ The table below is generated from the frozen installed dependency graph by `pnpm
 | yocto-queue | 0.1.0 | MIT |
 | zod | 4.4.3 | MIT |
 
-## Native playback runtime
+## Native playback runtime details
 
 See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `mpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.
 The current Windows binary is not approved for public redistribution.

@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "category": "application",
+      "name": "Seeing Stone",
+      "version": "0.4.3",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": null,
+      "sourceRevision": null,
+      "redistributionStatus": "source-only",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "LICENSE",
+        "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
+      }
+    },
+    {
+      "category": "font",
+      "name": "Inter",
+      "version": "4.1",
+      "license": "OFL-1.1",
+      "projectUrl": "https://github.com/rsms/inter",
+      "sourceRevision": "e3a3d4c57d5ecc01453a575621882a384c1995a3",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [
+        {
+          "path": "src/renderer/assets/fonts/InterVariable.woff2",
+          "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+        }
+      ],
+      "licenseFile": {
+        "path": "src/renderer/assets/fonts/Inter-OFL.txt",
+        "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+      }
+    },
+    {
+      "category": "font",
+      "name": "Spectral",
+      "version": "Google Fonts snapshot 8b0a1d0f5983",
+      "license": "OFL-1.1",
+      "projectUrl": "https://github.com/google/fonts/tree/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/spectral",
+      "sourceRevision": "8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [
+        {
+          "path": "src/renderer/assets/fonts/Spectral-Regular.ttf",
+          "sha256": "c89021dc20720c8d0dcf40b0b2f6e00c13665fa8041717f581396f51b8c78f5d"
+        },
+        {
+          "path": "src/renderer/assets/fonts/Spectral-SemiBold.ttf",
+          "sha256": "5f86915a744832ecf6e4a17ab04bea091b9fa992ef5164ff65ae34c1da2fe94b"
+        }
+      ],
+      "licenseFile": {
+        "path": "src/renderer/assets/fonts/Spectral-OFL.txt",
+        "sha256": "501d6ceca8e552630fe3aa9442b9a818565680a1a2f79f3fb8c13d6f309a9e98"
+      }
+    },
+    {
+      "category": "native",
+      "name": "mpv",
+      "version": "v0.41.0-dev-ge5486b96d",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/mpv-player/mpv",
+      "sourceRevision": "e5486b96d7d06dd148337899bfdc46bf25101663",
+      "redistributionStatus": "internal-only-unverified-provenance",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
+        "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+      }
+    },
+    {
+      "category": "native",
+      "name": "FFmpeg",
+      "version": "ff59522",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/FFmpeg/FFmpeg",
+      "sourceRevision": "ff59522",
+      "redistributionStatus": "internal-only-unverified-provenance",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/ffmpeg-GPL-2.0.txt",
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+      }
+    },
+    {
+      "category": "native",
+      "name": "Vulkan Loader",
+      "version": "runtime-associated; exact revision not recorded upstream",
+      "license": "Apache-2.0",
+      "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
+      "sourceRevision": null,
+      "redistributionStatus": "internal-only-unverified-provenance",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/Vulkan-Loader-LICENSE.txt",
+        "sha256": "43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
+      }
+    },
+    {
+      "category": "native",
+      "name": "AMD Advanced Media Framework headers",
+      "version": "runtime-associated; exact revision not recorded upstream",
+      "license": "MIT",
+      "projectUrl": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
+      "sourceRevision": null,
+      "redistributionStatus": "internal-only-unverified-provenance",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/AMD-AMF-LICENSE.txt",
+        "sha256": "eb297397aaa455b5668ab67d216b83828466152dab123fa92384c6ec16b74170"
+      }
+    }
+  ]
+}

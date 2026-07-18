@@ -6,6 +6,7 @@ import type {
   LibrarySummary,
   MediaItem,
   MediaSourceCapabilities,
+  JellyfinConnectionDiagnostics,
   PublicServerInfo,
   SafeSession,
   ServerConnection,
@@ -307,17 +308,38 @@ interface PendingConnection {
 const CONNECTION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_CONNECTIONS = 16;
 
+export interface JellyfinConnectionClock {
+  monotonicNow(): number;
+  wallNow(): number;
+}
+
+const systemConnectionClock: JellyfinConnectionClock = {
+  monotonicNow: () => performance.now(),
+  wallNow: () => Date.now(),
+};
+
+interface ConnectionMeasurement {
+  requestSequence: number;
+  sessionRevision: number;
+  state: "connected" | "offline";
+  requestLatencyMs: number | null;
+  measuredAt: string;
+}
+
 export class JellyfinApi {
   private session: AuthenticatedState | null = null;
   private sessionController = new AbortController();
   private sessionMutationTail: Promise<void> = Promise.resolve();
   private sessionRevision = 0;
   private readonly pendingConnections = new Map<string, PendingConnection>();
+  private requestMeasurementSequence = 0;
+  private connectionMeasurement: ConnectionMeasurement | null = null;
 
   constructor(
     private readonly identity: DeviceIdentity,
     private readonly sessionStore: SecureSessionStore,
     private readonly openExternal: (url: string) => Promise<void>,
+    private readonly connectionClock: JellyfinConnectionClock = systemConnectionClock,
   ) {}
 
   async getPublicServerInfo(serverUrl: string): Promise<PublicServerInfo> {
@@ -419,6 +441,28 @@ export class JellyfinApi {
 
   getSafeSession(): SafeSession {
     return this.safeSession();
+  }
+
+  getConnectionDiagnostics(): JellyfinConnectionDiagnostics {
+    if (!this.session) {
+      return {
+        state: "unknown",
+        serverName: null,
+        serverVersion: null,
+        requestLatencyMs: null,
+        measuredAt: null,
+      };
+    }
+    const measurement = this.connectionMeasurement?.sessionRevision === this.sessionRevision
+      ? this.connectionMeasurement
+      : null;
+    return {
+      state: measurement?.state ?? "unknown",
+      serverName: this.session.serverName.slice(0, 256) || "Jellyfin",
+      serverVersion: this.session.serverVersion.slice(0, 64) || null,
+      requestLatencyMs: measurement?.requestLatencyMs ?? null,
+      measuredAt: measurement?.measuredAt ?? null,
+    };
   }
 
   getAuthenticatedContext(): AuthenticatedContext {
@@ -829,6 +873,9 @@ export class JellyfinApi {
   private async fetchAuthenticated(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<Response> {
     const session = this.requireSession();
     const sessionController = this.sessionController;
+    const sessionRevision = this.sessionRevision;
+    const requestSequence = ++this.requestMeasurementSequence;
+    const startedAt = this.connectionClock.monotonicNow();
     const url = new URL(`${session.serverUrl}${path}`);
     for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
     const signals = [sessionController.signal];
@@ -851,12 +898,27 @@ export class JellyfinApi {
       if (this.session !== session || this.sessionController !== sessionController) {
         throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
       }
+      this.recordConnectionMeasurement({
+        requestSequence,
+        sessionRevision,
+        state: "offline",
+        requestLatencyMs: null,
+        measuredAt: new Date(this.connectionClock.wallNow()).toISOString(),
+      });
       throw new AppError("SERVER_UNAVAILABLE", "The Jellyfin server is unavailable.");
     }
     if (this.session !== session || this.sessionController !== sessionController) {
       void response.body?.cancel().catch(() => undefined);
       throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
     }
+    const elapsed = this.connectionClock.monotonicNow() - startedAt;
+    this.recordConnectionMeasurement({
+      requestSequence,
+      sessionRevision,
+      state: "connected",
+      requestLatencyMs: Number.isFinite(elapsed) ? Math.max(0, Math.min(120000, Math.round(elapsed))) : null,
+      measuredAt: new Date(this.connectionClock.wallNow()).toISOString(),
+    });
     if (!response.ok) {
       if (response.status === 401) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
       throw new AppError("JELLYFIN_REQUEST_FAILED", `Jellyfin request failed (${response.status}).`, response.status);
@@ -885,6 +947,13 @@ export class JellyfinApi {
     this.sessionController = new AbortController();
     this.session = session;
     this.sessionRevision += 1;
+    this.connectionMeasurement = null;
+  }
+
+  private recordConnectionMeasurement(measurement: ConnectionMeasurement): void {
+    if (measurement.sessionRevision !== this.sessionRevision) return;
+    if (this.connectionMeasurement && measurement.requestSequence < this.connectionMeasurement.requestSequence) return;
+    this.connectionMeasurement = measurement;
   }
 
   private async runSessionMutation<T>(operation: () => Promise<T>): Promise<T> {

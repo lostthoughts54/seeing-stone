@@ -17,6 +17,16 @@ asarUnpack:
   - dist/main/services/persistenceTypes.js
 
 extraResources:
+  - from: LICENSE
+    to: legal/LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: legal/THIRD_PARTY_NOTICES.md
+  - from: dependency-licenses.json
+    to: legal/dependency-licenses.json
+  - from: src/renderer/assets/fonts/Inter-OFL.txt
+    to: legal/fonts/Inter-OFL.txt
+  - from: src/renderer/assets/fonts/Spectral-OFL.txt
+    to: legal/fonts/Spectral-OFL.txt
   - from: .runtime/mpv
     to: mpv
     filter:

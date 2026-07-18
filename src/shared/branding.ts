@@ -3,7 +3,7 @@ export const BRANDING = Object.freeze({
   subtitle: "A Jellyfin client",
   appId: "app.seeingstone.client",
   description: "A Windows-first, local-first Jellyfin client.",
-  logoAsset: "./seeing-stone-orb.svg",
+  logoAsset: "./assets/seeing-stone-orb.svg",
   projectUrl: "",
   supportUrl: "",
 });

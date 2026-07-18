@@ -38,6 +38,8 @@ import { IPC } from "../shared/contracts";
 import { SyncPlayService } from "./services/syncPlay";
 import { EmbeddedVideoHost } from "./services/embeddedVideoHost";
 import type { PlayerController } from "./services/playerController";
+import { SoloSessionDiagnosticsService } from "./services/soloSessionDiagnostics";
+import { OpenSourceLicensesService } from "./services/openSourceLicenses";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -146,6 +148,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const playback = videoHost
     ? new EmbeddedMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost)
     : new LegacyExternalMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
+  const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback);
+  const openSourceLicenses = new OpenSourceLicensesService();
   activePlayback = playback;
   activeVideoHost = videoHost ?? null;
   playback.onState((state) => {
@@ -197,6 +201,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     downloadLocationController,
     videoHost,
     playerPreferences,
+    soloSessionDiagnostics,
+    openSourceLicenses,
   );
   await mainWindow.loadURL(APP_URL);
 }).catch((error) => {

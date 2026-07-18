@@ -161,6 +161,44 @@ export interface PlaybackState {
   error: string | null;
 }
 
+export type SessionPanelView = "solo" | "watchparty" | "chat";
+export type JellyfinConnectionState = "unknown" | "connected" | "offline" | "reconnecting";
+
+export interface JellyfinConnectionDiagnostics {
+  state: JellyfinConnectionState;
+  serverName: string | null;
+  serverVersion: string | null;
+  /** Most recent measured authenticated request time to response headers. */
+  requestLatencyMs: number | null;
+  measuredAt: string | null;
+}
+
+export interface SoloSessionDiagnostics {
+  playback: PlaybackState;
+  connection: JellyfinConnectionDiagnostics;
+  item: MediaItem | null;
+  nextUp: MediaItem | null;
+}
+
+export type OpenSourceLicenseCategory = "application" | "dependency" | "font" | "native" | "plugin";
+export type RedistributionStatus = "source-only" | "source-and-binary" | "internal-only-unverified-provenance";
+
+export interface OpenSourceLicenseEntry {
+  category: OpenSourceLicenseCategory;
+  name: string;
+  version: string;
+  license: string;
+  projectUrl: string | null;
+  redistributionStatus: RedistributionStatus;
+}
+
+export interface OpenSourceLicenseInventory {
+  schemaVersion: 1;
+  projectName: string;
+  projectLicense: string;
+  entries: OpenSourceLicenseEntry[];
+}
+
 export type DownloadState = "queued" | "downloading" | "paused" | "downloaded" | "failed" | "missing";
 
 export interface DownloadSummary {
@@ -316,6 +354,12 @@ export interface JellyfinBridge {
     setAdapterPreference(input: PlaybackAdapterPreferenceInput): Promise<PlaybackAdapterPreference>;
     subscribe(listener: (state: PlaybackState) => void): () => void;
   };
+  sessionPanel: {
+    getSolo(): Promise<SoloSessionDiagnostics>;
+  };
+  licenses: {
+    list(): Promise<OpenSourceLicenseInventory>;
+  };
   watchParties: {
     getState(): Promise<WatchPartyViewState>;
     list(): Promise<WatchPartyViewState>;
@@ -373,6 +417,8 @@ export const IPC = {
     playbackGetAdapterPreference: "playback:get-adapter-preference",
     playbackSetAdapterPreference: "playback:set-adapter-preference",
   playbackStateChanged: "playback:state-changed",
+  sessionPanelGetSolo: "session-panel:get-solo",
+  licensesList: "licenses:list",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",
   watchPartiesCreate: "watch-parties:create",

@@ -2,7 +2,9 @@ import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "
 import {
   IPC,
   type DownloadLocationSummary,
+  type OpenSourceLicenseInventory,
   type RpcResult,
+  type SoloSessionDiagnostics,
 } from "../shared/contracts";
 import {
   artworkSchema,
@@ -51,6 +53,14 @@ export interface DownloadLocationController {
   open(): Promise<{ opened: boolean }>;
 }
 
+export interface SoloSessionDiagnosticsProvider {
+  getSnapshot(): Promise<SoloSessionDiagnostics>;
+}
+
+export interface OpenSourceLicensesProvider {
+  list(): OpenSourceLicenseInventory;
+}
+
 function safeResult<T>(handler: Handler<T>): Handler<RpcResult<T>> {
   return async (input) => {
     try {
@@ -91,6 +101,8 @@ export function registerIpcHandlers(
   downloadLocation?: DownloadLocationController,
   videoHost?: MpvVideoHost,
   playerPreferences?: PlayerPreferencesService,
+  soloSessionDiagnostics?: SoloSessionDiagnosticsProvider,
+  openSourceLicenses?: OpenSourceLicensesProvider,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -252,6 +264,16 @@ export function registerIpcHandlers(
     if (mode === "embedded" && app.isPackaged) throw new AppError("EMBEDDED_PLAYER_GUARDED", "The embedded player is not enabled in packaged builds.", 409);
     await playerPreferences.setAdapterMode(mode);
     return adapterPreference();
+  });
+  register(IPC.sessionPanelGetSolo, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!soloSessionDiagnostics) throw new AppError("SESSION_DIAGNOSTICS_UNAVAILABLE", "Session diagnostics are unavailable.", 503);
+    return soloSessionDiagnostics.getSnapshot();
+  });
+  register(IPC.licensesList, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!openSourceLicenses) throw new AppError("LICENSES_UNAVAILABLE", "Open source license information is unavailable.", 503);
+    return openSourceLicenses.list();
   });
   const requireSyncPlay = (): SyncPlayService => {
     if (!syncPlay) throw new AppError("SYNCPLAY_UNAVAILABLE", "Watch parties are unavailable in this build.", 503);

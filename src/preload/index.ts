@@ -17,6 +17,7 @@ import {
   type LoginInput,
   type MediaItem,
   type MediaSourceCapabilities,
+  type OpenSourceLicenseInventory,
   type PlaybackIdInput,
   type PlaybackFullscreenInput,
   type PlaybackPauseInput,
@@ -32,6 +33,7 @@ import {
   type PlaybackAdapterPreferenceInput,
   type RpcResult,
   type SafeSession,
+  type SoloSessionDiagnostics,
   type SearchInput,
   type ServerConnection,
   type ServerUrlInput,
@@ -126,6 +128,12 @@ const bridge: JellyfinBridge = {
       ipcRenderer.on(IPC.playbackStateChanged, receive);
       return () => ipcRenderer.removeListener(IPC.playbackStateChanged, receive);
     },
+  },
+  sessionPanel: {
+    getSolo: () => invoke<SoloSessionDiagnostics>(IPC.sessionPanelGetSolo),
+  },
+  licenses: {
+    list: () => invoke<OpenSourceLicenseInventory>(IPC.licensesList),
   },
   watchParties: {
     getState: () => invoke<WatchPartyViewState>(IPC.watchPartiesGetState),
