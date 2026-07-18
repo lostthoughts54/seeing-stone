@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "gate": 5,
+  "fixture": "isolated-watchparty-visual-fixture",
+  "appVersion": "43.1.0",
+  "sourceRevision": "c2a0efede305f32feba40078fe4196c36ea8b313",
+  "sourceTree": "clean",
+  "platform": {
+    "platform": "win32",
+    "arch": "x64",
+    "electron": "43.1.0",
+    "chrome": "150.0.7871.47"
+  },
+  "screenshot": {
+    "filename": "watchparty-disabled-fallback.png",
+    "width": 1424,
+    "height": 835,
+    "sha256": "44fe048691f00066d213adb605efaffcffffd41ca75781c989a9adc693a45c37"
+  },
+  "assertions": {
+    "strictDisabledFallback": true,
+    "standardSyncPlayActive": true,
+    "waitContinueGroupActions": true,
+    "groupResyncVisible": true,
+    "bufferingPolicyRoundTrip": true,
+    "unverifiedRowsSuppressed": true,
+    "sensitiveTextRejected": true,
+    "rendererErrors": 0
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "gate": 5,
+  "sourceRevision": "c2a0efede305f32feba40078fe4196c36ea8b313",
+  "sourceCheckpoint": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+  "sourceTreeBeforeEvidence": "clean",
+  "environment": {
+    "platform": "win32",
+    "architecture": "x64",
+    "electronVersion": "43.1.0",
+    "fixturePolicy": "repository-owned or isolated synthetic data only"
+  },
+  "results": [
+    { "name": "typescript", "status": "passed", "targets": 3 },
+    { "name": "license-policy", "status": "passed" },
+    { "name": "unit-complete", "status": "passed", "files": 33, "tests": 219 },
+    { "name": "post-review-telemetry-syncplay", "status": "passed", "tests": 36 },
+    { "name": "compiled-core", "status": "passed", "tests": 22 },
+    { "name": "electron-integration", "status": "passed", "tests": 21 },
+    { "name": "electron-persistence", "status": "passed", "schemaVersion": 4 },
+    { "name": "gate5-visual", "status": "passed", "screenshots": 1, "rendererErrors": 0 },
+    { "name": "independent-safety-review", "status": "passed" }
+  ],
+  "featureFlags": {
+    "standardJellyfinSyncPlay": "enabled",
+    "participantTelemetryTransport": "disabled",
+    "pluginWebSocket": "disabled",
+    "pluginHttpPolling": "disabled",
+    "separateRelay": "not-implemented",
+    "packagedEmbeddedAdapter": "disabled",
+    "legacyExternalAdapter": "enabled"
+  },
+  "intentionallyNotRun": [
+    {
+      "name": "authenticated-jellyfin",
+      "reason": "The normal user server was not contacted; no disposable isolated service was provisioned."
+    },
+    {
+      "name": "telemetry-plugin-build",
+      "reason": "Exact-session group authorization cannot be proven through the reviewed Jellyfin 10.11.11 public plugin API, and the matching isolated SDK/server matrix was unavailable."
+    },
+    {
+      "name": "live-two-service-syncplay",
+      "reason": "No destructive or live acceptance was run against the normal server; deterministic service and protocol tests cover the current changes."
+    },
+    {
+      "name": "packaging",
+      "reason": "Gate 5 does not change the packaged default and the milestone forbids release publication."
+    }
+  ]
+}

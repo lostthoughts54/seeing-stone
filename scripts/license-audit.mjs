@@ -254,7 +254,7 @@ export async function loadLegalComponents(manifestPath = componentsManifest, roo
     if (!REDISTRIBUTION_STATUSES.has(redistributionStatus)) {
       throw new LicenseAuditError(`Legal component ${name} has an unknown redistribution status: ${redistributionStatus}.`);
     }
-    if (!sourceRevision && category !== "application" && !isBundledTelemetrySource && redistributionStatus !== "internal-only-unverified-provenance") {
+    if (!sourceRevision && category !== "application" && redistributionStatus !== "internal-only-unverified-provenance") {
       throw new LicenseAuditError(`Legal component ${name} must record an immutable source revision.`);
     }
 

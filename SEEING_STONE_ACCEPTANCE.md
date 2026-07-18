@@ -137,6 +137,44 @@ Deferred manual evidence:
 - Physical keyboard/media-key variations and unusual Windows text-rendering configurations.
 - GPU, HDR, and multi-device scenarios remain deferred with Gate 1 physical checks.
 
-## Gates 5–6
+## Gate 5 — Watchparty and optional participant telemetry
 
-Status: in progress. Later sections will be added only as their acceptance evidence passes.
+Status: accepted for native Jellyfin SyncPlay and the safely disabled enhanced-telemetry fallback. The optional server plugin remains disabled.
+
+Implemented behavior:
+
+- Jellyfin SyncPlay remains authoritative for shared item, play, pause, seek, stop, late join, time synchronization, and drift correction. Remote command origin and feedback-loop suppression remain inside `PlaybackAdapter` routing.
+- Wait and Continue issue Jellyfin group pause/unpause commands. Group Resync sends one bounded Jellyfin seek to the current authoritative timeline, while Ctrl+R retains the separate local-only correction.
+- The Watchparty Session Panel shows the real group, native Jellyfin participants, real measured latency/drift only while the timeline is connected and authoritative, session controls, buffering preference, and Leave Party.
+- `ParticipantTelemetryTransport` is a status-only boundary with no playback-command surface. Protocol v1 strictly validates client and server envelopes, rejects unknown and sensitive-shaped fields, derives identity server-side, enforces group/session/sequence/timestamp rules, publishes immediate transitions plus a two-second heartbeat, and marks data stale/disconnected at six/ten seconds.
+- The buffering coordinator uses only current verified session telemetry, applies the 1.5-second grace, distinguishes multiple sessions for one user, supports per-incident Continue suppression, and fails open if telemetry or the authoritative pause command fails.
+- Optional transport operations are bounded, lifecycle-revision guarded, sanitized, and unable to delay standard SyncPlay. A slow prior-group connection cannot publish into a later group.
+- SQLite schema 4 adds identity-independent application preferences without altering existing playback, download, local-version, or reporting rows. Adapter selection remains packaged-legacy and the buffering preference is durable.
+- The separate GPL-compatible plugin source boundary and protocol schema are recorded, but no endpoint, plugin binary, relay, install, restart, or server modification is produced.
+
+Autonomous evidence:
+
+- `1acdc1c` is the reviewed Gate 5 source checkpoint; subsequent small commits make the hidden visual capture deterministic without changing runtime behavior.
+- All three TypeScript targets and the deterministic license policy passed.
+- The complete unit suite passed 219 tests across 33 files. The final post-review telemetry and SyncPlay delta passed 36 focused tests.
+- All 22 compiled core/SQLite checks, all 21 hidden Electron integration/security checks, and Electron schema-4 persistence acceptance passed.
+- `artifacts/gate-5/gate5-visual-acceptance.json` records the clean source revision, environment, screenshot hash, strict disabled fallback, working Wait/Continue controls, group Resync visibility, buffering-policy round trip, suppressed unavailable rows, zero sensitive-looking text, and zero renderer errors.
+- `artifacts/gate-5/watchparty-disabled-fallback.png` is a sanitized isolated-fixture screenshot with no account, server, credential, path, URL, or fabricated participant-status data.
+- An independent read-only safety review found no remaining checkpoint blocker after lifecycle, cleanup, exact-session, outbound-validation, clock-skew, stale-drift, and evidence-provenance fixes.
+
+Safety and limitations:
+
+- The previously approved compatibility evidence identified Jellyfin 10.11.11. No fresh request was made to the normal server, and compatibility with any other version is not claimed.
+- Jellyfin 10.11.11's public plugin API cannot prove that the exact authenticated session belongs to the claimed SyncPlay group. Both WebSocket and authenticated HTTP fallback endpoints therefore remain disabled.
+- No disposable Jellyfin service with a matching plugin SDK was available, so no plugin build or live two-service plugin matrix was run. Standard SyncPlay remains independent and available.
+- Automatic participant buffering identification is intentionally unavailable while the verified telemetry transport is disabled; participant rows show only native Jellyfin membership and no invented state.
+
+Deferred manual evidence:
+
+- Physical multi-device SyncPlay behavior across independent networks and clock conditions.
+- Subjective watchparty ergonomics and assistive-technology review.
+- Plugin enablement remains a future isolated-server task if a supported exact-session membership API becomes available.
+
+## Gate 6 — Offline player completion
+
+Status: in progress. Gate 6 evidence will be added only after its offline launch, reconnection, conflict, persistence, and sanitized visual checks pass.

@@ -12,7 +12,7 @@
       "version": "0.4.3",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": null,
+      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
       "redistributionStatus": "source-only",
       "artifacts": [],
       "licenseFile": {
@@ -124,7 +124,7 @@
       "version": "protocol-v1-disabled",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": null,
+      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
       "redistributionStatus": "source-only",
       "artifacts": [
         {
