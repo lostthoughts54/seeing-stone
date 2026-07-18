@@ -6,6 +6,7 @@
   "sourceCheckpoint": "c716bee218bebeeb2d128b5abc6510eaba145367",
   "runtimeEvidenceSource": "c716bee218bebeeb2d128b5abc6510eaba145367",
   "visualEvidenceSource": "ede6d75d2907400a4ca0e83ff042620d66db59b2",
+  "finalPolicyCheckpoint": "5044bcda31cdcd99296f9a6c011005cb7836db06",
   "results": {
     "typecheckTargets": { "passed": 3, "failed": 0 },
     "licensePolicy": "passed",
@@ -21,6 +22,12 @@
     "offlineRealMpvRuntime": "passed",
     "isolatedVisual": { "screenshots": 3, "rendererErrors": 0, "status": "passed" },
     "independentSafetyReview": "safe-to-checkpoint"
+  },
+  "postAuditDelta": {
+    "scope": "Unpackaged validated development builds default to embedded; packaged builds remain legacy-only and persisted fallback selection remains available.",
+    "mainTypecheck": "passed",
+    "focusedTests": { "filesPassed": 2, "testsPassed": 9, "failed": 0 },
+    "fullSuiteRerunRequired": false
   },
   "retryEvidence": {
     "hiddenElectron": "The first launch exposed two stale test-fixture expectations for additive bridge methods and cached episode titles. The fixture was corrected and the single justified retry passed all 21 checks."
