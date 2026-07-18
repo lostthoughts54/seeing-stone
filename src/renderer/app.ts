@@ -1805,6 +1805,12 @@ function schedulePlayerViewport(): void {
   });
 }
 
+function schedulePlayerViewportSettled(): void {
+  schedulePlayerViewport();
+  requestAnimationFrame(() => requestAnimationFrame(schedulePlayerViewport));
+  setTimeout(() => void syncPlayerViewport(), 120);
+}
+
 function setTone(element: HTMLElement, tone: string): void {
   element.dataset.tone = tone;
 }
@@ -2016,7 +2022,9 @@ function renderPlayerState(forceStructure = false): void {
   if (playerTimeline.dataset.scrubbing !== "true") playerTimeline.value = String(safeTimelineValue(positionTicks, durationTicks));
   playerTimeline.disabled = !playback?.seekable || durationTicks <= 0;
   playerCurrentTime.textContent = formatPlaybackTime(positionTicks);
-  playerDuration.textContent = formatPlaybackTime(durationTicks);
+  playerDuration.textContent = playback?.fullscreen
+    ? `-${formatPlaybackTime(Math.max(0, durationTicks - positionTicks))}`
+    : formatPlaybackTime(durationTicks);
 
   const paused = replayAvailable || playback?.paused !== false;
   replacePlayPauseIcon(paused);
@@ -2040,7 +2048,19 @@ function renderPlayerState(forceStructure = false): void {
   playerFullscreenButton.disabled = !state.playbackId;
   playerFullscreenButton.setAttribute("aria-label", playback?.fullscreen ? "Exit fullscreen" : "Enter fullscreen");
   playerFullscreenButton.title = playback?.fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)";
-  playerView.dataset.fullscreen = String(Boolean(playback?.fullscreen));
+  const wasFullscreen = playerView.dataset.fullscreen === "true";
+  const isFullscreen = Boolean(playback?.fullscreen);
+  playerView.dataset.fullscreen = String(isFullscreen);
+  if (wasFullscreen !== isFullscreen) {
+    closePlayerSettings(false);
+    setPlayerControlsIdle(false);
+    schedulePlayerViewportSettled();
+    if (isFullscreen) markPlayerActivity();
+  }
+  if (isFullscreen) {
+    if (paused || playback?.phase !== "playing") keepPlayerControlsVisible();
+    else if (!playerControlsTimer && !playerView.classList.contains("is-controls-idle")) armPlayerControlsTimer();
+  }
   const structureKey = playerStructureKey(playback);
   if (forceStructure || structureKey !== playerStructuralRenderKey) {
     playerStructuralRenderKey = structureKey;
@@ -2383,14 +2403,38 @@ function togglePlayerSettings(): void {
   else closePlayerSettings();
 }
 
-function markPlayerActivity(): void {
-  playerView.classList.remove("is-controls-idle");
+function setPlayerControlsIdle(idle: boolean): void {
+  const changed = playerView.classList.contains("is-controls-idle") !== idle;
+  playerView.classList.toggle("is-controls-idle", idle);
+  if (changed) schedulePlayerViewportSettled();
+}
+
+function keepPlayerControlsVisible(): void {
+  if (playerControlsTimer) clearTimeout(playerControlsTimer);
+  playerControlsTimer = null;
+  setPlayerControlsIdle(false);
+}
+
+function armPlayerControlsTimer(): void {
   if (playerControlsTimer) clearTimeout(playerControlsTimer);
   playerControlsTimer = setTimeout(() => {
-    if (playbackForPlayer()?.fullscreen && !playerControls.contains(document.activeElement)) {
-      playerView.classList.add("is-controls-idle");
+    playerControlsTimer = null;
+    const playback = playbackForPlayer();
+    if (playback?.fullscreen && playback.phase === "playing" && playback.paused === false
+      && !playerControls.contains(document.activeElement)) {
+      setPlayerControlsIdle(true);
     }
   }, 2600);
+}
+
+function markPlayerActivity(): void {
+  setPlayerControlsIdle(false);
+  const playback = playbackForPlayer();
+  if (!playback?.fullscreen || playback.phase !== "playing" || playback.paused !== false) {
+    keepPlayerControlsVisible();
+    return;
+  }
+  armPlayerControlsTimer();
 }
 
 function applySoloDiagnostics(snapshot: SoloSessionDiagnostics, expectedPlaybackId = state.playbackId): void {
@@ -3060,13 +3104,19 @@ playerAdapterSelect.addEventListener("change", async () => {
     renderPlayerAdapterPreference();
   }
 });
-playerFullscreenButton.addEventListener("click", () => {
+function togglePlayerFullscreen(): void {
   const playback = playbackForPlayer();
   if (!state.playbackId || !playback) return;
   void applyPlaybackCommand(
     () => window.jellyfin.playback.setFullscreen({ playbackId: state.playbackId as string, fullscreen: !playback.fullscreen }),
     "Fullscreen could not be changed.",
-  ).then(schedulePlayerViewport);
+  ).then(schedulePlayerViewportSettled);
+}
+
+playerFullscreenButton.addEventListener("click", togglePlayerFullscreen);
+playerViewport.addEventListener("dblclick", (event) => {
+  event.preventDefault();
+  togglePlayerFullscreen();
 });
 
 const playNext = (): void => {
@@ -3109,7 +3159,9 @@ sessionPanelScrim.addEventListener("click", () => {
   openSessionPanelButton.focus();
 });
 playerView.addEventListener("pointermove", markPlayerActivity);
+playerView.addEventListener("click", markPlayerActivity);
 playerView.addEventListener("focusin", markPlayerActivity);
+playerControls.addEventListener("focusout", () => queueMicrotask(markPlayerActivity));
 
 for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-player-route]")) {
   button.addEventListener("click", async () => {
@@ -3147,7 +3199,8 @@ document.addEventListener("keydown", (event) => {
     markPlayerActivity();
     if (event.key === "Escape") {
       event.preventDefault();
-      if (!playerSettingsMenu.classList.contains("is-hidden")) closePlayerSettings();
+      if (playbackForPlayer()?.fullscreen) togglePlayerFullscreen();
+      else if (!playerSettingsMenu.classList.contains("is-hidden")) closePlayerSettings();
       else if (playerDrawerMode && !state.sessionPanelCollapsed) {
         setSessionPanelCollapsed(true);
         openSessionPanelButton.focus();

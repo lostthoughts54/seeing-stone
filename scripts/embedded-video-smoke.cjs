@@ -1,12 +1,122 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
-const { join } = require("node:path");
+const { join, resolve } = require("node:path");
 const { app, BrowserWindow, desktopCapturer, screen } = require("electron");
 const { EmbeddedVideoHost } = require("../dist/main/services/embeddedVideoHost.js");
 const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const fullscreenMode = process.argv.includes("--fullscreen");
+
+async function changeFullscreen(host, owner, fullscreen) {
+  const event = fullscreen ? "enter-full-screen" : "leave-full-screen";
+  const changed = new Promise((resolve) => owner.once(event, resolve));
+  host.setFullscreen(fullscreen);
+  await Promise.race([changed, delay(2500)]);
+  await delay(350);
+  if (owner.isFullScreen() !== fullscreen) throw new Error("Application fullscreen transition did not complete.");
+}
+
+async function verifyRendererCinemaFullscreen() {
+  const renderer = new BrowserWindow({
+    width: 1400,
+    height: 850,
+    show: false,
+    backgroundColor: "#000000",
+    webPreferences: {
+      preload: resolve(__dirname, "player-shell-visual-preload.cjs"),
+      contextIsolation: true,
+      sandbox: false,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  const rendererErrors = [];
+  renderer.webContents.on("console-message", (details) => {
+    if (details.level === "error") rendererErrors.push(true);
+  });
+  try {
+    await renderer.loadFile(resolve(__dirname, "../dist/renderer/index.html"));
+    const evidence = await renderer.webContents.executeJavaScript(`(async () => {
+      const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const button = document.getElementById("featurePlayButton");
+        if (button && !button.disabled) { button.click(); break; }
+        await delay(25);
+      }
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        if (window.seeingStoneVisualAcceptance?.getPlayback().phase === "playing") break;
+        await delay(25);
+      }
+      const acceptance = window.seeingStoneVisualAcceptance;
+      const player = document.getElementById("playerView");
+      const center = document.getElementById("playerCenter");
+      const viewport = document.getElementById("playerViewport");
+      const controls = document.getElementById("playerControls");
+      const desktopViewport = viewport.getBoundingClientRect();
+      const desktopScroll = center.scrollTop;
+      const panelWasVisible = getComputedStyle(document.getElementById("sessionPanel")).display !== "none";
+      acceptance.clearViewportInputs();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await delay(180);
+      const activeViewport = viewport.getBoundingClientRect();
+      const activeControls = controls.getBoundingClientRect();
+      const activeInput = acceptance.getViewportInputs().at(-1);
+      const activeFullscreen = acceptance.getPlayback().fullscreen === true;
+      const shellHidden = [".player-rail", ".player-identity-bar", ".session-panel", ".player-metadata"]
+        .every((selector) => getComputedStyle(document.querySelector(selector)).display === "none");
+      center.tabIndex = -1;
+      center.focus();
+      player.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+      await delay(2800);
+      const idleViewport = viewport.getBoundingClientRect();
+      const idleControls = controls.getBoundingClientRect();
+      const idleInput = acceptance.getViewportInputs().at(-1);
+      const idle = player.classList.contains("is-controls-idle");
+      player.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+      await delay(120);
+      const controlsReturned = !player.classList.contains("is-controls-idle") && controls.getBoundingClientRect().height === 56;
+      viewport.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await delay(120);
+      const doubleClickExited = acceptance.getPlayback().fullscreen === false;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+      await delay(120);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await delay(180);
+      const restoredViewport = viewport.getBoundingClientRect();
+      return {
+        fEntered: activeFullscreen,
+        shellHidden,
+        activeBand: Math.round(activeControls.height),
+        activeViewportMatches: Boolean(activeInput) && Math.abs(activeInput.height - activeViewport.height) < 1,
+        activeReportedHeight: activeInput?.height ?? null,
+        activeDomHeight: activeViewport.height,
+        idle,
+        idleBand: Math.round(idleControls.height),
+        idleViewportMatches: Boolean(idleInput) && Math.abs(idleInput.height - idleViewport.height) < 1,
+        idleReportedHeight: idleInput?.height ?? null,
+        idleDomHeight: idleViewport.height,
+        controlsReturned,
+        doubleClickExited,
+        escapeExited: player.dataset.fullscreen === "false",
+        layoutRestored: Math.abs(restoredViewport.width - desktopViewport.width) < 1
+          && Math.abs(restoredViewport.height - desktopViewport.height) < 1
+          && center.scrollTop === desktopScroll
+          && (getComputedStyle(document.getElementById("sessionPanel")).display !== "none") === panelWasVisible,
+      };
+    })()`);
+    if (rendererErrors.length > 0 || !evidence.fEntered || !evidence.shellHidden
+      || evidence.activeBand !== 56 || !evidence.activeViewportMatches || !evidence.idle
+      || evidence.idleBand !== 3 || !evidence.idleViewportMatches || !evidence.controlsReturned
+      || !evidence.doubleClickExited || !evidence.escapeExited || !evidence.layoutRestored) {
+      throw new Error(`Renderer cinema fullscreen interaction check failed: ${JSON.stringify(evidence)}`);
+    }
+    return evidence;
+  } finally {
+    if (!renderer.isDestroyed()) renderer.destroy();
+  }
+}
 
 function analyze(image) {
   const bitmap = image.toBitmap();
@@ -85,7 +195,7 @@ app.whenReady().then(async () => {
         name: "opengl-software",
         args: ["--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0"],
       },
-    ];
+    ].filter((profile) => !fullscreenMode || profile.name === "d3d11");
     const results = [];
     for (const profile of profiles) {
       const ipc = new MpvIpcClient();
@@ -102,6 +212,15 @@ app.whenReady().then(async () => {
         child.once("error", () => undefined);
         await ipc.connect(pipe);
         await delay(1500);
+        let activeViewport = viewport;
+        let fullscreenEvidence = null;
+        if (fullscreenMode) {
+          await changeFullscreen(host, owner, true);
+          const content = owner.getContentBounds();
+          activeViewport = { x: 0, y: 0, width: content.width, height: content.height - 56, visible: true, revision: 2 };
+          host.updateViewport(activeViewport);
+          await delay(650);
+        }
         const tracks = await ipc.command(["get_property", "track-list"]);
         const videoTrack = Array.isArray(tracks) ? tracks.find((track) => track?.type === "video") : null;
         const evidence = {
@@ -118,16 +237,51 @@ app.whenReady().then(async () => {
         owner.focus();
         await delay(150);
         if (!owner.isFocused()) throw new Error("Embedded video stole application focus.");
-        const pixels = analyze(await captureSurface(owner, viewport));
+        const pixels = analyze(await captureSurface(owner, activeViewport));
         if (pixels.nonDarkPixelRatio < 0.15 || pixels.colorRange < 60) {
           throw new Error(`${profile.name} embedded H.264 surface was visually blank.`);
         }
-        results.push({ profile: profile.name, evidence, pixels });
+        if (fullscreenMode) {
+          const activeBounds = host.window.getBounds();
+          const content = owner.getContentBounds();
+          const idleViewport = { x: 0, y: 0, width: content.width, height: content.height - 3, visible: true, revision: 3 };
+          host.updateViewport(idleViewport);
+          await delay(650);
+          const idleBounds = host.window.getBounds();
+          const idlePixels = analyze(await captureSurface(owner, idleViewport));
+          if (idlePixels.nonDarkPixelRatio < 0.15 || idlePixels.colorRange < 60) {
+            throw new Error("Idle fullscreen surface was visually blank.");
+          }
+          await changeFullscreen(host, owner, false);
+          host.updateViewport({ ...viewport, revision: 4 });
+          await delay(650);
+          const restoredBounds = host.window.getBounds();
+          const restoredContent = owner.getContentBounds();
+          const expectedRestored = {
+            x: restoredContent.x + viewport.x,
+            y: restoredContent.y + viewport.y,
+            width: viewport.width,
+            height: viewport.height,
+          };
+          const expectedActive = { x: content.x, y: content.y, width: content.width, height: content.height - 56 };
+          const expectedIdle = { x: content.x, y: content.y, width: content.width, height: content.height - 3 };
+          if (Object.keys(expectedActive).some((key) => activeBounds[key] !== expectedActive[key])
+            || Object.keys(expectedIdle).some((key) => idleBounds[key] !== expectedIdle[key])
+            || Object.keys(expectedRestored).some((key) => restoredBounds[key] !== expectedRestored[key])) {
+            throw new Error("Fullscreen control-band or restored native bounds were incorrect.");
+          }
+          fullscreenEvidence = { activeBand: 56, idleBand: 3, restored: true, idlePixels };
+        }
+        results.push({ profile: profile.name, evidence, pixels, ...(fullscreenEvidence ? { fullscreen: fullscreenEvidence } : {}) });
       } finally {
         ipc.close();
         if (child && !child.killed) child.kill();
         await delay(250);
       }
+    }
+    if (fullscreenMode) {
+      owner.hide();
+      results[0].renderer = await verifyRendererCinemaFullscreen();
     }
     process.stdout.write(`${JSON.stringify({ ok: true, results })}\n`);
     app.quit();

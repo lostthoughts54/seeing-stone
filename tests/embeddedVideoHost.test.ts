@@ -19,6 +19,9 @@ describe("EmbeddedVideoHost platform boundary", () => {
 
   it("keeps the renderer-defined control-safe viewport in application fullscreen", () => {
     const content = { x: 0, y: 0, width: 1920, height: 1080 };
-    expect(videoHostBounds(content, { x: 100, y: 100, width: 10, height: 10, visible: true, revision: 1 })).toEqual({ x: 100, y: 100, width: 10, height: 10 });
+    expect(videoHostBounds(content, { x: 0, y: 0, width: 1920, height: 1024, visible: true, revision: 1 }))
+      .toEqual({ x: 0, y: 0, width: 1920, height: 1024 });
+    expect(videoHostBounds(content, { x: 0, y: 0, width: 1920, height: 1077, visible: true, revision: 2 }))
+      .toEqual({ x: 0, y: 0, width: 1920, height: 1077 });
   });
 });

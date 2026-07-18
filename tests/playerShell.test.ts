@@ -73,6 +73,25 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('playerView.addEventListener("focusin", markPlayerActivity)');
   });
 
+  it("provides a control-safe cinema fullscreen with idle restoration behavior", async () => {
+    const [styles, renderer] = await Promise.all([
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(styles).toContain('--cinema-control-band: 56px');
+    expect(styles).toContain('--cinema-control-band: 3px');
+    expect(styles).toContain('.player-view[data-fullscreen="true"] .player-rail');
+    expect(styles).toContain('.player-view[data-fullscreen="true"] .session-panel');
+    expect(styles).toContain('.player-view[data-fullscreen="true"] .player-metadata');
+    expect(styles).toContain('grid-template-rows: minmax(0, 1fr) var(--cinema-control-band)');
+    expect(styles).toContain('.player-view.is-controls-idle[data-fullscreen="true"]');
+    expect(styles).toContain('cursor: none');
+    expect(renderer).toContain('playback.phase === "playing" && playback.paused === false');
+    expect(renderer).toContain('playerViewport.addEventListener("dblclick"');
+    expect(renderer).toContain('if (playbackForPlayer()?.fullscreen) togglePlayerFullscreen()');
+    expect(renderer).toContain('requestAnimationFrame(() => requestAnimationFrame(schedulePlayerViewport))');
+  });
+
   it("keeps compact playback options reachable through the real settings surface", async () => {
     const [html, styles, renderer] = await Promise.all([
       readFile("src/renderer/index.html", "utf8"),
