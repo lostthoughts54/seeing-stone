@@ -696,6 +696,7 @@ export class MpvPlayerService implements PlayerController {
       const videoReadiness = profile === "legacy"
         ? { hasVideo: false, hardwareDecoding: null as boolean | null }
         : await this.waitForEmbeddedVideoOutput(ipc);
+      if (videoReadiness.hasVideo) this.videoHost?.raise();
       await this.addExternalSubtitles(ipc, playbackTargets);
       this.update({
         ...this.state,

@@ -125,6 +125,7 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     embedded: true as const,
     getWindowId: () => "1234",
     updateViewport: vi.fn(),
+    raise: vi.fn(),
     setFullscreen: vi.fn(),
     hide: vi.fn(),
     destroy: vi.fn(),

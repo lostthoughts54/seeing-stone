@@ -9,6 +9,7 @@ export interface MpvVideoHost {
   readonly embedded: true;
   getWindowId(): string;
   updateViewport(viewport: VideoViewport): void;
+  raise(): void;
   setFullscreen(fullscreen: boolean): void;
   hide(): void;
   destroy(): void;
@@ -46,6 +47,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     owner.on("resize", () => this.scheduleReconcile());
     owner.on("restore", () => this.scheduleReconcile());
     owner.on("show", () => this.scheduleReconcile());
+    owner.on("focus", () => this.scheduleReconcile());
     owner.on("enter-full-screen", () => this.scheduleReconcile());
     owner.on("leave-full-screen", () => this.scheduleReconcile());
     owner.on("minimize", () => this.hide());
@@ -63,6 +65,11 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   updateViewport(viewport: VideoViewport): void {
     if (viewport.revision <= this.viewport.revision) return;
     this.viewport = { ...viewport };
+    this.scheduleReconcile();
+  }
+  raise(): void {
+    if (this.window.isDestroyed()) return;
+    this.window.moveTop();
     this.scheduleReconcile();
   }
   setFullscreen(fullscreen: boolean): void {
@@ -102,5 +109,6 @@ export class EmbeddedVideoHost implements MpvVideoHost {
       this.window.showInactive();
       this.hostVisible = true;
     }
+    this.window.moveTop();
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 import { videoHostBounds, windowsWindowId } from "../src/main/services/embeddedVideoHost";
 
 describe("EmbeddedVideoHost platform boundary", () => {
@@ -23,5 +24,14 @@ describe("EmbeddedVideoHost platform boundary", () => {
       .toEqual({ x: 0, y: 0, width: 1920, height: 1024 });
     expect(videoHostBounds(content, { x: 0, y: 0, width: 1920, height: 1077, visible: true, revision: 2 }))
       .toEqual({ x: 0, y: 0, width: 1920, height: 1077 });
+  });
+
+  it("reasserts the owned native surface above renderer repaints", async () => {
+    const source = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
+    expect(source).toContain("this.window.showInactive()");
+    expect(source).toContain("this.window.moveTop()");
+    expect(source).toContain("raise(): void");
+    expect(source).toContain('owner.on("focus", () => this.scheduleReconcile())');
+    expect(source.match(/this\.window\.moveTop\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
 });

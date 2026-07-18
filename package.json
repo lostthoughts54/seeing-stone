@@ -30,6 +30,7 @@
     "test:mpv-completion": "pnpm run build:main && node scripts/mpv-completion-acceptance.cjs",
     "test:embedded-window": "pnpm run build:main && electron scripts/embedded-window-spike.cjs",
     "test:embedded-video-smoke": "pnpm run build:main && electron scripts/embedded-video-smoke.cjs",
+    "test:embedded-integrated-smoke": "pnpm run build:main && pnpm run build:renderer && electron scripts/embedded-video-smoke.cjs --integrated",
     "test:embedded-fullscreen-smoke": "pnpm run build:main && pnpm run build:renderer && electron scripts/embedded-video-smoke.cjs --fullscreen",
     "test:player-shell-visual": "pnpm run build && node scripts/player-shell-visual-acceptance.cjs",
     "test:gate-5-visual": "pnpm run build && node scripts/gate5-visual-acceptance.cjs",

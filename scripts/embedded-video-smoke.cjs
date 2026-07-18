@@ -8,6 +8,8 @@ const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const fullscreenMode = process.argv.includes("--fullscreen");
+const primaryOnly = process.argv.includes("--primary-only");
+const integratedMode = process.argv.includes("--integrated");
 
 async function changeFullscreen(host, owner, fullscreen) {
   const event = fullscreen ? "enter-full-screen" : "leave-full-screen";
@@ -139,6 +141,24 @@ function analyze(image) {
   return { nonDarkPixelRatio: nonDark / Math.max(1, sampled), colorRange: maximum - minimum };
 }
 
+function changedPixelRatio(first, second) {
+  const a = first.toBitmap();
+  const b = second.toBitmap();
+  const length = Math.min(a.length, b.length);
+  let sampled = 0;
+  let changed = 0;
+  for (let offset = 0; offset + 2 < length; offset += 64) {
+    const delta = Math.max(
+      Math.abs(a[offset] - b[offset]),
+      Math.abs(a[offset + 1] - b[offset + 1]),
+      Math.abs(a[offset + 2] - b[offset + 2]),
+    );
+    if (delta >= 8) changed += 1;
+    sampled += 1;
+  }
+  return changed / Math.max(1, sampled);
+}
+
 async function captureSurface(owner, viewport) {
   const display = screen.getDisplayMatching(owner.getBounds());
   const sources = await desktopCapturer.getSources({
@@ -169,7 +189,86 @@ async function captureSurface(owner, viewport) {
   });
 }
 
+async function runIntegratedSmoke() {
+  let owner;
+  let host;
+  let child;
+  const ipc = new MpvIpcClient();
+  try {
+    owner = new BrowserWindow({
+      width: 1400,
+      height: 850,
+      show: true,
+      backgroundColor: "#060711",
+      webPreferences: {
+        preload: resolve(__dirname, "player-shell-visual-preload.cjs"),
+        contextIsolation: true,
+        sandbox: false,
+        nodeIntegration: false,
+        backgroundThrottling: false,
+      },
+    });
+    await owner.loadFile(resolve(__dirname, "../dist/renderer/index.html"));
+    const ready = await owner.webContents.executeJavaScript(`(async () => {
+      const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const button = document.getElementById("featurePlayButton");
+        if (button && !button.disabled) { button.click(); break; }
+        await delay(25);
+      }
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const input = window.seeingStoneVisualAcceptance?.getViewportInputs().at(-1);
+        if (input?.visible && input.width >= 16 && input.height >= 16) return input;
+        await delay(25);
+      }
+      return null;
+    })()`);
+    if (!ready) throw new Error("Integrated player viewport did not become ready.");
+    host = new EmbeddedVideoHost(owner);
+    let revision = 1;
+    const updateHost = async () => {
+      const input = await owner.webContents.executeJavaScript("window.seeingStoneVisualAcceptance.getViewportInputs().at(-1)");
+      host.updateViewport({ ...input, revision: revision++ });
+      return input;
+    };
+    const viewport = await updateHost();
+    const pipe = `\\\\.\\pipe\\seeing-stone-integrated-${process.pid}-${Date.now()}`;
+    child = spawn(join(process.cwd(), ".runtime", "mpv", "mpv.exe"), [
+      "--no-config", "--terminal=no", "--force-window=immediate", "--keep-open=yes",
+      "--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0",
+      "--osc=no", "--input-default-bindings=no", "--input-vo-keyboard=no",
+      `--input-ipc-server=${pipe}`, `--wid=${host.getWindowId()}`, "--loop-file=inf", "--",
+      join(process.cwd(), ".runtime", "h264-embedded-smoke.mp4"),
+    ], { windowsHide: true, stdio: "ignore" });
+    child.once("error", () => undefined);
+    await ipc.connect(pipe);
+    await delay(1200);
+    host.raise();
+    const first = await captureSurface(owner, viewport);
+    for (let step = 1; step <= 8; step += 1) {
+      await owner.webContents.executeJavaScript(`window.jellyfin.playback.seek({ playbackId: "visual-playback", positionTicks: ${step * 10_000_000} })`);
+      await delay(100);
+    }
+    const second = await captureSurface(owner, viewport);
+    const pixels = analyze(second);
+    const motionRatio = changedPixelRatio(first, second);
+    if (pixels.nonDarkPixelRatio < 0.15 || pixels.colorRange < 60) throw new Error("Integrated embedded surface was visually blank.");
+    if (motionRatio < 0.002) throw new Error("Integrated embedded surface did not present advancing frames.");
+    return { ok: true, profile: "d3d11", pixels, motionRatio };
+  } finally {
+    ipc.close();
+    if (child && !child.killed) child.kill();
+    if (host) host.destroy();
+    if (owner && !owner.isDestroyed()) owner.destroy();
+  }
+}
+
 app.whenReady().then(async () => {
+  if (integratedMode) {
+    process.stdout.write(`${JSON.stringify(await runIntegratedSmoke())}\n`);
+    app.quit();
+    return;
+  }
   let owner;
   let host;
   try {
@@ -195,7 +294,7 @@ app.whenReady().then(async () => {
         name: "opengl-software",
         args: ["--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0"],
       },
-    ].filter((profile) => !fullscreenMode || profile.name === "d3d11");
+    ].filter((profile) => (!fullscreenMode && !primaryOnly) || profile.name === "d3d11");
     const results = [];
     for (const profile of profiles) {
       const ipc = new MpvIpcClient();
@@ -235,9 +334,12 @@ app.whenReady().then(async () => {
           throw new Error(`${profile.name} embedded video output was not configured.`);
         }
         owner.focus();
+        await delay(50);
+        host.raise();
         await delay(150);
         if (!owner.isFocused()) throw new Error("Embedded video stole application focus.");
-        const pixels = analyze(await captureSurface(owner, activeViewport));
+        const firstSurface = await captureSurface(owner, activeViewport);
+        const pixels = analyze(firstSurface);
         if (pixels.nonDarkPixelRatio < 0.15 || pixels.colorRange < 60) {
           throw new Error(`${profile.name} embedded H.264 surface was visually blank.`);
         }
