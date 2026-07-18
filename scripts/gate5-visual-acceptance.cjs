@@ -115,20 +115,26 @@ async function runChild() {
       await delay(20);
     }
     const continueState = panel.textContent.includes("Playing");
+    const toast = document.getElementById("toast");
     const refreshedPolicy = panel.querySelector('[data-session-action="buffering-policy"]');
     refreshedPolicy.value = "continue";
     refreshedPolicy.dispatchEvent(new Event("change", { bubbles: true }));
-    await delay(80);
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const current = panel.querySelector('[data-session-action="buffering-policy"]');
+      if (current?.value === "continue" && !current.disabled && toast.textContent === "Automatic waiting is off.") break;
+      await delay(20);
+    }
     const savedPolicy = panel.querySelector('[data-session-action="buffering-policy"]')?.value || null;
     const resetPolicy = panel.querySelector('[data-session-action="buffering-policy"]');
     resetPolicy.value = "wait-for-all";
     resetPolicy.dispatchEvent(new Event("change", { bubbles: true }));
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       const current = panel.querySelector('[data-session-action="buffering-policy"]');
-      if (current?.value === "wait-for-all" && !current.disabled) break;
+      if (current?.value === "wait-for-all" && !current.disabled && toast.textContent === "Buffering policy set to wait for everyone.") break;
       await delay(20);
     }
-    const toast = document.getElementById("toast");
+    const restoredPolicy = panel.querySelector('[data-session-action="buffering-policy"]')?.value || null;
+    const resetCompleted = toast.textContent === "Buffering policy set to wait for everyone.";
     toast.textContent = "";
     toast.classList.add("is-hidden");
     toast.style.display = "none";
@@ -140,6 +146,8 @@ async function runChild() {
       explanation,
       initialPolicy,
       savedPolicy,
+      restoredPolicy,
+      resetCompleted,
       waitState,
       continueState,
       hasLatencyRow: /Server latency|Local drift/.test(panel.textContent),
@@ -151,7 +159,7 @@ async function runChild() {
   assert(result.actionLabels.join("|") === "Wait|Continue|Resync|Leave Party", "Watchparty actions are incomplete.");
   assert(result.participantValues.length === 2 && result.participantValues.every((value) => value === "Jellyfin member"), "Unverified participants must show only native Jellyfin membership.");
   assert(result.explanation.includes("unavailable") && result.explanation.includes("Standard Jellyfin SyncPlay remains active"), "Disabled telemetry explanation is missing.");
-  assert(result.initialPolicy === "wait-for-all" && result.savedPolicy === "continue", "Buffering policy controls did not round-trip.");
+  assert(result.initialPolicy === "wait-for-all" && result.savedPolicy === "continue" && result.restoredPolicy === "wait-for-all" && result.resetCompleted, "Buffering policy controls did not round-trip.");
   assert(result.waitState && result.continueState, "Wait and Continue did not update the isolated Jellyfin group state.");
   assert(!result.hasLatencyRow && !result.hasIncident, "Unavailable enhanced diagnostics must be suppressed.");
   assert(!result.sensitiveText, "Gate 5 visual fixture exposed sensitive-looking text.");
