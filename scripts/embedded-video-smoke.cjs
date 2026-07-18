@@ -319,6 +319,13 @@ async function runManagedOverlaySmoke() {
     await host.attachWindow(title);
     overlay = findWindow(null, title);
     if (overlay === null) throw new Error("Managed mpv overlay window was unavailable.");
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const configured = await ipc.command(["get_property", "vo-configured"]).catch(() => false);
+      const format = await ipc.command(["get_property", "video-format"]).catch(() => null);
+      if (configured === true && format) break;
+      await delay(25);
+    }
+    host.raise();
     await delay(1000);
     const first = await captureSurface(owner, viewport);
     await delay(700);
@@ -354,7 +361,7 @@ async function runManagedOverlaySmoke() {
     setCursorPosNative(originalCursor.x, originalCursor.y);
     const pointerEvidence = await owner.webContents.executeJavaScript("window.__seeingStoneOverlayClicks");
     if (pointerEvidence.click < 2 || pointerEvidence.doubleClick < 1 || !owner.isFocused()) {
-      throw new Error("Managed overlay did not preserve click-through input and application focus.");
+      throw new Error(`Managed overlay did not preserve click-through input and application focus (${pointerEvidence.click}, ${pointerEvidence.doubleClick}, ${owner.isFocused()}).`);
     }
     host.hide();
     await delay(100);

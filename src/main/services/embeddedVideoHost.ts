@@ -37,6 +37,10 @@ export function videoHostBounds(content: Rectangle, viewport: VideoViewport): Re
   };
 }
 
+export function initializedVideoSurfaceBounds(bounds: Rectangle): Rectangle {
+  return { ...bounds, width: Math.max(16, bounds.width - 1) };
+}
+
 const user32 = koffi.load("user32.dll");
 const findWindow = user32.func("__stdcall", "FindWindowA", "void *", ["str", "str"]);
 const getWindowLongPtr = user32.func("__stdcall", "GetWindowLongPtrA", "intptr_t", ["void *", "int"]);
@@ -87,6 +91,8 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   private viewport: VideoViewport = { x: 0, y: 0, width: 0, height: 0, visible: false, revision: 0 };
   private lastBounds: Rectangle | null = null;
   private reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  private surfaceInitializationTimer: ReturnType<typeof setTimeout> | null = null;
+  private videoSurfaceInitialized = false;
   private destroyed = false;
   private readonly displayMetricsListener = () => this.scheduleReconcile();
 
@@ -111,15 +117,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
       const candidate = findWindow(null, title) as bigint | null;
       if (candidate !== null && isWindow(candidate) !== 0) {
         this.overlay = candidate;
-        const ownerHandle = windowsWindowHandle(this.owner.getNativeWindowHandle());
-        setWindowLongChecked(candidate, GWLP_HWNDPARENT, ownerHandle);
-        const existingStyle = BigInt(getWindowLongPtr(candidate, GWL_EXSTYLE));
-        const managedStyle = (existingStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED)
-          & ~WS_EX_APPWINDOW;
-        setWindowLongChecked(candidate, GWL_EXSTYLE, managedStyle);
-        if (setLayeredWindowAttributes(candidate, 0, 255, LWA_ALPHA) === 0
-          || setWindowPos(candidate, null, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) === 0) {
+        if (!this.applyManagedStyles(candidate)) {
           this.overlay = null;
           throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "The embedded video window could not be managed safely.", 503);
         }
@@ -133,9 +131,12 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   }
 
   detachWindow(): void {
+    if (this.surfaceInitializationTimer) clearTimeout(this.surfaceInitializationTimer);
+    this.surfaceInitializationTimer = null;
     this.hide();
     this.overlay = null;
     this.lastBounds = null;
+    this.videoSurfaceInitialized = false;
   }
 
   updateViewport(viewport: VideoViewport): void {
@@ -145,7 +146,21 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   }
 
   raise(): void {
-    this.scheduleReconcile();
+    if (this.surfaceInitializationTimer) clearTimeout(this.surfaceInitializationTimer);
+    this.surfaceInitializationTimer = setTimeout(() => {
+      this.videoSurfaceInitialized = true;
+      this.applyBounds();
+      this.surfaceInitializationTimer = setTimeout(() => {
+        this.surfaceInitializationTimer = null;
+        const overlay = this.validOverlay();
+        try {
+          if (overlay === null || !this.applyManagedStyleBits(overlay)) this.hide();
+          else this.scheduleReconcile();
+        } catch {
+          this.hide();
+        }
+      }, 100);
+    }, 500);
   }
 
   setFullscreen(fullscreen: boolean): void {
@@ -164,12 +179,30 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     this.destroyed = true;
     if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     this.reconcileTimer = null;
+    if (this.surfaceInitializationTimer) clearTimeout(this.surfaceInitializationTimer);
+    this.surfaceInitializationTimer = null;
     screen.removeListener("display-metrics-changed", this.displayMetricsListener);
     this.detachWindow();
   }
 
   private validOverlay(): bigint | null {
     return this.overlay !== null && isWindow(this.overlay) !== 0 ? this.overlay : null;
+  }
+
+  private applyManagedStyles(overlay: bigint): boolean {
+    if (!this.applyManagedStyleBits(overlay)) return false;
+    return setWindowPos(overlay, null, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) !== 0;
+  }
+
+  private applyManagedStyleBits(overlay: bigint): boolean {
+    const ownerHandle = windowsWindowHandle(this.owner.getNativeWindowHandle());
+    setWindowLongChecked(overlay, GWLP_HWNDPARENT, ownerHandle);
+    const existingStyle = BigInt(getWindowLongPtr(overlay, GWL_EXSTYLE));
+    const managedStyle = (existingStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+      & ~WS_EX_APPWINDOW;
+    setWindowLongChecked(overlay, GWL_EXSTYLE, managedStyle);
+    return setLayeredWindowAttributes(overlay, 0, 255, LWA_ALPHA) !== 0;
   }
 
   private scheduleReconcile(): void {
@@ -188,7 +221,8 @@ export class EmbeddedVideoHost implements MpvVideoHost {
       this.hide();
       return;
     }
-    const bounds = videoHostBounds(this.owner.getContentBounds(), this.viewport);
+    const viewportBounds = videoHostBounds(this.owner.getContentBounds(), this.viewport);
+    const bounds = this.videoSurfaceInitialized ? initializedVideoSurfaceBounds(viewportBounds) : viewportBounds;
     if (bounds.width < 16 || bounds.height < 16) {
       this.hide();
       return;

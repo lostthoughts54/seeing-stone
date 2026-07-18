@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
-import { videoHostBounds, windowsWindowHandle, windowsWindowId } from "../src/main/services/embeddedVideoHost";
+import {
+  initializedVideoSurfaceBounds,
+  videoHostBounds,
+  windowsWindowHandle,
+  windowsWindowId,
+} from "../src/main/services/embeddedVideoHost";
 
 describe("EmbeddedVideoHost platform boundary", () => {
   it("preserves the complete unsigned Win32 HWND value", () => {
@@ -27,6 +32,13 @@ describe("EmbeddedVideoHost platform boundary", () => {
       .toEqual({ x: 0, y: 0, width: 1920, height: 1077 });
   });
 
+  it("keeps the initialized D3D surface one physical resize away from its pre-video bounds", () => {
+    expect(initializedVideoSurfaceBounds({ x: 10, y: 20, width: 1280, height: 720 }))
+      .toEqual({ x: 10, y: 20, width: 1279, height: 720 });
+    expect(initializedVideoSurfaceBounds({ x: 10, y: 20, width: 16, height: 16 }))
+      .toEqual({ x: 10, y: 20, width: 16, height: 16 });
+  });
+
   it("owns a non-activating click-through mpv overlay and never creates an Electron child surface", async () => {
     const source = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
     expect(source).not.toContain("new BaseWindow");
@@ -36,8 +48,10 @@ describe("EmbeddedVideoHost platform boundary", () => {
     expect(source).toContain("WS_EX_NOACTIVATE");
     expect(source).toContain("WS_EX_TRANSPARENT");
     expect(source).toContain("WS_EX_LAYERED");
-    expect(source).toContain("setLayeredWindowAttributes(candidate, 0, 255, LWA_ALPHA)");
-    expect(source).toContain("setWindowLongChecked(candidate, GWLP_HWNDPARENT, ownerHandle)");
+    expect(source).toContain("setLayeredWindowAttributes(overlay, 0, 255, LWA_ALPHA)");
+    expect(source).toContain("setWindowLongChecked(overlay, GWLP_HWNDPARENT, ownerHandle)");
+    expect(source).toContain("if (!this.applyManagedStyles(candidate))");
+    expect(source).toContain("!this.applyManagedStyleBits(overlay)");
     expect(source).toContain("SWP_FRAMECHANGED");
     expect(source).toContain("SWP_NOACTIVATE | SWP_SHOWWINDOW");
     expect(source).toContain("raise(): void");
