@@ -520,6 +520,16 @@ async function runElectronChild() {
       }],
       joinedGroup: null,
       sharedControls: true,
+      sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
+      telemetry: {
+        protocolVersion: 1,
+        availability: "disabled",
+        transport: "none",
+        reason: "Enhanced participant status is unavailable in this isolated test fixture. Standard Jellyfin SyncPlay remains active.",
+        participants: [],
+        incident: null,
+        policy: { mode: "wait-for-all", gracePeriodMs: 1500 },
+      },
       error: null,
     };
     let watchPartyResyncCount = 0;
@@ -543,9 +553,15 @@ async function runElectronChild() {
         watchPartyState = { ...watchPartyState, joinedGroup: null };
         return structuredClone(watchPartyState);
       },
-      async resyncLocal() {
+      async waitForAll() { return structuredClone(watchPartyState); },
+      async continueAfterBuffering() { return structuredClone(watchPartyState); },
+      async setBufferingPolicy(mode) {
+        watchPartyState = { ...watchPartyState, telemetry: { ...watchPartyState.telemetry, policy: { mode, gracePeriodMs: 1500 } } };
+        return structuredClone(watchPartyState);
+      },
+      async resyncGroup() {
         watchPartyResyncCount += 1;
-        return playback.getState();
+        return structuredClone(watchPartyState);
       },
       async setViewVisible() { return structuredClone(watchPartyState); },
     };
@@ -698,7 +714,7 @@ async function runElectronChild() {
         playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "stop", "subscribe"],
         sessionPanel: ["getSolo"],
         licenses: ["list"],
-        watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
+        watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setVisible", "subscribe", "wait"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -812,7 +828,7 @@ async function runElectronChild() {
         };
 
         document.querySelector('[data-watch-party-action="resync"]').click();
-        await waitFor(() => document.getElementById("toast").textContent === "This computer was resynced to the party.");
+        await waitFor(() => document.getElementById("toast").textContent === "The watch party was corrected to the authoritative timeline.");
         const resyncToast = document.getElementById("toast").textContent;
 
         document.querySelector('[data-watch-party-action="leave"]').click();
@@ -837,7 +853,7 @@ async function runElectronChild() {
         group: "Runtime movie night",
         status: "Parties are visible only to signed-in users on this Jellyfin server.",
       });
-      assert.equal(result.resyncToast, "This computer was resynced to the party.");
+      assert.equal(result.resyncToast, "The watch party was corrected to the authoritative timeline.");
       assert.equal(watchPartyResyncCount, 1);
       assert.deepEqual(result.joined, {
         name: "Runtime movie night",

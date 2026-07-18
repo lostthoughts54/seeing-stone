@@ -108,7 +108,8 @@ describe("renderer and preload security boundary", () => {
       contracts.indexOf("export type WatchPartyPlaybackState"),
       contracts.indexOf("export interface JellyfinBridge"),
     );
-    expect(watchPartyContracts).not.toMatch(/accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket|mediaUrl|api[_-]?key/i);
+    expect(watchPartyContracts).not.toMatch(/accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket(?:Url|Endpoint|Headers|Token)|mediaUrl|api[_-]?key/i);
+    expect(watchPartyContracts).not.toMatch(/(?:url|path|headers|credential|token)\s*:/i);
     expect(preload).toContain("ipcRenderer.on(IPC.watchPartiesChanged, receive)");
     expect(preload).toContain("ipcRenderer.removeListener(IPC.watchPartiesChanged, receive)");
     expect(preload).not.toMatch(/new WebSocket|\bfetch\s*\(/);

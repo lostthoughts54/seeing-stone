@@ -2,6 +2,7 @@ import { parentPort, threadId, workerData } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
 import {
   DATABASE_SCHEMA_VERSION,
+  type ApplicationPreferenceRecord,
   type DownloadBundleRecord,
   type DownloadJobRecord,
   type DownloadJobState,
@@ -198,6 +199,15 @@ ALTER TABLE playback_revisions ADD COLUMN report_conflict_policy TEXT
   CHECK (report_conflict_policy IS NULL OR report_conflict_policy IN ('automatic', 'explicit'));
 `;
 
+const MIGRATION_4 = `
+CREATE TABLE application_preferences (
+  preference_key TEXT PRIMARY KEY
+    CHECK (preference_key IN ('player.adapter-mode', 'watchparty.buffering-policy', 'player.cached-diagnostics')),
+  value_json TEXT NOT NULL CHECK (length(value_json) BETWEEN 1 AND 16384),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= 0)
+) STRICT, WITHOUT ROWID;
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -257,6 +267,12 @@ function initialize(): PersistenceHealth {
         db().exec("PRAGMA user_version = 3");
       });
     }
+    if (version < 4) {
+      transaction(() => {
+        db().exec(MIGRATION_4);
+        db().exec("PRAGMA user_version = 4");
+      });
+    }
     const now = Date.now();
     db().prepare(`
       UPDATE download_jobs
@@ -278,6 +294,28 @@ function initialize(): PersistenceHealth {
     if (error instanceof PersistenceWorkerError) throw error;
     throw new PersistenceWorkerError("PERSISTENCE_CORRUPT", "Local data could not be opened safely.");
   }
+}
+
+function getApplicationPreference(
+  key: Extract<PersistenceOperation, { kind: "getApplicationPreference" }>["key"],
+): ApplicationPreferenceRecord | null {
+  const row = db().prepare(`
+    SELECT preference_key, value_json, updated_at
+    FROM application_preferences WHERE preference_key = ?
+  `).get(key) as Record<string, unknown> | undefined;
+  return row ? { key, valueJson: String(row.value_json), updatedAt: Number(row.updated_at) } : null;
+}
+
+function setApplicationPreference(
+  key: Extract<PersistenceOperation, { kind: "setApplicationPreference" }>["key"],
+  valueJson: string,
+  updatedAt: number,
+): ApplicationPreferenceRecord {
+  db().prepare(`
+    INSERT INTO application_preferences(preference_key, value_json, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(preference_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).run(key, valueJson, updatedAt);
+  return { key, valueJson, updatedAt };
 }
 
 function upsertCatalogIdentity(input: Extract<PersistenceOperation, { kind: "upsertCatalogIdentity" }>["input"]): null {
@@ -739,6 +777,8 @@ function execute(operation: PersistenceOperation): unknown {
   }
   initialize();
   switch (operation.kind) {
+    case "getApplicationPreference": return getApplicationPreference(operation.key);
+    case "setApplicationPreference": return setApplicationPreference(operation.key, operation.valueJson, operation.updatedAt);
     case "upsertCatalogIdentity": return upsertCatalogIdentity(operation.input);
     case "upsertMediaItem": return upsertMediaItem(operation.input);
     case "getMediaItem": return getMediaItem(operation.serverId, operation.userId, operation.itemId);

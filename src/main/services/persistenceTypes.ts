@@ -1,4 +1,15 @@
-export const DATABASE_SCHEMA_VERSION = 3;
+export const DATABASE_SCHEMA_VERSION = 4;
+
+export type ApplicationPreferenceKey =
+  | "player.adapter-mode"
+  | "watchparty.buffering-policy"
+  | "player.cached-diagnostics";
+
+export interface ApplicationPreferenceRecord {
+  key: ApplicationPreferenceKey;
+  valueJson: string;
+  updatedAt: number;
+}
 
 export interface CatalogIdentityInput {
   serverId: string;
@@ -179,6 +190,8 @@ export interface PersistenceHealth {
 
 export type PersistenceOperation =
   | { kind: "initialize" }
+  | { kind: "getApplicationPreference"; key: ApplicationPreferenceKey }
+  | { kind: "setApplicationPreference"; key: ApplicationPreferenceKey; valueJson: string; updatedAt: number }
   | { kind: "upsertCatalogIdentity"; input: CatalogIdentityInput }
   | { kind: "upsertMediaItem"; input: MediaItemRecordInput }
   | { kind: "getMediaItem"; serverId: string; userId: string; itemId: string }

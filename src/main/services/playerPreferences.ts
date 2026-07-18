@@ -23,6 +23,11 @@ export interface PlayerPreferencesStore {
   setAdapterMode?(adapterMode: PlayerAdapterMode): Promise<void>;
 }
 
+export interface AdapterPreferencePersistence {
+  getAdapterMode(): Promise<PlayerAdapterMode | null>;
+  setAdapterMode(mode: PlayerAdapterMode): Promise<void>;
+}
+
 const DEFAULTS: PlayerPreferences = { windowMaximized: true, adapterMode: "legacy" };
 
 export class PlayerPreferencesService implements PlayerPreferencesStore {
@@ -31,7 +36,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
   private initialization: Promise<PlayerPreferences> | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
-  constructor(userDataPath: string) {
+  constructor(userDataPath: string, private readonly durablePreferences?: AdapterPreferencePersistence) {
     this.preferencesPath = join(userDataPath, "player-preferences.json");
   }
 
@@ -60,6 +65,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
       const current = await this.get();
       if (current.adapterMode === adapterMode) return;
       const next = { ...current, adapterMode };
+      await this.durablePreferences?.setAdapterMode(adapterMode);
       await this.persist(next);
       this.cached = next;
     });
@@ -78,6 +84,13 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
     } catch {
       this.cached = { ...DEFAULTS };
       await this.persist(this.cached);
+    }
+    const durableMode = await this.durablePreferences?.getAdapterMode().catch(() => null) ?? null;
+    if (durableMode) {
+      this.cached = { ...this.cached, adapterMode: durableMode };
+      await this.persist(this.cached);
+    } else if (this.durablePreferences && this.cached.adapterMode) {
+      await this.durablePreferences.setAdapterMode(this.cached.adapterMode).catch(() => undefined);
     }
     return this.cached;
   }

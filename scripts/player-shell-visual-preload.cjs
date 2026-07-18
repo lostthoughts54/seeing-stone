@@ -35,14 +35,24 @@ const safeSession = Object.freeze({
   server: { address: "https://visual.invalid", id: "visual-server", name: "Isolated visual harness", version: "test-fixture" },
   user: { id: "visual-user", name: "Visual QA" },
 });
-const watchPartyState = Object.freeze({
+let watchPartyState = {
   availability: "available",
   connection: "connected",
   groups: [],
   joinedGroup: null,
   sharedControls: true,
+  sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
+  telemetry: {
+    protocolVersion: 1,
+    availability: "disabled",
+    transport: "none",
+    reason: "Enhanced participant status is unavailable in this isolated visual fixture. Standard Jellyfin SyncPlay remains active.",
+    participants: [],
+    incident: null,
+    policy: { mode: "wait-for-all", gracePeriodMs: 1500 },
+  },
   error: null,
-});
+};
 const audioTracks = Object.freeze([
   Object.freeze({ id: 1, streamIndex: 0, type: "audio", title: "Fixture stereo", language: "eng", selected: true, codec: "aac", channels: 2, isDefault: true, isForced: false, external: false }),
   Object.freeze({ id: 2, streamIndex: 1, type: "audio", title: "Fixture commentary", language: "eng", selected: false, codec: "aac", channels: 2, isDefault: false, isForced: false, external: false }),
@@ -82,6 +92,7 @@ let playback = {
   error: null,
 };
 const playbackListeners = new Set();
+const watchPartyListeners = new Set();
 
 function copy(value) { return structuredClone(value); }
 function emitPlayback() { for (const listener of playbackListeners) listener(copy(playback)); }
@@ -89,6 +100,13 @@ function updatePlayback(changes) {
   playback = { ...playback, ...changes };
   emitPlayback();
   return copy(playback);
+}
+
+function emitWatchParty() { for (const listener of watchPartyListeners) listener(copy(watchPartyState)); }
+function updateWatchParty(changes) {
+  watchPartyState = { ...watchPartyState, ...changes };
+  emitWatchParty();
+  return copy(watchPartyState);
 }
 
 function selectedTracks(tracks, selectedId) {
@@ -192,10 +210,25 @@ const bridge = Object.freeze({
     list: async () => copy(watchPartyState),
     create: async () => copy(watchPartyState),
     join: async () => copy(watchPartyState),
-    leave: async () => copy(watchPartyState),
-    resync: async () => copy(playback),
+    leave: async () => updateWatchParty({ joinedGroup: null }),
+    wait: async () => updateWatchParty({
+      joinedGroup: watchPartyState.joinedGroup ? { ...watchPartyState.joinedGroup, playbackState: "Paused" } : null,
+    }),
+    continue: async () => updateWatchParty({
+      joinedGroup: watchPartyState.joinedGroup ? { ...watchPartyState.joinedGroup, playbackState: "Playing" } : null,
+    }),
+    resync: async () => copy(watchPartyState),
+    setBufferingPolicy: async (input) => {
+      return updateWatchParty({
+        telemetry: { ...watchPartyState.telemetry, policy: { mode: input.mode, gracePeriodMs: 1500 } },
+      });
+    },
     setVisible: async () => copy(watchPartyState),
-    subscribe(listener) { queueMicrotask(() => listener(copy(watchPartyState))); return () => undefined; },
+    subscribe(listener) {
+      watchPartyListeners.add(listener);
+      queueMicrotask(() => listener(copy(watchPartyState)));
+      return () => watchPartyListeners.delete(listener);
+    },
   }),
 });
 
@@ -204,6 +237,26 @@ contextBridge.exposeInMainWorld("seeingStoneVisualAcceptance", Object.freeze({
   getPlayback: () => copy(playback),
   getViewportInputs: () => copy(viewportInputs),
   clearViewportInputs: () => { viewportInputs.length = 0; },
+  joinWatchPartyFixture: () => updateWatchParty({
+    groups: [{
+      groupId: "11111111111141118111111111111111",
+      name: "Isolated fixture party",
+      playbackState: "Playing",
+      participants: ["Fixture Host", "Fixture Guest"],
+      participantCount: 2,
+      lastUpdatedAt: "2026-07-17T00:00:00.000Z",
+    }],
+    joinedGroup: {
+      groupId: "11111111111141118111111111111111",
+      name: "Isolated fixture party",
+      playbackState: "Playing",
+      participants: ["Fixture Host", "Fixture Guest"],
+      participantCount: 2,
+      lastUpdatedAt: "2026-07-17T00:00:00.000Z",
+      currentItemId: item.id,
+      playlistItemId: "22222222222242228222222222222222",
+    },
+  }),
   transitionToNext: () => updatePlayback({
     playbackId: "visual-transition",
     itemId: nextItem.id,

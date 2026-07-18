@@ -242,14 +242,19 @@ export async function loadLegalComponents(manifestPath = componentsManifest, roo
     const identity = `${category}:${name}@${version}`;
     if (identities.has(identity)) throw new LicenseAuditError(`Duplicate legal component: ${identity}.`);
     identities.add(identity);
+    const isBundledTelemetrySource = category === "plugin"
+      && name === "Seeing Stone Participant Telemetry"
+      && version === "protocol-v1-disabled"
+      && license === "GPL-2.0-or-later"
+      && raw.redistributionStatus === "source-only";
     const projectUrl = raw.projectUrl === null ? null : publicHttpsUrl(raw.projectUrl, `Legal component ${name} project URL`);
-    if (!projectUrl && category !== "application") throw new LicenseAuditError(`Legal component ${name} must record a public project URL.`);
+    if (!projectUrl && category !== "application" && !isBundledTelemetrySource) throw new LicenseAuditError(`Legal component ${name} must record a public project URL.`);
     const sourceRevision = raw.sourceRevision === null ? null : requiredText(raw.sourceRevision, `Legal component ${name} source revision`);
     const redistributionStatus = requiredText(raw.redistributionStatus, `Legal component ${name} redistribution status`);
     if (!REDISTRIBUTION_STATUSES.has(redistributionStatus)) {
       throw new LicenseAuditError(`Legal component ${name} has an unknown redistribution status: ${redistributionStatus}.`);
     }
-    if (!sourceRevision && category !== "application" && redistributionStatus !== "internal-only-unverified-provenance") {
+    if (!sourceRevision && category !== "application" && !isBundledTelemetrySource && redistributionStatus !== "internal-only-unverified-provenance") {
       throw new LicenseAuditError(`Legal component ${name} must record an immutable source revision.`);
     }
 
@@ -265,6 +270,15 @@ export async function loadLegalComponents(manifestPath = componentsManifest, roo
       artifacts.push({ path: checked.path, sha256 });
     }
     if (category === "font" && artifacts.length === 0) throw new LicenseAuditError(`Font component ${name} must include at least one verified artifact.`);
+    if (isBundledTelemetrySource) {
+      const expectedArtifacts = new Set([
+        "plugins/SeeingStone.ParticipantTelemetry/README.md",
+        "plugins/SeeingStone.ParticipantTelemetry/protocol-v1.schema.json",
+      ]);
+      if (artifacts.length !== expectedArtifacts.size || artifacts.some((artifact) => !expectedArtifacts.has(artifact.path))) {
+        throw new LicenseAuditError("The bundled telemetry source exception must contain only its reviewed README and protocol schema.");
+      }
+    }
 
     if (!raw.licenseFile || typeof raw.licenseFile !== "object" || Array.isArray(raw.licenseFile)) {
       throw new LicenseAuditError(`Legal component ${name} must include a verified license file.`);
@@ -375,7 +389,7 @@ function renderArtifacts(packages, components) {
     "| --- | --- | --- | --- | --- |",
     ...components.map((entry) => `| ${entry.category} | ${entry.name.replaceAll("|", "\\|")} | ${entry.version.replaceAll("|", "\\|")} | ${entry.license.replaceAll("|", "\\|")} | ${entry.redistributionStatus} |`),
     "",
-    "Each component's immutable source revision, artifact hashes, and license-file hash are recorded in `dependency-licenses.json`.",
+    "Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.",
     "The current native runtime remains internal-only because upstream did not record a complete linked-dependency source bill of materials.",
     "",
     "## JavaScript dependencies",

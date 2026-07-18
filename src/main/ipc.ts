@@ -26,6 +26,7 @@ import {
   playbackViewportSchema,
   playbackVolumeSchema,
   playbackAdapterPreferenceSchema,
+  bufferingPolicyPreferenceSchema,
   searchSchema,
   serverUrlSchema,
   watchedStateSchema,
@@ -279,11 +280,34 @@ export function registerIpcHandlers(
     if (!syncPlay) throw new AppError("SYNCPLAY_UNAVAILABLE", "Watch parties are unavailable in this build.", 503);
     return syncPlay;
   };
-  register(IPC.watchPartiesGetState, () => requireSyncPlay().getState());
-  register(IPC.watchPartiesList, () => requireSyncPlay().list());
+  register(IPC.watchPartiesGetState, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().getState();
+  });
+  register(IPC.watchPartiesList, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().list();
+  });
   register(IPC.watchPartiesCreate, (input) => requireSyncPlay().create(watchPartyCreateSchema.strict().parse(input).name));
   register(IPC.watchPartiesJoin, (input) => requireSyncPlay().join(watchPartyGroupSchema.strict().parse(input).groupId));
-  register(IPC.watchPartiesLeave, () => requireSyncPlay().leave());
-  register(IPC.watchPartiesResync, () => requireSyncPlay().resyncLocal());
+  register(IPC.watchPartiesLeave, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().leave();
+  });
+  register(IPC.watchPartiesWait, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().waitForAll();
+  });
+  register(IPC.watchPartiesContinue, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().continueAfterBuffering();
+  });
+  register(IPC.watchPartiesResync, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().resyncGroup();
+  });
+  register(IPC.watchPartiesSetBufferingPolicy, (input) => requireSyncPlay().setBufferingPolicy(
+    bufferingPolicyPreferenceSchema.strict().parse(input).mode,
+  ));
   register(IPC.watchPartiesSetVisible, (input) => requireSyncPlay().setViewVisible(watchPartyVisibilitySchema.strict().parse(input).visible));
 }

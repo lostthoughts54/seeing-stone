@@ -40,6 +40,7 @@ import { EmbeddedVideoHost } from "./services/embeddedVideoHost";
 import type { PlayerController } from "./services/playerController";
 import { SoloSessionDiagnosticsService } from "./services/soloSessionDiagnostics";
 import { OpenSourceLicensesService } from "./services/openSourceLicenses";
+import { ApplicationPreferencesService } from "./services/applicationPreferences";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -96,6 +97,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     : undefined;
   persistence = new SqlitePersistenceService(app.getPath("userData"), persistenceWorkerPath);
   await persistence.open();
+  const applicationPreferences = new ApplicationPreferencesService(persistence);
   const rendererSession = hardenSession();
   const identity = await new DeviceIdentityService(
     app.getPath("userData"),
@@ -106,7 +108,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
-  const playerPreferences = new PlayerPreferencesService(app.getPath("userData"));
+  const playerPreferences = new PlayerPreferencesService(app.getPath("userData"), applicationPreferences);
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
   await rendererSession.protocol.handle("jellyfin-artwork", async (request) => {
@@ -155,7 +157,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
-  activeSyncPlay = new SyncPlayService(api, playback, logger);
+  activeSyncPlay = new SyncPlayService(api, playback, logger, 5000, applicationPreferences);
   activeSyncPlay.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
   });

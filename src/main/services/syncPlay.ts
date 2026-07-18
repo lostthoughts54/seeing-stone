@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+  BufferingPolicyMode,
   JoinedWatchParty,
   PlaybackStartResult,
   PlaybackState,
@@ -11,6 +12,13 @@ import { AppError } from "./errors";
 import type { JellyfinApi } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { PlayerController, PlayerControllerEvent } from "./playerController";
+import type { ApplicationPreferences } from "./applicationPreferences";
+import {
+  DisabledParticipantTelemetryTransport,
+  ENHANCED_TELEMETRY_DISABLED_REASON,
+  ParticipantTelemetryCoordinator,
+  type ParticipantTelemetryTransport,
+} from "./participantTelemetry";
 
 // `ws` intentionally stays main-only. Its API is typed locally so no browser
 // WebSocket or renderer networking can accidentally enter this service.
@@ -96,6 +104,7 @@ interface SyncAnchor {
 interface TimeMeasurement { offsetMs: number; delayMs: number }
 
 const TICKS_PER_SECOND = 10_000_000;
+const MAX_PLAYBACK_TICKS = 864_000_000_000;
 const DRIFT_TOLERANCE_TICKS = 1_000_000;
 const DRIFT_RATE_RESET_TICKS = 500_000;
 const DRIFT_MEDIUM_RATE_TICKS = 4_000_000;
@@ -108,6 +117,21 @@ const emptyState = (): WatchPartyViewState => ({
   groups: [],
   joinedGroup: null,
   sharedControls: true,
+  sync: {
+    serverLatencyMs: null,
+    localDriftTicks: null,
+    authoritativeTimelineReady: false,
+    measuredAtUnixMs: null,
+  },
+  telemetry: {
+    protocolVersion: 1,
+    availability: "disabled",
+    transport: "none",
+    reason: ENHANCED_TELEMETRY_DISABLED_REASON,
+    participants: [],
+    incident: null,
+    policy: { mode: "wait-for-all", gracePeriodMs: 1500 },
+  },
   error: null,
 });
 
@@ -157,13 +181,37 @@ export class SyncPlayService {
   private lastPublishedTransitionItemId: string | null = null;
   private viewVisible = false;
   private localResyncInFlight: Promise<PlaybackState> | null = null;
+  private lastDriftTicks: number | null = null;
+  private driftMeasuredAtUnixMs: number | null = null;
+  private readonly telemetry: ParticipantTelemetryCoordinator;
 
   constructor(
     private readonly api: JellyfinApi,
     private readonly player: PlayerController,
     private readonly logger: AppLogger,
     private readonly refreshIntervalMs = 5000,
-  ) {}
+    private readonly preferences?: Pick<ApplicationPreferences, "getBufferingPolicy" | "setBufferingPolicy">,
+    telemetryTransport: ParticipantTelemetryTransport = new DisabledParticipantTelemetryTransport(),
+  ) {
+    this.telemetry = new ParticipantTelemetryCoordinator(
+      telemetryTransport,
+      () => this.localTelemetrySnapshot(),
+      {
+        pauseGroup: async () => {
+          this.requireJoined();
+          await this.api.syncPlayRequest("/SyncPlay/Pause", {}, "POST");
+        },
+        resumeGroup: async () => {
+          this.requireJoined();
+          await this.api.syncPlayRequest("/SyncPlay/Unpause", {}, "POST");
+        },
+      },
+    );
+    this.telemetry.onState(() => {
+      const snapshot = this.getState();
+      for (const listener of this.listeners) listener(snapshot);
+    });
+  }
 
   onState(listener: (state: WatchPartyViewState) => void): () => void {
     this.listeners.add(listener);
@@ -171,7 +219,17 @@ export class SyncPlayService {
   }
 
   getState(): WatchPartyViewState {
-    return structuredClone(this.state);
+    const authoritativeTimelineReady = this.hasAuthoritativeTimeline();
+    return structuredClone({
+      ...this.state,
+      sync: {
+        serverLatencyMs: this.timeSyncReady ? this.latencyMs : null,
+        localDriftTicks: authoritativeTimelineReady ? this.lastDriftTicks : null,
+        authoritativeTimelineReady,
+        measuredAtUnixMs: authoritativeTimelineReady ? this.driftMeasuredAtUnixMs : null,
+      },
+      telemetry: this.telemetry.getState(),
+    });
   }
 
   isJoined(): boolean {
@@ -180,6 +238,8 @@ export class SyncPlayService {
 
   async activate(): Promise<WatchPartyViewState> {
     await this.deactivate(false);
+    const policy = await this.preferences?.getBufferingPolicy().catch(() => "wait-for-all" as const) ?? "wait-for-all";
+    this.telemetry.setPolicy(policy);
     const revision = ++this.activationRevision;
     let context;
     try { context = this.api.getAuthenticatedSocketContext(); }
@@ -239,6 +299,8 @@ export class SyncPlayService {
     this.lastPublishedTransitionItemId = null;
     this.viewVisible = false;
     this.syncAnchor = null;
+    this.lastDriftTicks = null;
+    this.driftMeasuredAtUnixMs = null;
     this.timeMeasurements = [];
     this.serverTimeOffsetMs = 0;
     this.latencyMs = 0;
@@ -246,6 +308,7 @@ export class SyncPlayService {
     this.membershipRevision += 1;
     this.messageHistory = [];
     this.appliedMessageIds.clear();
+    await this.telemetry.stop();
     await this.restoreNormalRate().catch(() => undefined);
     this.player.setAutomaticTransitionsEnabled(true);
     this.setState(emptyState());
@@ -340,6 +403,36 @@ export class SyncPlayService {
     this.requireJoined();
     await this.api.syncPlayRequest("/SyncPlay/Stop", {}, "POST");
     return this.player.getState();
+  }
+
+  async waitForAll(): Promise<WatchPartyViewState> {
+    this.requireJoined();
+    await this.telemetry.wait();
+    return this.getState();
+  }
+
+  async continueAfterBuffering(): Promise<WatchPartyViewState> {
+    this.requireJoined();
+    await this.telemetry.continue();
+    return this.getState();
+  }
+
+  async setBufferingPolicy(mode: BufferingPolicyMode): Promise<WatchPartyViewState> {
+    await this.preferences?.setBufferingPolicy(mode);
+    this.telemetry.setPolicy(mode);
+    return this.getState();
+  }
+
+  async resyncGroup(): Promise<WatchPartyViewState> {
+    const joined = this.requireJoined();
+    const anchor = this.syncAnchor;
+    if (!anchor || !this.hasAuthoritativeTimeline() || !joined.playlistItemId || anchor.playlistItemId !== joined.playlistItemId) {
+      throw new AppError("SYNCPLAY_RESYNC_NOT_READY", "Choose and start a shared item before resyncing the watch party.", 409);
+    }
+    const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
+    const targetTicks = Math.min(MAX_PLAYBACK_TICKS, Math.max(0, Math.round(anchor.positionTicks + elapsedTicks)));
+    await this.api.syncPlayRequest("/SyncPlay/Seek", { PositionTicks: targetTicks }, "POST");
+    return this.getState();
   }
 
   async resyncLocal(): Promise<PlaybackState> {
@@ -505,6 +598,8 @@ export class SyncPlayService {
     const joined = this.state.joinedGroup;
     if (!joined || membershipRevision !== this.membershipRevision) return;
     const selected = queue.Playlist[queue.PlayingItemIndex];
+    this.lastDriftTicks = null;
+    this.driftMeasuredAtUnixMs = null;
     this.currentPlaylistItemId = selected.PlaylistItemId;
     if (this.lastPublishedTransitionItemId !== selected.ItemId) this.lastPublishedTransitionItemId = null;
     this.setJoined({ ...joined, currentItemId: selected.ItemId, playlistItemId: selected.PlaylistItemId });
@@ -587,11 +682,15 @@ export class SyncPlayService {
       await this.sendReady(!settled.paused);
     } else if (command.Command === "Stop") {
       this.syncAnchor = null;
+      this.lastDriftTicks = null;
+      this.driftMeasuredAtUnixMs = null;
       await this.player.stop(state.playbackId, "stopped", context);
     }
   }
 
   private async handlePlayerEvent(event: PlayerControllerEvent): Promise<void> {
+    // Optional status publishing must never delay authoritative Jellyfin SyncPlay commands.
+    void this.telemetry.notifyLocalStateTransition().catch(() => undefined);
     if (event.action === "resync-request" && event.origin === "local-user") {
       try {
         const state = await this.resyncLocal();
@@ -701,6 +800,7 @@ export class SyncPlayService {
     this.lastPublishedTransitionItemId = null;
     this.syncAnchor = null;
     this.setJoined({ ...group, currentItemId: null, playlistItemId: null });
+    void this.telemetry.start(group.groupId).catch(() => undefined);
     void this.reportPing().catch(() => undefined);
   }
 
@@ -714,7 +814,10 @@ export class SyncPlayService {
     this.currentPlaylistItemId = null;
     this.rememberedGroupId = null;
     this.syncAnchor = null;
+    this.lastDriftTicks = null;
+    this.driftMeasuredAtUnixMs = null;
     this.setState({ ...this.state, joinedGroup: null });
+    void this.telemetry.stop();
     this.player.setAutomaticTransitionsEnabled(true);
     void this.restoreNormalRate().catch(() => undefined);
   }
@@ -747,6 +850,8 @@ export class SyncPlayService {
     const elapsedTicks = Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000);
     const expectedTicks = Math.min(state.durationTicks || Number.MAX_SAFE_INTEGER, anchor.positionTicks + elapsedTicks);
     const driftTicks = expectedTicks - state.positionTicks;
+    this.lastDriftTicks = Math.round(driftTicks);
+    this.driftMeasuredAtUnixMs = Date.now();
     this.driftCorrectionInFlight = true;
     try {
       const context = { origin: "remote-sync" as const, commandRevision: ++this.commandRevision, commandId: `drift:${anchor.playlistItemId}` };
@@ -772,6 +877,39 @@ export class SyncPlayService {
     this.state = structuredClone(state);
     const snapshot = this.getState();
     for (const listener of this.listeners) listener(snapshot);
+  }
+
+  private localTelemetrySnapshot() {
+    const state = this.player.getState();
+    const telemetryState = state.phase === "buffering"
+      ? "buffering" as const
+      : state.phase === "stalled" ? "stalled" as const
+        : state.phase === "paused" ? "paused" as const
+          : state.phase === "playing" ? "playing" as const
+            : state.phase === "loading" || state.phase === "resolving" ? "recovering" as const
+              : state.phase === "disconnected" || state.phase === "error" || state.phase === "stopped" || state.phase === "ended"
+                ? "disconnected" as const
+                : "ready" as const;
+    return {
+      state: telemetryState,
+      positionTicks: state.positionTicks,
+      driftTicks: this.hasAuthoritativeTimeline() ? this.lastDriftTicks : null,
+      jellyfinLatencyMs: this.timeSyncReady ? this.latencyMs : null,
+      bufferAheadTicks: state.diagnostics?.bufferAheadTicks ?? null,
+      sourceKind: state.diagnostics?.sourceKind ?? null,
+    };
+  }
+
+  private hasAuthoritativeTimeline(): boolean {
+    return Boolean(
+      this.timeSyncReady
+      && this.state.connection === "connected"
+      && !this.reconciling
+      && this.syncAnchor
+      && this.state.joinedGroup
+      && this.syncAnchor.membershipRevision === this.membershipRevision
+      && this.syncAnchor.playlistItemId === this.currentPlaylistItemId
+    );
   }
 
   private closeTransport(): void {

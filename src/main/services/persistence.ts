@@ -5,6 +5,8 @@ import { Worker } from "node:worker_threads";
 import { AppError } from "./errors";
 import { redactText } from "./logger";
 import type {
+  ApplicationPreferenceKey,
+  ApplicationPreferenceRecord,
   CatalogIdentityInput,
   CreateDownloadInput,
   DownloadBundleRecord,
@@ -124,6 +126,23 @@ export class SqlitePersistenceService {
 
   async health(): Promise<PersistenceHealth> {
     return this.invoke({ kind: "health" }) as Promise<PersistenceHealth>;
+  }
+
+  async getApplicationPreference(key: ApplicationPreferenceKey): Promise<ApplicationPreferenceRecord | null> {
+    return this.invoke({ kind: "getApplicationPreference", key }) as Promise<ApplicationPreferenceRecord | null>;
+  }
+
+  async setApplicationPreference(key: ApplicationPreferenceKey, value: unknown): Promise<ApplicationPreferenceRecord> {
+    const valueJson = JSON.stringify(value);
+    if (!valueJson || valueJson.length > 16_384 || valueJson.includes("\0")) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Application preference data is invalid.", 400);
+    }
+    return this.invoke({
+      kind: "setApplicationPreference",
+      key,
+      valueJson,
+      updatedAt: Date.now(),
+    }) as Promise<ApplicationPreferenceRecord>;
   }
 
   async upsertCatalogIdentity(input: CatalogIdentityInput): Promise<void> {

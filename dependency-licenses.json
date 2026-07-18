@@ -117,6 +117,29 @@
         "path": "assets/mpv/licenses/AMD-AMF-LICENSE.txt",
         "sha256": "eb297397aaa455b5668ab67d216b83828466152dab123fa92384c6ec16b74170"
       }
+    },
+    {
+      "category": "plugin",
+      "name": "Seeing Stone Participant Telemetry",
+      "version": "protocol-v1-disabled",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": null,
+      "sourceRevision": null,
+      "redistributionStatus": "source-only",
+      "artifacts": [
+        {
+          "path": "plugins/SeeingStone.ParticipantTelemetry/README.md",
+          "sha256": "97cfa3211792946789489824c6195cde2aefd202ae81d460235e236668e60b0b"
+        },
+        {
+          "path": "plugins/SeeingStone.ParticipantTelemetry/protocol-v1.schema.json",
+          "sha256": "f423e9696a66be0272d340930bad578d9327b3ed660b2f93755faca032a68508"
+        }
+      ],
+      "licenseFile": {
+        "path": "LICENSE",
+        "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
+      }
     }
   ],
   "packages": [

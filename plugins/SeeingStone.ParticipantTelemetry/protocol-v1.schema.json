@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seeingstone.invalid/protocol/participant-telemetry-v1.schema.json",
+  "title": "Seeing Stone participant telemetry v1",
+  "oneOf": [
+    { "$ref": "#/$defs/clientEnvelope" },
+    { "$ref": "#/$defs/serverEnvelope" }
+  ],
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "groupId",
+        "sequence",
+        "sentAtUnixMs",
+        "state",
+        "positionTicks",
+        "driftTicks",
+        "jellyfinLatencyMs",
+        "bufferAheadTicks",
+        "sourceKind"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "groupId": { "type": "string", "pattern": "^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "sentAtUnixMs": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "state": { "enum": ["playing", "paused", "buffering", "recovering", "ready", "stalled", "disconnected"] },
+        "positionTicks": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "driftTicks": { "type": ["integer", "null"], "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "jellyfinLatencyMs": { "type": ["number", "null"], "minimum": 0, "maximum": 60000 },
+        "bufferAheadTicks": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "sourceKind": { "enum": ["matched-local", "downloaded", "direct-play", "direct-stream", "transcode", "offline-local", null] }
+      }
+    },
+    "clientEnvelope": {
+      "title": "Client-to-plugin status without client-asserted identity",
+      "allOf": [{ "$ref": "#/$defs/payload" }],
+      "unevaluatedProperties": false
+    },
+    "serverEnvelope": {
+      "title": "Plugin-to-client status with server-derived identity",
+      "allOf": [
+        { "$ref": "#/$defs/payload" },
+        {
+          "type": "object",
+          "required": ["sessionId", "participantId", "displayName"],
+          "properties": {
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9._:-]+$" },
+            "participantId": { "type": "string", "pattern": "^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" },
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "allOf": [
+                { "not": { "pattern": "[Hh][Tt][Tt][Pp][Ss]?://|[Ff][Ii][Ll][Ee]://" } },
+                { "not": { "pattern": "[Bb][Ee][Aa][Rr][Ee][Rr]\\s+|([Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][ _-]?[Kk][Ee][Yy]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\\s*[:=]" } }
+              ]
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

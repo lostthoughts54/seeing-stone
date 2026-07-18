@@ -34,7 +34,7 @@ async function runChild() {
   const service = new SqlitePersistenceService(directory);
   try {
     const health = await service.open();
-    assert.equal(health.schemaVersion, 3);
+    assert.equal(health.schemaVersion, 4);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");

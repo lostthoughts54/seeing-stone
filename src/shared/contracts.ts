@@ -278,12 +278,74 @@ export interface JoinedWatchParty extends WatchPartySummary {
   playlistItemId: string | null;
 }
 
+export type ParticipantTelemetryTransportAvailability =
+  | "disabled"
+  | "absent"
+  | "incompatible"
+  | "connecting"
+  | "available"
+  | "offline";
+
+export type BufferingPolicyMode = "wait-for-all" | "continue";
+
+export interface BufferingPolicyPreference {
+  mode: BufferingPolicyMode;
+  gracePeriodMs: 1500;
+}
+
+export interface BufferingPolicyPreferenceInput {
+  mode: BufferingPolicyMode;
+}
+
+export type BufferingIncidentStatus = "grace" | "waiting" | "suppressed";
+
+export interface BufferingIncident {
+  incidentId: string;
+  participantId: string;
+  participantName: string;
+  state: "buffering" | "stalled";
+  startedAtUnixMs: number;
+  status: BufferingIncidentStatus;
+  automaticallyPaused: boolean;
+}
+
+export interface ParticipantTelemetryView {
+  participantId: string;
+  displayName: string;
+  state: "playing" | "paused" | "buffering" | "recovering" | "ready" | "stalled" | "disconnected";
+  freshness: "current" | "stale" | "disconnected";
+  positionTicks: number;
+  driftTicks: number | null;
+  jellyfinLatencyMs: number | null;
+  bufferAheadTicks: number | null;
+  sourceKind: PlaybackSourceKind | null;
+}
+
+export interface ParticipantTelemetryViewState {
+  protocolVersion: 1;
+  availability: ParticipantTelemetryTransportAvailability;
+  transport: "none" | "websocket" | "http-polling";
+  reason: string | null;
+  participants: ParticipantTelemetryView[];
+  incident: BufferingIncident | null;
+  policy: BufferingPolicyPreference;
+}
+
+export interface SyncPlayDiagnostics {
+  serverLatencyMs: number | null;
+  localDriftTicks: number | null;
+  authoritativeTimelineReady: boolean;
+  measuredAtUnixMs: number | null;
+}
+
 export interface WatchPartyViewState {
   availability: "signed-out" | "connecting" | "available" | "denied" | "unsupported" | "offline";
   connection: "disconnected" | "connecting" | "connected";
   groups: WatchPartySummary[];
   joinedGroup: JoinedWatchParty | null;
   sharedControls: boolean;
+  sync: SyncPlayDiagnostics;
+  telemetry: ParticipantTelemetryViewState;
   error: { code: string; message: string } | null;
 }
 
@@ -366,7 +428,10 @@ export interface JellyfinBridge {
     create(input: WatchPartyCreateInput): Promise<WatchPartyViewState>;
     join(input: WatchPartyGroupInput): Promise<WatchPartyViewState>;
     leave(): Promise<WatchPartyViewState>;
-    resync(): Promise<PlaybackState>;
+    wait(): Promise<WatchPartyViewState>;
+    continue(): Promise<WatchPartyViewState>;
+    resync(): Promise<WatchPartyViewState>;
+    setBufferingPolicy(input: BufferingPolicyPreferenceInput): Promise<WatchPartyViewState>;
     setVisible(input: WatchPartyVisibilityInput): Promise<WatchPartyViewState>;
     subscribe(listener: (state: WatchPartyViewState) => void): () => void;
   };
@@ -424,7 +489,10 @@ export const IPC = {
   watchPartiesCreate: "watch-parties:create",
   watchPartiesJoin: "watch-parties:join",
   watchPartiesLeave: "watch-parties:leave",
+  watchPartiesWait: "watch-parties:wait",
+  watchPartiesContinue: "watch-parties:continue",
   watchPartiesResync: "watch-parties:resync",
+  watchPartiesSetBufferingPolicy: "watch-parties:set-buffering-policy",
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",
 } as const;

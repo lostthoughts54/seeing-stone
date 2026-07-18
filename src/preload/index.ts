@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC,
   type ArtworkInput,
+  type BufferingPolicyPreferenceInput,
   type DiscoveredServer,
   type DownloadIdInput,
   type DownloadKeepInput,
@@ -141,7 +142,10 @@ const bridge: JellyfinBridge = {
     create: (input: WatchPartyCreateInput) => invoke<WatchPartyViewState>(IPC.watchPartiesCreate, input),
     join: (input: WatchPartyGroupInput) => invoke<WatchPartyViewState>(IPC.watchPartiesJoin, input),
     leave: () => invoke<WatchPartyViewState>(IPC.watchPartiesLeave),
-    resync: () => invoke<PlaybackState>(IPC.watchPartiesResync),
+    wait: () => invoke<WatchPartyViewState>(IPC.watchPartiesWait),
+    continue: () => invoke<WatchPartyViewState>(IPC.watchPartiesContinue),
+    resync: () => invoke<WatchPartyViewState>(IPC.watchPartiesResync),
+    setBufferingPolicy: (input: BufferingPolicyPreferenceInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetBufferingPolicy, input),
     setVisible: (input: WatchPartyVisibilityInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetVisible, input),
     subscribe: (listener: (state: WatchPartyViewState) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, state: WatchPartyViewState) => listener(state);

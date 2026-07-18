@@ -45,7 +45,7 @@ async function createSeededService(prefix = "lf-sqlite-") {
   return { directory, service };
 }
 
-test("schema v1 upgrades additively to v3 while preserving existing rows", async () => {
+test("schema v1 upgrades additively to v4 while preserving existing rows", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lf-sqlite-v1-upgrade-"));
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const v1Schema = await fs.readFile(path.join(__dirname, "fixtures", "persistence-schema-v1.sql"), "utf8");
@@ -92,7 +92,7 @@ test("schema v1 upgrades additively to v3 while preserving existing rows", async
 
   const service = new SqlitePersistenceService(directory);
   try {
-    assert.equal((await service.open()).schemaVersion, 3);
+    assert.equal((await service.open()).schemaVersion, 4);
     const bundle = await service.getDownloadBundle("download-v1");
     assert.equal(bundle.job.state, "paused");
     assert.equal(bundle.localVersion.localVersionId, "local-v1");
@@ -104,7 +104,7 @@ test("schema v1 upgrades additively to v3 while preserving existing rows", async
     const [legacyRevision] = await service.listPendingProgressForIdentity("server-v1", "user-v1", 10);
     assert.equal(legacyRevision.localRevision, 1);
     assert.equal(legacyRevision.report, null);
-    const v3Revision = await service.recordPlaybackRevision({
+    const v4Revision = await service.recordPlaybackRevision({
       serverId: "server-v1",
       userId: "user-v1",
       itemId: "episode-v1",
@@ -124,16 +124,18 @@ test("schema v1 upgrades additively to v3 while preserving existing rows", async
         conflictPolicy: "automatic",
       },
     });
-    assert.equal(v3Revision.localRevision, 2);
-    assert.equal(v3Revision.report.playSessionId, "session-v2");
-    assert.equal(v3Revision.report.conflictPolicy, "automatic");
+    assert.equal(v4Revision.localRevision, 2);
+    assert.equal(v4Revision.report.playSessionId, "session-v2");
+    assert.equal(v4Revision.report.conflictPolicy, "automatic");
+    await service.setApplicationPreference("player.adapter-mode", { mode: "embedded" });
+    assert.equal(JSON.parse((await service.getApplicationPreference("player.adapter-mode")).valueJson).mode, "embedded");
   } finally {
     await service.close();
   }
 
   const verify = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 4);
     const columns = verify.prepare("PRAGMA table_info(playback_revisions)").all().map((row) => row.name);
     for (const name of [
       "report_kind", "report_media_source_id", "report_play_method", "report_play_session_id",
@@ -152,7 +154,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 3);
+    assert.equal(health.schemaVersion, 4);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -176,11 +178,11 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 3);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 4);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
-      "playback_revisions", "profiles", "servers",
+      "playback_revisions", "profiles", "servers", "application_preferences",
     ]) assert.ok(tables.includes(expected), expected);
   } finally {
     database.close();

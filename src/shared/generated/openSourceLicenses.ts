@@ -2365,6 +2365,14 @@ export const OPEN_SOURCE_LICENSES = {
       "license": "Apache-2.0",
       "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
       "redistributionStatus": "internal-only-unverified-provenance"
+    },
+    {
+      "category": "plugin",
+      "name": "Seeing Stone Participant Telemetry",
+      "version": "protocol-v1-disabled",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": null,
+      "redistributionStatus": "source-only"
     }
   ]
 } satisfies OpenSourceLicenseInventory;

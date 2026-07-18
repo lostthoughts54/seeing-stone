@@ -2140,6 +2140,18 @@ select option {
 
 .session-party-actions { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; margin-top: 10px; }
 .session-party-actions button:last-child { grid-column: 1 / -1; }
+.session-buffering-incident {
+  background: linear-gradient(135deg, rgba(242, 174, 85, 0.13), rgba(126, 69, 169, 0.08));
+  border: 1px solid rgba(242, 174, 85, 0.28);
+  border-radius: 9px;
+  color: #e8c99d;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  margin-top: 8px;
+  padding: 9px 10px;
+}
+.session-details label { color: #91899b; display: grid; font-size: 0.7rem; gap: 6px; padding-top: 10px; }
+.session-details select { min-height: 32px; width: 100%; }
 .session-panel-scrim { display: none; }
 
 .player-view.is-panel-collapsed .player-workspace {

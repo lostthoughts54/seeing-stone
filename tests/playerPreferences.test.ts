@@ -48,4 +48,22 @@ describe("PlayerPreferencesService", () => {
     await service.setAdapterMode("embedded");
     expect(await new PlayerPreferencesService(directory).get()).toEqual({ windowMaximized: false, adapterMode: "embedded" });
   });
+
+  it("uses SQLite-backed adapter selection as the durable source of truth", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "lf-player-preferences-"));
+    await writeFile(join(directory, "player-preferences.json"), JSON.stringify({
+      schemaVersion: 2,
+      windowMaximized: false,
+      adapterMode: "legacy",
+    }));
+    let durable: "legacy" | "embedded" | null = "embedded";
+    const store = {
+      getAdapterMode: async () => durable,
+      setAdapterMode: async (mode: "legacy" | "embedded") => { durable = mode; },
+    };
+    const service = new PlayerPreferencesService(directory, store);
+    expect(await service.get()).toEqual({ windowMaximized: false, adapterMode: "embedded" });
+    await service.setAdapterMode("legacy");
+    expect(durable).toBe("legacy");
+  });
 });

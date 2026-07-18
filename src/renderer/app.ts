@@ -600,7 +600,8 @@ function renderWatchParties(): void {
     leave.dataset.watchPartyAction = "leave";
     leave.addEventListener("click", () => { void leaveWatchParty(leave); });
     resync.type = "button";
-    resync.textContent = "Resync This Computer";
+    resync.textContent = "Resync Party";
+    resync.title = "Move everyone to the current authoritative watchparty timeline";
     resync.dataset.watchPartyAction = "resync";
     resync.disabled = !available;
     resync.addEventListener("click", () => { void resyncWatchParty(resync); });
@@ -726,17 +727,50 @@ async function resyncWatchParty(button: HTMLButtonElement): Promise<void> {
   const label = button.textContent;
   button.textContent = "Resyncing...";
   try {
-    const playback = await window.jellyfin.watchParties.resync();
-    state.playbackState = playback;
-    state.playbackSource = playback.source;
-    state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
+    state.watchParties = await window.jellyfin.watchParties.resync();
     renderWatchParties();
     if (!playerView.classList.contains("is-hidden")) renderPlayerState();
-    showToast("This computer was resynced to the party.");
+    showToast("The watch party was corrected to the authoritative timeline.");
   } catch (error) {
     button.disabled = false;
     button.textContent = label;
-    showToast(errorMessage(error, "This computer could not be resynced."));
+    showToast(errorMessage(error, "The watch party could not be resynced."));
+  }
+}
+
+async function waitForWatchParty(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.wait();
+    renderSessionPanel();
+    showToast("Waiting for everyone. Jellyfin SyncPlay is pausing the party.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "The watch party could not be paused."));
+  }
+}
+
+async function continueWatchParty(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.continue();
+    renderSessionPanel();
+    showToast("Continuing through Jellyfin SyncPlay.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "The watch party could not continue."));
+  }
+}
+
+async function updateBufferingPolicy(mode: "wait-for-all" | "continue", select: HTMLSelectElement): Promise<void> {
+  select.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.setBufferingPolicy({ mode });
+    renderSessionPanel();
+    showToast(mode === "wait-for-all" ? "Buffering policy set to wait for everyone." : "Automatic waiting is off.");
+  } catch (error) {
+    select.disabled = false;
+    showToast(errorMessage(error, "The buffering policy could not be saved."));
   }
 }
 
@@ -2141,7 +2175,7 @@ function renderWatchpartySessionPanel(): void {
   sessionPanelContent.replaceChildren();
   const value = state.watchParties;
   const group = value?.joinedGroup || null;
-  if (!group) {
+  if (!value || !group) {
     const empty = document.createElement("p");
     const open = document.createElement("button");
     empty.className = "session-empty";
@@ -2161,26 +2195,89 @@ function renderWatchpartySessionPanel(): void {
     { label: "Group", value: group.name },
     { label: "State", value: watchPartyStateLabel(group.playbackState), tone: group.playbackState === "Playing" ? "green" : "blue" },
     { label: "Participants", value: String(group.participantCount) },
+    ...(value.sync.serverLatencyMs !== null ? [{ label: "Server latency", value: `${Math.round(value.sync.serverLatencyMs)} ms`, tone: "blue" as const }] : []),
+    ...(value.sync.localDriftTicks !== null ? [{ label: "Local drift", value: `${Math.round(value.sync.localDriftTicks / 10_000)} ms` }] : []),
   ]);
   appendSessionSection("Participants", group.participants.map((name) => ({ label: name, value: "Jellyfin member" })));
+  if (value.telemetry.availability === "available" && value.telemetry.participants.length > 0) {
+    // Keep server-verified sessions separate from Jellyfin's display-name-only
+    // group list; names are not stable identifiers and may be duplicated.
+    appendSessionSection("Verified participant status", value.telemetry.participants.map((participant) => {
+      const stateLabel = participant.freshness === "stale" ? `${participant.state} · stale` : participant.state;
+      return {
+        label: participant.displayName,
+        value: stateLabel.replace(/^./, (character) => character.toLocaleUpperCase()),
+        tone: participant.state === "buffering" || participant.state === "stalled" ? "amber" as const
+          : participant.state === "disconnected" ? "rose" as const : "green" as const,
+      };
+    }));
+  }
 
   const enhanced = document.createElement("p");
   enhanced.className = "session-empty";
-  enhanced.textContent = "Enhanced participant diagnostics are unavailable. Standard Jellyfin SyncPlay remains active.";
+  enhanced.textContent = value.telemetry.availability === "available"
+    ? "Enhanced participant status is authenticated and group-verified."
+    : value.telemetry.reason || "Enhanced participant diagnostics are unavailable. Standard Jellyfin SyncPlay remains active.";
+  if (value.telemetry.incident) {
+    const incident = document.createElement("div");
+    incident.className = "session-buffering-incident";
+    incident.setAttribute("role", "status");
+    incident.textContent = value.telemetry.incident.status === "grace"
+      ? `${value.telemetry.incident.participantName} is ${value.telemetry.incident.state}. Waiting briefly before pausing.`
+      : value.telemetry.incident.status === "suppressed"
+        ? `${value.telemetry.incident.participantName} is still ${value.telemetry.incident.state}. Automatic waiting is suppressed for this incident.`
+        : `${value.telemetry.incident.participantName} is ${value.telemetry.incident.state}. The party is waiting.`;
+    sessionPanelContent.append(incident);
+  }
   const actions = document.createElement("div");
+  const wait = document.createElement("button");
+  const continueButton = document.createElement("button");
   const resync = document.createElement("button");
   const leave = document.createElement("button");
   actions.className = "session-party-actions";
+  wait.type = "button";
+  wait.textContent = "Wait";
+  wait.title = "Pause the party through Jellyfin SyncPlay";
+  wait.dataset.sessionAction = "wait-party";
+  wait.addEventListener("click", () => { void waitForWatchParty(wait); });
+  continueButton.type = "button";
+  continueButton.textContent = "Continue";
+  continueButton.title = "Resume the party and suppress waiting for this buffering incident";
+  continueButton.dataset.sessionAction = "continue-party";
+  continueButton.addEventListener("click", () => { void continueWatchParty(continueButton); });
   resync.type = "button";
   resync.textContent = "Resync";
+  resync.title = "Correct the group to the authoritative Jellyfin timeline";
   resync.dataset.sessionAction = "resync";
   resync.addEventListener("click", () => { void resyncWatchParty(resync); });
   leave.type = "button";
   leave.textContent = "Leave Party";
   leave.dataset.sessionAction = "leave-party";
   leave.addEventListener("click", () => { void leaveWatchParty(leave); });
-  actions.append(resync, leave);
+  actions.append(wait, continueButton, resync, leave);
   sessionPanelContent.append(enhanced, actions);
+
+  const details = document.createElement("details");
+  const summary = document.createElement("summary");
+  const policyLabel = document.createElement("label");
+  const policySelect = document.createElement("select");
+  details.className = "session-details";
+  summary.textContent = "Session details";
+  summary.dataset.sessionAction = "advanced-diagnostics";
+  policyLabel.textContent = "When someone buffers";
+  policySelect.setAttribute("aria-label", "When someone buffers");
+  policySelect.dataset.sessionAction = "buffering-policy";
+  for (const [mode, label] of [["wait-for-all", "Wait for everyone"], ["continue", "Keep playing"]] as const) {
+    const option = document.createElement("option");
+    option.value = mode;
+    option.textContent = label;
+    option.selected = value.telemetry.policy.mode === mode;
+    policySelect.append(option);
+  }
+  policySelect.addEventListener("change", () => { void updateBufferingPolicy(policySelect.value as "wait-for-all" | "continue", policySelect); });
+  policyLabel.append(policySelect);
+  details.append(summary, policyLabel);
+  sessionPanelContent.append(details);
 }
 
 function renderSessionPanel(): void {

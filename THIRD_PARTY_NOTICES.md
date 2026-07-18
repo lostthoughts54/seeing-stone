@@ -14,8 +14,9 @@ These tables are generated from pinned component provenance and the frozen insta
 | native | FFmpeg | ff59522 | GPL-2.0-or-later | internal-only-unverified-provenance |
 | native | Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | internal-only-unverified-provenance |
 | native | AMD Advanced Media Framework headers | runtime-associated; exact revision not recorded upstream | MIT | internal-only-unverified-provenance |
+| plugin | Seeing Stone Participant Telemetry | protocol-v1-disabled | GPL-2.0-or-later | source-only |
 
-Each component's immutable source revision, artifact hashes, and license-file hash are recorded in `dependency-licenses.json`.
+Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.
 The current native runtime remains internal-only because upstream did not record a complete linked-dependency source bill of materials.
 
 ## JavaScript dependencies

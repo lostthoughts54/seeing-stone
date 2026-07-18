@@ -56,6 +56,37 @@ function createHarness() {
     useDefault: vi.fn(async () => ({ mode: "default" as const, label: "Windows Videos folder" })),
     open: vi.fn(async () => ({ opened: true })),
   };
+  const watchPartyState = {
+    availability: "available" as const,
+    connection: "connected" as const,
+    groups: [],
+    joinedGroup: null,
+    sharedControls: true,
+    sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
+    telemetry: {
+      protocolVersion: 1 as const,
+      availability: "disabled" as const,
+      transport: "none" as const,
+      reason: "Enhanced status unavailable.",
+      participants: [],
+      incident: null,
+      policy: { mode: "wait-for-all" as const, gracePeriodMs: 1500 as const },
+    },
+    error: null,
+  };
+  const syncPlay = {
+    getState: vi.fn(() => structuredClone(watchPartyState)),
+    list: vi.fn(async () => structuredClone(watchPartyState)),
+    create: vi.fn(async () => structuredClone(watchPartyState)),
+    join: vi.fn(async () => structuredClone(watchPartyState)),
+    leave: vi.fn(async () => structuredClone(watchPartyState)),
+    waitForAll: vi.fn(async () => structuredClone(watchPartyState)),
+    continueAfterBuffering: vi.fn(async () => structuredClone(watchPartyState)),
+    resyncGroup: vi.fn(async () => structuredClone(watchPartyState)),
+    setBufferingPolicy: vi.fn(async () => structuredClone(watchPartyState)),
+    setViewVisible: vi.fn(async () => structuredClone(watchPartyState)),
+    isJoined: vi.fn(() => false),
+  };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -64,11 +95,11 @@ function createHarness() {
     playback as never,
     downloads as never,
     synchronization as never,
-    undefined,
+    syncPlay as never,
     downloadLocation,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
@@ -195,5 +226,30 @@ describe("IPC authorization and allowlist", () => {
     await expect(handlers.get(IPC.playbackSetVolume)?.(validEvent, { playbackId, volume: 101 })).resolves.toMatchObject({ ok: false });
     expect(playback.setRate).toHaveBeenCalledTimes(1);
     expect(playback.setVolume).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes only narrow Watchparty intents and rejects renderer-authored telemetry", async () => {
+    const { handlers, validEvent, syncPlay } = createHarness();
+    await expect(handlers.get(IPC.watchPartiesWait)?.(validEvent)).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesContinue)?.(validEvent)).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesResync)?.(validEvent)).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesSetBufferingPolicy)?.(validEvent, { mode: "continue" })).resolves.toMatchObject({ ok: true });
+    expect(syncPlay.waitForAll).toHaveBeenCalledOnce();
+    expect(syncPlay.continueAfterBuffering).toHaveBeenCalledOnce();
+    expect(syncPlay.resyncGroup).toHaveBeenCalledOnce();
+    expect(syncPlay.setBufferingPolicy).toHaveBeenCalledWith("continue");
+
+    const rejected = await handlers.get(IPC.watchPartiesWait)?.(validEvent, {
+      participantId: "33333333333343338333333333333333",
+      state: "buffering",
+      mediaUrl: "https://invalid.example/media",
+      token: "secret",
+    }) as { ok: boolean };
+    expect(rejected.ok).toBe(false);
+    expect(syncPlay.waitForAll).toHaveBeenCalledTimes(1);
+    await expect(handlers.get(IPC.watchPartiesSetBufferingPolicy)?.(validEvent, {
+      mode: "wait-for-all",
+      gracePeriodMs: 0,
+    })).resolves.toMatchObject({ ok: false });
   });
 });

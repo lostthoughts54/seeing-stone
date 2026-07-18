@@ -276,6 +276,106 @@ describe("SyncPlayService", () => {
     expect(h.requests).toEqual([{ path: "/SyncPlay/Pause", body: {}, method: "POST" }]);
   });
 
+  it("keeps enhanced telemetry hard-disabled while standard Jellyfin SyncPlay remains available", () => {
+    const h = harness();
+    expect(h.service.getState()).toMatchObject({
+      availability: "available",
+      connection: "connected",
+      telemetry: {
+        availability: "disabled",
+        transport: "none",
+        participants: [],
+        reason: expect.stringContaining("exact authenticated session's SyncPlay-group membership"),
+      },
+    });
+  });
+
+  it("routes explicit Wait and Continue through Jellyfin group commands", async () => {
+    const h = harness();
+
+    await h.service.waitForAll();
+    await h.service.continueAfterBuffering();
+
+    expect(h.requests).toEqual([
+      { path: "/SyncPlay/Pause", body: {}, method: "POST" },
+      { path: "/SyncPlay/Unpause", body: {}, method: "POST" },
+    ]);
+  });
+
+  it("issues group Resync at the current authoritative timeline while retaining local Resync separately", async () => {
+    const h = harness();
+    const performanceNow = vi.spyOn(performance, "now").mockReturnValue(25_000);
+    h.internals.syncAnchor = {
+      membershipRevision: h.internals.membershipRevision,
+      playlistItemId,
+      positionTicks: 70_000_000,
+      playing: true,
+      monotonicTimestampMs: 24_500,
+    };
+
+    try {
+      await h.service.resyncGroup();
+      expect(h.requests).toEqual([{
+        path: "/SyncPlay/Seek",
+        body: { PositionTicks: 75_000_000 },
+        method: "POST",
+      }]);
+      expect(h.player.seek).not.toHaveBeenCalled();
+    } finally {
+      performanceNow.mockRestore();
+    }
+  });
+
+  it("publishes only measured latency, drift, and anchor readiness", async () => {
+    const h = harness();
+    h.internals.timeSyncReady = false;
+    expect(h.service.getState().sync).toEqual({
+      serverLatencyMs: null,
+      localDriftTicks: null,
+      authoritativeTimelineReady: false,
+      measuredAtUnixMs: null,
+    });
+
+    const dateNow = vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_020).mockReturnValue(2_000);
+    h.api.getServerTime.mockResolvedValueOnce({
+      requestReceptionTime: new Date(1_105).toISOString(),
+      responseTransmissionTime: new Date(1_105).toISOString(),
+    });
+    await h.internals.synchronizeTime(1);
+    h.internals.syncAnchor = {
+      membershipRevision: h.internals.membershipRevision,
+      playlistItemId,
+      positionTicks: 12_000_000,
+      playing: true,
+      monotonicTimestampMs: performance.now(),
+    };
+    h.internals.lastDriftTicks = -250_000;
+    h.internals.driftMeasuredAtUnixMs = 2_000;
+
+    expect(h.service.getState().sync).toEqual({
+      serverLatencyMs: 10,
+      localDriftTicks: -250_000,
+      authoritativeTimelineReady: true,
+      measuredAtUnixMs: 2_000,
+    });
+    h.internals.reconciling = true;
+    expect(h.service.getState().sync).toEqual({
+      serverLatencyMs: 10,
+      localDriftTicks: null,
+      authoritativeTimelineReady: false,
+      measuredAtUnixMs: null,
+    });
+    h.internals.reconciling = false;
+    h.internals.syncAnchor = null;
+    expect(h.service.getState().sync).toEqual({
+      serverLatencyMs: 10,
+      localDriftTicks: null,
+      authoritativeTimelineReady: false,
+      measuredAtUnixMs: null,
+    });
+    dateNow.mockRestore();
+  });
+
   it("manually resyncs only this player to the validated paused anchor", async () => {
     const h = harness();
     h.internals.syncAnchor = {

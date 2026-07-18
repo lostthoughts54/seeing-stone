@@ -83,3 +83,7 @@ export const watchPartyGroupSchema = z.object({
 });
 
 export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });
+
+export const bufferingPolicyPreferenceSchema = z.object({
+  mode: z.enum(["wait-for-all", "continue"]),
+});

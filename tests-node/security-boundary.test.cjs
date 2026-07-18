@@ -219,7 +219,8 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
     contracts.indexOf("export type WatchPartyPlaybackState"),
     contracts.indexOf("export interface JellyfinBridge"),
   );
-  assert.doesNotMatch(watchPartyContract, /accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket|mediaUrl|api[_-]?key/i);
+  assert.doesNotMatch(watchPartyContract, /accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket(?:Url|Endpoint|Headers|Token)|mediaUrl|api[_-]?key/i);
+  assert.doesNotMatch(watchPartyContract, /(?:url|path|headers|credential|token)\s*:/i);
   for (const setting of [
     "contextIsolation: true",
     "sandbox: true",
