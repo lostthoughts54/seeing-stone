@@ -13,9 +13,10 @@ describe("PlayerPreferencesService", () => {
     await service.setWindowMaximized(false);
     expect(await new PlayerPreferencesService(directory).get()).toEqual({ windowMaximized: false, adapterMode: "legacy" });
     expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8"))).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       windowMaximized: false,
       adapterMode: "legacy",
+      adapterModeExplicit: false,
     });
   });
 
@@ -33,9 +34,10 @@ describe("PlayerPreferencesService", () => {
 
     await expect(service.get()).resolves.toEqual({ windowMaximized: true, adapterMode: "embedded" });
     expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8"))).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       windowMaximized: true,
       adapterMode: "embedded",
+      adapterModeExplicit: false,
     });
 
     const legacyDirectory = await mkdtemp(join(tmpdir(), "seeing-stone-player-preferences-development-legacy-"));
@@ -55,7 +57,7 @@ describe("PlayerPreferencesService", () => {
       service.setWindowMaximized(false),
     ]);
     const persisted = JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8"));
-    expect(persisted).toEqual({ schemaVersion: 2, windowMaximized: false, adapterMode: "legacy" });
+    expect(persisted).toEqual({ schemaVersion: 3, windowMaximized: false, adapterMode: "legacy", adapterModeExplicit: false });
     await expect(readFile(join(directory, "player-preferences.json.tmp"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -71,9 +73,10 @@ describe("PlayerPreferencesService", () => {
   it("uses SQLite-backed adapter selection as the durable source of truth", async () => {
     const directory = await mkdtemp(join(tmpdir(), "lf-player-preferences-"));
     await writeFile(join(directory, "player-preferences.json"), JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       windowMaximized: false,
       adapterMode: "legacy",
+      adapterModeExplicit: true,
     }));
     let durable: "legacy" | "embedded" | null = "embedded";
     const store = {
@@ -84,5 +87,33 @@ describe("PlayerPreferencesService", () => {
     expect(await service.get()).toEqual({ windowMaximized: false, adapterMode: "embedded" });
     await service.setAdapterMode("legacy");
     expect(durable).toBe("legacy");
+  });
+
+  it("migrates the hidden schema-2 default to the current launch default", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-player-preferences-hidden-default-"));
+    await writeFile(join(directory, "player-preferences.json"), JSON.stringify({
+      schemaVersion: 2,
+      windowMaximized: false,
+      adapterMode: "legacy",
+    }));
+    let durable: "legacy" | "embedded" | null = "legacy";
+    const store = {
+      getAdapterMode: async () => durable,
+      setAdapterMode: async (mode: "legacy" | "embedded") => { durable = mode; },
+    };
+
+    const service = new PlayerPreferencesService(directory, store, "embedded");
+    await expect(service.get()).resolves.toEqual({ windowMaximized: false, adapterMode: "embedded" });
+    expect(durable).toBe("legacy");
+    expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8"))).toEqual({
+      schemaVersion: 3,
+      windowMaximized: false,
+      adapterMode: "embedded",
+      adapterModeExplicit: false,
+    });
+
+    await service.setAdapterMode("legacy");
+    expect(durable).toBe("legacy");
+    expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8")).adapterModeExplicit).toBe(true);
   });
 });

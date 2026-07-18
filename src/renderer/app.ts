@@ -6,6 +6,7 @@ import type {
   LibrarySummary,
   MediaItem,
   OpenSourceLicenseInventory,
+  PlaybackAdapterPreference,
   OfflinePlayableSummary,
   PlaybackSourceKind,
   PlaybackState,
@@ -158,6 +159,8 @@ const closePlayerSettingsButton = byId<HTMLButtonElement>("closePlayerSettingsBu
 const playerSettingsRateSelect = byId<HTMLSelectElement>("playerSettingsRateSelect");
 const playerSettingsAudioSelect = byId<HTMLSelectElement>("playerSettingsAudioSelect");
 const playerSettingsSubtitleSelect = byId<HTMLSelectElement>("playerSettingsSubtitleSelect");
+const playerAdapterSelect = byId<HTMLSelectElement>("playerAdapterSelect");
+const playerAdapterStatus = byId<HTMLElement>("playerAdapterStatus");
 const playerSettingsDiagnosticsButton = byId<HTMLButtonElement>("playerSettingsDiagnosticsButton");
 const playerNextButton = byId<HTMLButtonElement>("playerNextButton");
 const playerFullscreenButton = byId<HTMLButtonElement>("playerFullscreenButton");
@@ -296,6 +299,7 @@ let playerSettingsLastFocus: HTMLElement | null = null;
 let playerStructuralRenderKey = "";
 let playerDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
 let offlinePlayableRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let playerAdapterPreference: PlaybackAdapterPreference | null = null;
 
 document.title = BRANDING.productName;
 
@@ -1985,11 +1989,14 @@ function renderPlayerMetadata(): void {
 function renderPlayerState(forceStructure = false): void {
   const playback = playbackForPlayer();
   const phase = playbackPhasePresentation(playback);
+  const replayAvailable = !state.playbackId
+    && Boolean(state.playbackItem)
+    && Boolean(playback && ["stopped", "disconnected", "error", "ended"].includes(playback.phase));
   const sourceKind = playbackSourceKind();
   const connection = connectionStatePresentation(state.soloDiagnostics?.connection.state || "unknown");
   const joinedParty = state.watchParties?.joinedGroup || null;
 
-  playerPhaseLabel.textContent = phase.label;
+  playerPhaseLabel.textContent = replayAvailable ? `${phase.label} — Replay available` : phase.label;
   setTone(playerFrameStatus, phase.tone);
   playerFrameStatus.classList.toggle("is-active", phase.active);
 
@@ -2007,11 +2014,12 @@ function renderPlayerState(forceStructure = false): void {
   playerCurrentTime.textContent = formatPlaybackTime(positionTicks);
   playerDuration.textContent = formatPlaybackTime(durationTicks);
 
-  const paused = playback?.paused !== false;
+  const paused = replayAvailable || playback?.paused !== false;
   replacePlayPauseIcon(paused);
-  playerPlayPauseButton.setAttribute("aria-label", paused ? "Play" : "Pause");
-  playerPlayPauseButton.title = paused ? "Play (Space or K)" : "Pause (Space or K)";
-  playerPlayPauseButton.disabled = !state.playbackId || !playback || ["resolving", "loading", "ended", "stopped", "error", "disconnected"].includes(playback.phase);
+  playerPlayPauseButton.setAttribute("aria-label", replayAvailable ? "Replay" : paused ? "Play" : "Pause");
+  playerPlayPauseButton.title = replayAvailable ? "Replay" : paused ? "Play (Space or K)" : "Pause (Space or K)";
+  playerPlayPauseButton.disabled = !replayAvailable
+    && (!state.playbackId || !playback || ["resolving", "loading", "ended", "stopped", "error", "disconnected"].includes(playback.phase));
   playerBack10Button.disabled = !state.playbackId || !playback?.seekable;
   playerForward10Button.disabled = !state.playbackId || !playback?.seekable;
 
@@ -2327,6 +2335,37 @@ function openPlayerSettings(): void {
   markPlayerActivity();
 }
 
+function renderPlayerAdapterPreference(): void {
+  const preference = playerAdapterPreference;
+  if (!preference) {
+    playerAdapterSelect.disabled = true;
+    playerAdapterStatus.textContent = "Player engine status is unavailable.";
+    playerAdapterStatus.dataset.tone = "amber";
+    return;
+  }
+  playerAdapterSelect.disabled = false;
+  playerAdapterSelect.value = preference.selected;
+  const embeddedOption = playerAdapterSelect.querySelector<HTMLOptionElement>('option[value="embedded"]');
+  if (embeddedOption) embeddedOption.disabled = !preference.embeddedAvailable;
+  const activeLabel = preference.active === "embedded" ? "Embedded player" : "Legacy external player";
+  if (preference.restartRequired) {
+    playerAdapterStatus.textContent = `${activeLabel} is active. Restart Seeing Stone to apply this change.`;
+    playerAdapterStatus.dataset.tone = "amber";
+  } else {
+    playerAdapterStatus.textContent = `${activeLabel} is active.`;
+    playerAdapterStatus.dataset.tone = "green";
+  }
+}
+
+async function refreshPlayerAdapterPreference(): Promise<void> {
+  try {
+    playerAdapterPreference = await window.jellyfin.playback.getAdapterPreference();
+  } catch {
+    playerAdapterPreference = null;
+  }
+  renderPlayerAdapterPreference();
+}
+
 function togglePlayerSettings(): void {
   if (playerSettingsMenu.classList.contains("is-hidden")) openPlayerSettings();
   else closePlayerSettings();
@@ -2392,7 +2431,13 @@ async function applyPlaybackCommand(command: () => Promise<PlaybackState>, fallb
 
 async function togglePlayerPaused(): Promise<void> {
   const playback = playbackForPlayer();
-  if (!state.playbackId || !playback) return;
+  if (!state.playbackId) {
+    if (state.playbackItem && playback && ["stopped", "disconnected", "error", "ended"].includes(playback.phase)) {
+      await playItem(state.playbackItem);
+    }
+    return;
+  }
+  if (!playback) return;
   await applyPlaybackCommand(
     () => window.jellyfin.playback.setPaused({ playbackId: state.playbackId as string, paused: !playback.paused }),
     "Playback could not be changed.",
@@ -2775,6 +2820,7 @@ function resetSignedInState(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  void refreshPlayerAdapterPreference();
   try {
     state.session = await window.jellyfin.session.restore();
     if (state.session.server) serverUrlInput.value = state.session.server.address;
@@ -2987,6 +3033,21 @@ playerAudioSelect.addEventListener("change", () => changePlayerAudio(playerAudio
 playerSettingsAudioSelect.addEventListener("change", () => changePlayerAudio(playerSettingsAudioSelect));
 playerSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSubtitleSelect));
 playerSettingsSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSettingsSubtitleSelect));
+playerAdapterSelect.addEventListener("change", async () => {
+  const previous = playerAdapterPreference?.selected;
+  playerAdapterSelect.disabled = true;
+  try {
+    playerAdapterPreference = await window.jellyfin.playback.setAdapterPreference({
+      mode: playerAdapterSelect.value === "legacy" ? "legacy" : "embedded",
+    });
+    renderPlayerAdapterPreference();
+    if (playerAdapterPreference.restartRequired) showToast("Player engine saved. Restart Seeing Stone to apply it.");
+  } catch (error) {
+    if (previous) playerAdapterSelect.value = previous;
+    showToast(errorMessage(error, "The player engine could not be changed."));
+    renderPlayerAdapterPreference();
+  }
+});
 playerFullscreenButton.addEventListener("click", () => {
   const playback = playbackForPlayer();
   if (!state.playbackId || !playback) return;

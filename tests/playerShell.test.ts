@@ -30,6 +30,8 @@ describe("Seeing Stone player shell", () => {
       "playerSettingsRateSelect",
       "playerSettingsAudioSelect",
       "playerSettingsSubtitleSelect",
+      "playerAdapterSelect",
+      "playerAdapterStatus",
       "sessionPanel",
       "sessionSoloTab",
       "sessionWatchpartyTab",
@@ -84,6 +86,7 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("playerSettingsRateSelect.addEventListener");
     expect(renderer).toContain("playerSettingsAudioSelect.addEventListener");
     expect(renderer).toContain("playerSettingsSubtitleSelect.addEventListener");
+    expect(renderer).toContain("window.jellyfin.playback.setAdapterPreference");
     expect(renderer).toContain("closePlayerSettings()");
   });
 
@@ -100,6 +103,8 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("const lostActivePlayback");
     expect(renderer).toContain('playback.phase === "disconnected"');
     expect(renderer).toContain("void syncPlayerViewport(false)");
+    expect(renderer).toContain("Replay available");
+    expect(renderer).toContain("await playItem(state.playbackItem)");
     expect(renderer).not.toContain('playerView.classList.add("is-hidden");\n  document.body.classList.remove("is-playing");\n  void syncPlayerViewport(false);\n  state.lastFocusElement?.focus?.();');
   });
 

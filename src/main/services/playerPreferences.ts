@@ -3,11 +3,17 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 const preferencesSchema = z.object({
+  schemaVersion: z.literal(3),
+  windowMaximized: z.boolean(),
+  adapterMode: z.enum(["legacy", "embedded"]),
+  adapterModeExplicit: z.boolean(),
+});
+
+const previousPreferencesSchema = z.object({
   schemaVersion: z.literal(2),
   windowMaximized: z.boolean(),
   adapterMode: z.enum(["legacy", "embedded"]),
 });
-
 const legacyPreferencesSchema = z.object({ schemaVersion: z.literal(1), windowMaximized: z.boolean() });
 
 export type PlayerAdapterMode = "legacy" | "embedded";
@@ -31,6 +37,7 @@ export interface AdapterPreferencePersistence {
 export class PlayerPreferencesService implements PlayerPreferencesStore {
   private readonly preferencesPath: string;
   private cached: PlayerPreferences | null = null;
+  private adapterModeExplicit = false;
   private initialization: Promise<PlayerPreferences> | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
@@ -57,7 +64,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
       const current = await this.get();
       if (current.windowMaximized === windowMaximized) return;
       const next = { ...current, windowMaximized };
-      await this.persist(next);
+      await this.persist(next, this.adapterModeExplicit);
       this.cached = next;
     });
   }
@@ -65,10 +72,11 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
   async setAdapterMode(adapterMode: PlayerAdapterMode): Promise<void> {
     await this.runExclusive(async () => {
       const current = await this.get();
-      if (current.adapterMode === adapterMode) return;
+      if (current.adapterMode === adapterMode && this.adapterModeExplicit) return;
       const next = { ...current, adapterMode };
       await this.durablePreferences?.setAdapterMode(adapterMode);
-      await this.persist(next);
+      this.adapterModeExplicit = true;
+      await this.persist(next, true);
       this.cached = next;
     });
   }
@@ -77,28 +85,47 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
     try {
       const raw = JSON.parse(await readFile(this.preferencesPath, "utf8"));
       const parsed = preferencesSchema.safeParse(raw);
-      if (parsed.success) this.cached = { windowMaximized: parsed.data.windowMaximized, adapterMode: parsed.data.adapterMode };
-      else {
-        const legacy = legacyPreferencesSchema.parse(raw);
-        this.cached = { windowMaximized: legacy.windowMaximized, adapterMode: this.defaultAdapterMode };
-        await this.persist(this.cached);
+      if (parsed.success) {
+        this.adapterModeExplicit = parsed.data.adapterModeExplicit;
+        this.cached = {
+          windowMaximized: parsed.data.windowMaximized,
+          adapterMode: parsed.data.adapterModeExplicit ? parsed.data.adapterMode : this.defaultAdapterMode,
+        };
+      } else {
+        const previous = previousPreferencesSchema.safeParse(raw);
+        const windowMaximized = previous.success
+          ? previous.data.windowMaximized
+          : legacyPreferencesSchema.parse(raw).windowMaximized;
+        // Schema 1/2 never exposed an engine selector. Their stored adapter value was
+        // an automatic launch default, not evidence of an intentional user choice.
+        this.adapterModeExplicit = false;
+        this.cached = { windowMaximized, adapterMode: this.defaultAdapterMode };
       }
+      await this.persist(this.cached, this.adapterModeExplicit);
     } catch {
+      this.adapterModeExplicit = false;
       this.cached = { windowMaximized: true, adapterMode: this.defaultAdapterMode };
-      await this.persist(this.cached);
+      await this.persist(this.cached, false);
     }
-    const durableMode = await this.durablePreferences?.getAdapterMode().catch(() => null) ?? null;
-    if (durableMode) {
-      this.cached = { ...this.cached, adapterMode: durableMode };
-      await this.persist(this.cached);
-    } else if (this.durablePreferences && this.cached.adapterMode) {
-      await this.durablePreferences.setAdapterMode(this.cached.adapterMode).catch(() => undefined);
+    if (this.adapterModeExplicit) {
+      const durableMode = await this.durablePreferences?.getAdapterMode().catch(() => null) ?? null;
+      if (durableMode) {
+        this.cached = { ...this.cached, adapterMode: durableMode };
+        await this.persist(this.cached, true);
+      } else if (this.durablePreferences && this.cached.adapterMode) {
+        await this.durablePreferences.setAdapterMode(this.cached.adapterMode).catch(() => undefined);
+      }
     }
     return this.cached;
   }
 
-  private async persist(preferences: PlayerPreferences): Promise<void> {
-    const safe = preferencesSchema.parse({ schemaVersion: 2, ...preferences, adapterMode: preferences.adapterMode ?? this.defaultAdapterMode });
+  private async persist(preferences: PlayerPreferences, adapterModeExplicit: boolean): Promise<void> {
+    const safe = preferencesSchema.parse({
+      schemaVersion: 3,
+      ...preferences,
+      adapterMode: preferences.adapterMode ?? this.defaultAdapterMode,
+      adapterModeExplicit,
+    });
     await mkdir(dirname(this.preferencesPath), { recursive: true });
     const temporaryPath = `${this.preferencesPath}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(safe, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });

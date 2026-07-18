@@ -1933,6 +1933,16 @@ select option {
   width: 100%;
 }
 
+.player-engine-setting { grid-column: 1 / -1; }
+.player-adapter-status {
+  color: #aba5b4;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+.player-adapter-status[data-tone="amber"] { color: var(--ss-amber); }
+.player-adapter-status[data-tone="green"] { color: var(--ss-green); }
+
 .player-settings-diagnostics {
   background: rgba(167, 92, 255, 0.075);
   border-color: rgba(167, 92, 255, 0.17);

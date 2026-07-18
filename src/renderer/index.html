@@ -387,7 +387,9 @@
                     <label><span>Playback speed</span><select id="playerSettingsRateSelect" aria-label="Playback speed in settings"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
                     <label><span>Audio track</span><select id="playerSettingsAudioSelect" aria-label="Audio track in settings" disabled><option>Default</option></select></label>
                     <label><span>Subtitle track</span><select id="playerSettingsSubtitleSelect" aria-label="Subtitle track in settings" disabled><option value="">Off</option></select></label>
+                    <label class="player-engine-setting"><span>Player engine</span><select id="playerAdapterSelect" aria-label="Player engine"><option value="embedded">Embedded (recommended)</option><option value="legacy">Legacy external</option></select></label>
                   </div>
+                  <p id="playerAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
                   <button id="playerSettingsDiagnosticsButton" class="player-settings-diagnostics" type="button">Open playback diagnostics</button>
                 </div>
               </section>
