@@ -31,6 +31,7 @@
     "test:embedded-window": "pnpm run build:main && electron scripts/embedded-window-spike.cjs",
     "test:embedded-video-smoke": "pnpm run build:main && electron scripts/embedded-video-smoke.cjs",
     "test:embedded-integrated-smoke": "pnpm run build:main && pnpm run build:renderer && electron scripts/embedded-video-smoke.cjs --integrated",
+    "test:embedded-overlay-smoke": "pnpm run build:main && pnpm run build:renderer && electron scripts/embedded-video-smoke.cjs --overlay",
     "test:embedded-fullscreen-smoke": "pnpm run build:main && pnpm run build:renderer && electron scripts/embedded-video-smoke.cjs --fullscreen",
     "test:player-shell-visual": "pnpm run build && node scripts/player-shell-visual-acceptance.cjs",
     "test:gate-5-visual": "pnpm run build && node scripts/gate5-visual-acceptance.cjs",
@@ -59,6 +60,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
+    "koffi": "^3.1.1",
     "ws": "8.18.3",
     "zod": "^4.0.0"
   }

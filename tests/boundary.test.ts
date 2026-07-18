@@ -115,7 +115,7 @@ describe("renderer and preload security boundary", () => {
     expect(preload).not.toMatch(/new WebSocket|\bfetch\s*\(/);
   });
 
-  it("keeps legacy playback while gating a main-controlled Windows HWND host", async () => {
+  it("keeps legacy playback while gating a main-controlled Windows video overlay", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
     const host = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
     const main = await readFile("src/main/index.ts", "utf8");
@@ -127,17 +127,19 @@ describe("renderer and preload security boundary", () => {
     expect(player).toContain("this.mainWindow.restore()");
     expect(player).toContain("this.mainWindow.show()");
     expect(player).not.toContain("this.mainWindow.hide()");
-    expect(player).toContain("`--wid=${windowId}`");
+    expect(player).not.toContain("--wid=");
+    expect(player).toContain('"--focus-on=never"');
+    expect(player).toContain('"--border=no"');
     expect(player).toContain('"--gpu-api=d3d11"');
     expect(player).toContain('"--gpu-context=d3d11"');
     expect(player).toContain('"--gpu-api=opengl"');
     expect(player).toContain('"--gpu-context=win"');
     expect(player).toContain('"--panscan=0"');
-    expect(host).toContain("new BaseWindow({");
-    expect(host).not.toContain("new BrowserWindow({");
+    expect(host).not.toContain("new BaseWindow");
     expect(host).toContain("getNativeWindowHandle()");
-    expect(host).toContain("readUInt32LE(0)");
-    expect(host).toContain("setIgnoreMouseEvents(true)");
+    expect(host).toContain("readBigUInt64LE(0)");
+    expect(host).toContain("GWLP_HWNDPARENT");
+    expect(host).toContain("WS_EX_TRANSPARENT");
     expect(main).toContain('process.env.SEEING_STONE_PLAYER === "embedded"');
     expect(main).toContain("!app.isPackaged");
     expect(input).toContain("Ctrl+r script-message jellyfin-resync");

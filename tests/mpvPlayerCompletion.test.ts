@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { embeddedRenderProfileArgs, MpvPlayerService } from "../src/main/services/mpvPlayer";
+import { embeddedRenderProfileArgs, embeddedVideoWindowArgs, MpvPlayerService } from "../src/main/services/mpvPlayer";
 import { PlaybackCompletionCoordinator } from "../src/main/services/playbackCompletion";
 import { AppError } from "../src/main/services/errors";
 import type { ResolvedPlaybackSource } from "../src/main/services/playbackSession";
@@ -123,7 +123,8 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
   };
   const videoHost = {
     embedded: true as const,
-    getWindowId: () => "1234",
+    attachWindow: vi.fn(async () => undefined),
+    detachWindow: vi.fn(),
     updateViewport: vi.fn(),
     raise: vi.fn(),
     setFullscreen: vi.fn(),
@@ -193,6 +194,17 @@ describe("MpvPlayerService natural completion", () => {
     expect(embeddedRenderProfileArgs("opengl-software")).toEqual([
       "--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0",
     ]);
+  });
+
+  it("launches embedded mpv as an offscreen borderless overlay without --wid", () => {
+    const args = embeddedVideoWindowArgs("Seeing Stone Video test-id");
+    expect(args).toEqual([
+      "--border=no",
+      "--focus-on=never",
+      "--geometry=16x16-10000-10000",
+      "--title=Seeing Stone Video test-id",
+    ]);
+    expect(args.join(" ")).not.toContain("--wid");
   });
 
   it("retries embedded rendering before emitting its single Jellyfin start report", async () => {
@@ -575,7 +587,7 @@ describe("MpvPlayerService natural completion", () => {
     expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
     expect(h.reportedEvents[0]).toMatchObject({ actionKind: "progress", watched: false });
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
-    expect(h.videoHost.hide).toHaveBeenCalledOnce();
+    expect(h.videoHost.detachWindow).toHaveBeenCalledOnce();
   });
 
   it("auto-closes a movie after exactly one authoritative stop report", async () => {

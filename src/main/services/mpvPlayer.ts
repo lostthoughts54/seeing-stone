@@ -33,6 +33,15 @@ export function embeddedRenderProfileArgs(profile: Exclude<MpvRenderProfile, "le
     : ["--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0"];
 }
 
+export function embeddedVideoWindowArgs(title: string): string[] {
+  return [
+    "--border=no",
+    "--focus-on=never",
+    "--geometry=16x16-10000-10000",
+    `--title=${title}`,
+  ];
+}
+
 function hasVideoTrack(value: unknown): boolean {
   return Array.isArray(value) && value.some((entry) => Boolean(entry)
     && typeof entry === "object"
@@ -442,7 +451,7 @@ export class MpvPlayerService implements PlayerController {
       ipc?.close();
       if (process && !process.killed) process.kill();
       await this.proxy.close();
-      this.videoHost?.hide();
+      this.videoHost?.detachWindow();
       this.playbackTarget = null;
       try { this.playback.stop(playbackId); } catch { /* Already cleared. */ }
       this.source = null;
@@ -476,7 +485,7 @@ export class MpvPlayerService implements PlayerController {
       this.rawTimePositionSeconds = 0;
       this.demuxerCacheTimeSeconds = null;
       this.activeRenderProfile = "legacy";
-      this.videoHost?.hide();
+      this.videoHost?.detachWindow();
       this.update(emptyState(), "stop", { origin: "system" });
     }
   }
@@ -493,7 +502,7 @@ export class MpvPlayerService implements PlayerController {
     this.ipc?.close();
     this.ipc = null;
     await this.proxy.close().catch(() => undefined);
-    this.videoHost?.hide();
+    this.videoHost?.detachWindow();
     this.playbackTarget = null;
     try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
     this.source = null;
@@ -561,6 +570,7 @@ export class MpvPlayerService implements PlayerController {
     await ipc?.command(["quit"]).catch(() => undefined);
     ipc?.close();
     if (process && !process.killed) process.kill();
+    this.videoHost?.detachWindow();
   }
 
   private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
@@ -627,7 +637,7 @@ export class MpvPlayerService implements PlayerController {
     this.demuxerCacheTimeSeconds = null;
     this.activeRenderProfile = profile;
     const pipePath = `\\\\.\\pipe\\seeing-stone-${randomUUID()}`;
-    const windowId = this.videoHost?.getWindowId();
+    const windowTitle = this.videoHost ? `Seeing Stone Video ${randomUUID()}` : "Seeing Stone Player";
     const args = [
       "--no-config",
       "--terminal=no",
@@ -637,8 +647,9 @@ export class MpvPlayerService implements PlayerController {
       `--osc=${this.videoHost ? "no" : "yes"}`,
       `--input-default-bindings=${this.videoHost ? "no" : "yes"}`,
       `--input-vo-keyboard=${this.videoHost ? "no" : "yes"}`,
-      "--title=Seeing Stone Player",
-      ...(windowId ? [`--wid=${windowId}`] : ["--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
+      ...(this.videoHost
+        ? embeddedVideoWindowArgs(windowTitle)
+        : ["--title=Seeing Stone Player", "--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
       `--input-conf=${this.runtime.inputConfig}`,
       `--input-ipc-server=${pipePath}`,
       `--start=${positionTicks / TICKS_PER_SECOND}`,
@@ -673,6 +684,7 @@ export class MpvPlayerService implements PlayerController {
     ipc.onMessage((message) => { if (this.ipc === ipc) this.handleMessage(message); });
     const initialize = async () => {
       await ipc.connect(pipePath);
+      if (this.videoHost) await this.videoHost.attachWindow(windowTitle);
       await Promise.all([
         ipc.observe(1, "time-pos"),
         ipc.observe(2, "duration"),
@@ -733,6 +745,7 @@ export class MpvPlayerService implements PlayerController {
     await oldIpc?.command(["quit"]).catch(() => undefined);
     oldIpc?.close();
     if (oldProcess && !oldProcess.killed) oldProcess.kill();
+    this.videoHost?.detachWindow();
     this.update({ ...this.state, phase: "loading", buffering: true });
     try {
       if (source.usesServerTimelineOffset) {

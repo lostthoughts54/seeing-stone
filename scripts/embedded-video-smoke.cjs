@@ -3,13 +3,23 @@
 const { spawn } = require("node:child_process");
 const { join, resolve } = require("node:path");
 const { app, BrowserWindow, desktopCapturer, screen } = require("electron");
+const koffi = require("koffi");
 const { EmbeddedVideoHost } = require("../dist/main/services/embeddedVideoHost.js");
 const { MpvIpcClient } = require("../dist/main/services/mpvIpc.js");
+const { embeddedVideoWindowArgs } = require("../dist/main/services/mpvPlayer.js");
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const fullscreenMode = process.argv.includes("--fullscreen");
 const primaryOnly = process.argv.includes("--primary-only");
 const integratedMode = process.argv.includes("--integrated");
+const requireMotion = process.argv.includes("--require-motion");
+const overlayMode = process.argv.includes("--overlay");
+
+const user32 = koffi.load("user32.dll");
+const findWindow = user32.func("__stdcall", "FindWindowA", "void *", ["str", "str"]);
+const isWindowVisibleNative = user32.func("__stdcall", "IsWindowVisible", "int", ["void *"]);
+const setCursorPosNative = user32.func("__stdcall", "SetCursorPos", "int", ["int", "int"]);
+const mouseEventNative = user32.func("__stdcall", "mouse_event", "void", ["uint", "uint", "uint", "uint", "uintptr_t"]);
 
 async function changeFullscreen(host, owner, fullscreen) {
   const event = fullscreen ? "enter-full-screen" : "leave-full-screen";
@@ -263,7 +273,107 @@ async function runIntegratedSmoke() {
   }
 }
 
+async function runManagedOverlaySmoke() {
+  let owner;
+  let host;
+  let child;
+  let overlay = null;
+  const ipc = new MpvIpcClient();
+  try {
+    owner = new BrowserWindow({
+      width: 1400, height: 850, show: true, backgroundColor: "#060711",
+      webPreferences: {
+        preload: resolve(__dirname, "player-shell-visual-preload.cjs"), contextIsolation: true,
+        sandbox: false, nodeIntegration: false, backgroundThrottling: false,
+      },
+    });
+    await owner.loadFile(resolve(__dirname, "../dist/renderer/index.html"));
+    const viewport = await owner.webContents.executeJavaScript(`(async () => {
+      const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const button = document.getElementById("featurePlayButton");
+        if (button && !button.disabled) { button.click(); break; }
+        await delay(25);
+      }
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const input = window.seeingStoneVisualAcceptance?.getViewportInputs().at(-1);
+        if (input?.visible && input.width >= 16 && input.height >= 16) return input;
+        await delay(25);
+      }
+      return null;
+    })()`);
+    if (!viewport) throw new Error("Managed overlay viewport did not become ready.");
+    host = new EmbeddedVideoHost(owner);
+    host.updateViewport({ ...viewport, revision: 1 });
+    const title = `Seeing Stone Overlay ${process.pid}-${Date.now()}`;
+    const pipe = `\\\\.\\pipe\\seeing-stone-overlay-${process.pid}-${Date.now()}`;
+    child = spawn(join(process.cwd(), ".runtime", "mpv", "mpv.exe"), [
+      "--no-config", "--terminal=no", "--force-window=immediate", "--keep-open=yes",
+      ...embeddedVideoWindowArgs(title),
+      "--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0",
+      "--osc=no", "--input-default-bindings=no", "--input-vo-keyboard=no", `--input-ipc-server=${pipe}`, "--loop-file=inf", "--",
+      join(process.cwd(), ".runtime", "h264-embedded-smoke.mp4"),
+    ], { windowsHide: true, stdio: "ignore" });
+    child.once("error", () => undefined);
+    await ipc.connect(pipe);
+    await host.attachWindow(title);
+    overlay = findWindow(null, title);
+    if (overlay === null) throw new Error("Managed mpv overlay window was unavailable.");
+    await delay(1000);
+    const first = await captureSurface(owner, viewport);
+    await delay(700);
+    const second = await captureSurface(owner, viewport);
+    const pixels = analyze(second);
+    const motionRatio = changedPixelRatio(first, second);
+    if (pixels.nonDarkPixelRatio < 0.15 || pixels.colorRange < 60 || motionRatio < 0.002) {
+      throw new Error(`Managed overlay did not present advancing H.264 frames (${pixels.nonDarkPixelRatio.toFixed(4)}, ${pixels.colorRange}, ${motionRatio.toFixed(4)}).`);
+    }
+    await ipc.command(["seek", 20, "absolute", "exact"]);
+    await delay(500);
+    const replacedRatio = changedPixelRatio(second, await captureSurface(owner, viewport));
+    if (replacedRatio < 0.01) throw new Error("Managed overlay did not replace its visible frame.");
+    await owner.webContents.executeJavaScript(`(() => {
+      window.__seeingStoneOverlayClicks = { click: 0, doubleClick: 0 };
+      const viewport = document.getElementById("playerViewport");
+      viewport.addEventListener("click", () => { window.__seeingStoneOverlayClicks.click += 1; });
+      viewport.addEventListener("dblclick", () => { window.__seeingStoneOverlayClicks.doubleClick += 1; });
+    })()`);
+    owner.focus();
+    const originalCursor = screen.getCursorScreenPoint();
+    const content = owner.getContentBounds();
+    setCursorPosNative(
+      Math.round(content.x + viewport.x + viewport.width / 2),
+      Math.round(content.y + viewport.y + viewport.height / 2),
+    );
+    for (let click = 0; click < 2; click += 1) {
+      mouseEventNative(0x0002, 0, 0, 0, 0);
+      mouseEventNative(0x0004, 0, 0, 0, 0);
+      await delay(70);
+    }
+    await delay(150);
+    setCursorPosNative(originalCursor.x, originalCursor.y);
+    const pointerEvidence = await owner.webContents.executeJavaScript("window.__seeingStoneOverlayClicks");
+    if (pointerEvidence.click < 2 || pointerEvidence.doubleClick < 1 || !owner.isFocused()) {
+      throw new Error("Managed overlay did not preserve click-through input and application focus.");
+    }
+    host.hide();
+    await delay(100);
+    if (isWindowVisibleNative(overlay) !== 0) throw new Error("Managed overlay did not hide on exit.");
+    return { ok: true, profile: "d3d11-overlay", pixels, motionRatio, replacedRatio, pointerEvidence, focused: true, hidden: true };
+  } finally {
+    if (host) host.destroy();
+    ipc.close();
+    if (child && !child.killed) child.kill();
+    if (owner && !owner.isDestroyed()) owner.destroy();
+  }
+}
+
 app.whenReady().then(async () => {
+  if (overlayMode) {
+    process.stdout.write(`${JSON.stringify(await runManagedOverlaySmoke())}\n`);
+    app.quit();
+    return;
+  }
   if (integratedMode) {
     process.stdout.write(`${JSON.stringify(await runIntegratedSmoke())}\n`);
     app.quit();
@@ -343,6 +453,12 @@ app.whenReady().then(async () => {
         if (pixels.nonDarkPixelRatio < 0.15 || pixels.colorRange < 60) {
           throw new Error(`${profile.name} embedded H.264 surface was visually blank.`);
         }
+        let motionRatio = null;
+        if (requireMotion) {
+          await delay(700);
+          motionRatio = changedPixelRatio(firstSurface, await captureSurface(owner, activeViewport));
+          if (motionRatio < 0.002) throw new Error(`${profile.name} embedded H.264 surface did not present advancing frames.`);
+        }
         if (fullscreenMode) {
           const activeBounds = host.window.getBounds();
           const content = owner.getContentBounds();
@@ -374,7 +490,7 @@ app.whenReady().then(async () => {
           }
           fullscreenEvidence = { activeBand: 56, idleBand: 3, restored: true, idlePixels };
         }
-        results.push({ profile: profile.name, evidence, pixels, ...(fullscreenEvidence ? { fullscreen: fullscreenEvidence } : {}) });
+        results.push({ profile: profile.name, evidence, pixels, ...(motionRatio === null ? {} : { motionRatio }), ...(fullscreenEvidence ? { fullscreen: fullscreenEvidence } : {}) });
       } finally {
         ipc.close();
         if (child && !child.killed) child.kill();

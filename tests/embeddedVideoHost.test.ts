@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
-import { videoHostBounds, windowsWindowId } from "../src/main/services/embeddedVideoHost";
+import { videoHostBounds, windowsWindowHandle, windowsWindowId } from "../src/main/services/embeddedVideoHost";
 
 describe("EmbeddedVideoHost platform boundary", () => {
-  it("passes mpv the low unsigned 32 bits of a Win32 HWND", () => {
+  it("preserves the complete unsigned Win32 HWND value", () => {
     const handle = Buffer.alloc(8);
     handle.writeUInt32LE(0xfedcba98, 0);
     handle.writeUInt32LE(0x12345678, 4);
-    expect(windowsWindowId(handle)).toBe("4275878552");
-    expect(() => windowsWindowId(Buffer.alloc(8))).toThrow(/invalid video-surface handle/i);
+    expect(windowsWindowHandle(handle)).toBe(0x12345678fedcba98n);
+    expect(windowsWindowId(handle)).toBe("1311768469143599768");
+    expect(() => windowsWindowId(Buffer.alloc(8))).toThrow(/invalid video-window handle/i);
   });
 
   it("maps renderer CSS-pixel bounds into Electron screen DIP bounds", () => {
@@ -26,12 +27,22 @@ describe("EmbeddedVideoHost platform boundary", () => {
       .toEqual({ x: 0, y: 0, width: 1920, height: 1077 });
   });
 
-  it("reasserts the owned native surface above renderer repaints", async () => {
+  it("owns a non-activating click-through mpv overlay and never creates an Electron child surface", async () => {
     const source = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
-    expect(source).toContain("this.window.showInactive()");
-    expect(source).toContain("this.window.moveTop()");
+    expect(source).not.toContain("new BaseWindow");
+    expect(source).toContain('findWindow(null, title)');
+    expect(source).toContain("GWLP_HWNDPARENT");
+    expect(source).toContain("WS_EX_TOOLWINDOW");
+    expect(source).toContain("WS_EX_NOACTIVATE");
+    expect(source).toContain("WS_EX_TRANSPARENT");
+    expect(source).toContain("WS_EX_LAYERED");
+    expect(source).toContain("setLayeredWindowAttributes(candidate, 0, 255, LWA_ALPHA)");
+    expect(source).toContain("setWindowLongChecked(candidate, GWLP_HWNDPARENT, ownerHandle)");
+    expect(source).toContain("SWP_FRAMECHANGED");
+    expect(source).toContain("SWP_NOACTIVATE | SWP_SHOWWINDOW");
     expect(source).toContain("raise(): void");
     expect(source).toContain('owner.on("focus", () => this.scheduleReconcile())');
-    expect(source.match(/this\.window\.moveTop\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("showWindow(overlay, SW_HIDE)");
+    expect(source).toContain("this.owner.webContents.invalidate()");
   });
 });

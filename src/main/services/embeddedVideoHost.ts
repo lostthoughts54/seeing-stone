@@ -1,4 +1,5 @@
-import { BaseWindow, BrowserWindow, screen, type Rectangle } from "electron";
+import { BrowserWindow, screen, type Rectangle } from "electron";
+import koffi from "koffi";
 import { AppError } from "./errors";
 
 export interface VideoViewport {
@@ -7,7 +8,8 @@ export interface VideoViewport {
 
 export interface MpvVideoHost {
   readonly embedded: true;
-  getWindowId(): string;
+  attachWindow(title: string): Promise<void>;
+  detachWindow(): void;
   updateViewport(viewport: VideoViewport): void;
   raise(): void;
   setFullscreen(fullscreen: boolean): void;
@@ -15,34 +17,80 @@ export interface MpvVideoHost {
   destroy(): void;
 }
 
+export function windowsWindowHandle(handle: Buffer): bigint {
+  if (handle.length < 4) throw new AppError("VIDEO_HOST_INVALID", "Windows returned an invalid video-window handle.", 500);
+  const value = handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0));
+  if (value === 0n) throw new AppError("VIDEO_HOST_INVALID", "Windows returned an invalid video-window handle.", 500);
+  return value;
+}
+
 export function windowsWindowId(handle: Buffer): string {
-  if (handle.length < 4) throw new AppError("VIDEO_HOST_INVALID", "Windows returned an invalid video-surface handle.", 500);
-  const id = handle.readUInt32LE(0);
-  if (id === 0) throw new AppError("VIDEO_HOST_INVALID", "Windows returned an invalid video-surface handle.", 500);
-  return id.toString(10);
+  return windowsWindowHandle(handle).toString(10);
 }
 
 export function videoHostBounds(content: Rectangle, viewport: VideoViewport): Rectangle {
-  return { x: Math.round(content.x + viewport.x), y: Math.round(content.y + viewport.y), width: Math.max(1, Math.round(viewport.width)), height: Math.max(1, Math.round(viewport.height)) };
+  return {
+    x: Math.round(content.x + viewport.x),
+    y: Math.round(content.y + viewport.y),
+    width: Math.max(1, Math.round(viewport.width)),
+    height: Math.max(1, Math.round(viewport.height)),
+  };
 }
 
+const user32 = koffi.load("user32.dll");
+const findWindow = user32.func("__stdcall", "FindWindowA", "void *", ["str", "str"]);
+const getWindowLongPtr = user32.func("__stdcall", "GetWindowLongPtrA", "intptr_t", ["void *", "int"]);
+const setWindowLongPtr = user32.func("__stdcall", "SetWindowLongPtrA", "intptr_t", ["void *", "int", "intptr_t"]);
+const setWindowPos = user32.func("__stdcall", "SetWindowPos", "int", ["void *", "void *", "int", "int", "int", "int", "uint"]);
+const showWindow = user32.func("__stdcall", "ShowWindow", "int", ["void *", "int"]);
+const isWindow = user32.func("__stdcall", "IsWindow", "int", ["void *"]);
+const setLayeredWindowAttributes = user32.func("__stdcall", "SetLayeredWindowAttributes", "int", ["void *", "uint", "uchar", "uint"]);
+const kernel32 = koffi.load("kernel32.dll");
+const getLastError = kernel32.func("__stdcall", "GetLastError", "uint", []);
+const setLastError = kernel32.func("__stdcall", "SetLastError", "void", ["uint"]);
+
+const GWLP_HWNDPARENT = -8;
+const GWL_EXSTYLE = -20;
+const WS_EX_TRANSPARENT = 0x00000020n;
+const WS_EX_TOOLWINDOW = 0x00000080n;
+const WS_EX_APPWINDOW = 0x00040000n;
+const WS_EX_NOACTIVATE = 0x08000000n;
+const WS_EX_LAYERED = 0x00080000n;
+const SW_HIDE = 0;
+const LWA_ALPHA = 0x00000002;
+const SWP_NOSIZE = 0x0001;
+const SWP_NOMOVE = 0x0002;
+const SWP_NOZORDER = 0x0004;
+const SWP_NOACTIVATE = 0x0010;
+const SWP_FRAMECHANGED = 0x0020;
+const SWP_SHOWWINDOW = 0x0040;
+
+const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function setWindowLongChecked(window: bigint, index: number, value: bigint): void {
+  setLastError(0);
+  const previous = BigInt(setWindowLongPtr(window, index, value));
+  if (previous === 0n && getLastError() !== 0) {
+    throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "The embedded video window could not be managed safely.", 503);
+  }
+}
+
+/**
+ * Owns mpv's borderless top-level Win32 window and keeps it aligned to the
+ * renderer's video viewport. This deliberately avoids Electron child-window
+ * embedding: Chromium creates a competing D3D child surface that can cover or
+ * freeze an mpv --wid swapchain on Windows.
+ */
 export class EmbeddedVideoHost implements MpvVideoHost {
   readonly embedded = true as const;
-  private readonly window: BaseWindow;
+  private overlay: bigint | null = null;
   private viewport: VideoViewport = { x: 0, y: 0, width: 0, height: 0, visible: false, revision: 0 };
   private lastBounds: Rectangle | null = null;
-  private hostVisible = false;
   private reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
   private readonly displayMetricsListener = () => this.scheduleReconcile();
 
   constructor(private readonly owner: BrowserWindow) {
-    this.window = new BaseWindow({
-      parent: owner, modal: false, frame: false, show: false, focusable: false,
-      skipTaskbar: true, backgroundColor: "#020207", hasShadow: false,
-      roundedCorners: false, thickFrame: false, resizable: false, movable: false,
-      minimizable: false, maximizable: false, fullscreenable: false,
-    });
-    this.window.setIgnoreMouseEvents(true);
     owner.on("move", () => this.scheduleReconcile());
     owner.on("resize", () => this.scheduleReconcile());
     owner.on("restore", () => this.scheduleReconcile());
@@ -56,10 +104,38 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     screen.on("display-metrics-changed", this.displayMetricsListener);
   }
 
-  getWindowId(): string {
-    if (this.window.isDestroyed()) throw new AppError("VIDEO_HOST_UNAVAILABLE", "The embedded video surface is unavailable.", 409);
-    const handle = this.window.getNativeWindowHandle();
-    return windowsWindowId(handle);
+  async attachWindow(title: string): Promise<void> {
+    this.detachWindow();
+    const deadline = Date.now() + 3000;
+    while (!this.destroyed && Date.now() < deadline) {
+      const candidate = findWindow(null, title) as bigint | null;
+      if (candidate !== null && isWindow(candidate) !== 0) {
+        this.overlay = candidate;
+        const ownerHandle = windowsWindowHandle(this.owner.getNativeWindowHandle());
+        setWindowLongChecked(candidate, GWLP_HWNDPARENT, ownerHandle);
+        const existingStyle = BigInt(getWindowLongPtr(candidate, GWL_EXSTYLE));
+        const managedStyle = (existingStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+          & ~WS_EX_APPWINDOW;
+        setWindowLongChecked(candidate, GWL_EXSTYLE, managedStyle);
+        if (setLayeredWindowAttributes(candidate, 0, 255, LWA_ALPHA) === 0
+          || setWindowPos(candidate, null, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) === 0) {
+          this.overlay = null;
+          throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "The embedded video window could not be managed safely.", 503);
+        }
+        this.lastBounds = null;
+        this.applyBounds();
+        return;
+      }
+      await delay(25);
+    }
+    throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "The embedded video window could not be attached.", 503);
+  }
+
+  detachWindow(): void {
+    this.hide();
+    this.overlay = null;
+    this.lastBounds = null;
   }
 
   updateViewport(viewport: VideoViewport): void {
@@ -67,48 +143,68 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     this.viewport = { ...viewport };
     this.scheduleReconcile();
   }
+
   raise(): void {
-    if (this.window.isDestroyed()) return;
-    this.window.moveTop();
     this.scheduleReconcile();
   }
+
   setFullscreen(fullscreen: boolean): void {
     if (this.owner.isFullScreen() !== fullscreen) this.owner.setFullScreen(fullscreen);
     this.scheduleReconcile();
   }
+
   hide(): void {
-    if (!this.window.isDestroyed() && this.hostVisible) this.window.hide();
-    this.hostVisible = false;
+    const overlay = this.validOverlay();
+    if (overlay !== null) showWindow(overlay, SW_HIDE);
+    if (!this.owner.isDestroyed()) this.owner.webContents.invalidate();
   }
+
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     this.reconcileTimer = null;
     screen.removeListener("display-metrics-changed", this.displayMetricsListener);
-    if (!this.window.isDestroyed()) this.window.destroy();
-    this.hostVisible = false;
+    this.detachWindow();
+  }
+
+  private validOverlay(): bigint | null {
+    return this.overlay !== null && isWindow(this.overlay) !== 0 ? this.overlay : null;
   }
 
   private scheduleReconcile(): void {
     if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     this.applyBounds();
-    this.reconcileTimer = setTimeout(() => { this.reconcileTimer = null; this.applyBounds(); }, 500);
+    this.reconcileTimer = setTimeout(() => {
+      this.reconcileTimer = null;
+      this.applyBounds();
+    }, 500);
   }
 
   private applyBounds(): void {
-    if (this.window.isDestroyed() || this.owner.isDestroyed() || this.owner.isMinimized() || !this.owner.isVisible() || !this.viewport.visible) {
-      this.hide(); return;
+    const overlay = this.validOverlay();
+    if (overlay === null || this.destroyed || this.owner.isDestroyed()
+      || this.owner.isMinimized() || !this.owner.isVisible() || !this.viewport.visible) {
+      this.hide();
+      return;
     }
-    const content = this.owner.getContentBounds();
-    const bounds = videoHostBounds(content, this.viewport);
-    if (bounds.width < 16 || bounds.height < 16) { this.hide(); return; }
-    if (!this.lastBounds || Object.keys(bounds).some((key) => bounds[key as keyof Rectangle] !== this.lastBounds![key as keyof Rectangle])) {
-      this.window.setBounds(bounds, false);
-      this.lastBounds = bounds;
+    const bounds = videoHostBounds(this.owner.getContentBounds(), this.viewport);
+    if (bounds.width < 16 || bounds.height < 16) {
+      this.hide();
+      return;
     }
-    if (!this.hostVisible) {
-      this.window.showInactive();
-      this.hostVisible = true;
-    }
-    this.window.moveTop();
+    const boundsChanged = !this.lastBounds || Object.keys(bounds).some(
+      (key) => bounds[key as keyof Rectangle] !== this.lastBounds![key as keyof Rectangle],
+    );
+    if (boundsChanged) this.lastBounds = bounds;
+    setWindowPos(
+      overlay,
+      null,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    );
   }
 }
