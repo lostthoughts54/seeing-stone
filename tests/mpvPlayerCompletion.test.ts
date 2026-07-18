@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { MpvPlayerService } from "../src/main/services/mpvPlayer";
+import { embeddedRenderProfileArgs, MpvPlayerService } from "../src/main/services/mpvPlayer";
 import { PlaybackCompletionCoordinator } from "../src/main/services/playbackCompletion";
+import { AppError } from "../src/main/services/errors";
 import type { ResolvedPlaybackSource } from "../src/main/services/playbackSession";
 
 const ticks = 10_000_000;
@@ -184,6 +185,65 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("MpvPlayerService natural completion", () => {
+  it("uses the Windows D3D11 profile before the software-safe embedded fallback", () => {
+    expect(embeddedRenderProfileArgs("d3d11")).toEqual([
+      "--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0",
+    ]);
+    expect(embeddedRenderProfileArgs("opengl-software")).toEqual([
+      "--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0",
+    ]);
+  });
+
+  it("retries embedded rendering before emitting its single Jellyfin start report", async () => {
+    const h = harness({ embedded: true });
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    const candidate = { ...source("episode-1", "embedded-playback"), diagnostics: {
+      sourceKind: "direct-play" as const, playbackRate: 1, bufferAheadTicks: null,
+      container: "mkv", videoCodec: "h264", audioCodec: "aac", audioChannels: "stereo",
+      resolution: "1920×1080", bitrate: null, videoRange: "SDR", transcodeReason: null,
+    } };
+    h.playback.start.mockResolvedValue(candidate);
+    h.internals.openPlaybackTarget = vi.fn(async () => ({ media: candidate.mediaUrl, subtitles: [] }));
+    const attempts = vi.fn()
+      .mockRejectedValueOnce(new AppError("VIDEO_OUTPUT_UNAVAILABLE", "synthetic D3D11 failure", 503))
+      .mockResolvedValueOnce(undefined);
+    h.internals.launchProcessAttempt = attempts;
+
+    await expect(h.player.start("episode-1", "resume")).resolves.toMatchObject({ playbackId: "embedded-playback" });
+
+    expect(attempts.mock.calls.map((call) => call[4])).toEqual(["d3d11", "opengl-software"]);
+    expect(h.reports).toEqual([{ kind: "start", itemId: "episode-1" }]);
+    expect(h.player.getState().diagnostics).toMatchObject({
+      videoOutput: "opengl-software",
+      videoOutputHealthy: false,
+      hardwareDecoding: false,
+      renderFallbackUsed: true,
+    });
+  });
+
+  it("requires configured output for video but allows genuine audio-only tracks", async () => {
+    const h = harness({ embedded: true });
+    const videoIpc = {
+      command: vi.fn(async (command: unknown[]) => {
+        const property = command[1];
+        if (property === "track-list") return [{ type: "video" }, { type: "audio" }];
+        if (property === "vo-configured") return true;
+        if (property === "current-vo") return "gpu-next";
+        if (property === "video-format") return "nv12";
+        if (property === "hwdec-current") return "d3d11va";
+        return null;
+      }),
+    };
+    await expect((h.player as never as { waitForEmbeddedVideoOutput(ipc: unknown): Promise<unknown> })
+      .waitForEmbeddedVideoOutput(videoIpc)).resolves.toEqual({ hasVideo: true, hardwareDecoding: true });
+
+    h.current.diagnostics = undefined;
+    const audioIpc = { command: vi.fn(async () => [{ type: "audio" }]) };
+    await expect((h.player as never as { waitForEmbeddedVideoOutput(ipc: unknown): Promise<unknown> })
+      .waitForEmbeddedVideoOutput(audioIpc)).resolves.toEqual({ hasVideo: false, hardwareDecoding: null });
+  });
+
   it("falls through failed local launches and reports only the successful server source", async () => {
     const h = harness();
     h.internals.source = null;

@@ -23,6 +23,27 @@ import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackS
 import type { MpvVideoHost } from "./embeddedVideoHost";
 
 const TICKS_PER_SECOND = 10_000_000;
+const VIDEO_OUTPUT_TIMEOUT_MS = 5000;
+
+type MpvRenderProfile = "legacy" | "d3d11" | "opengl-software";
+
+export function embeddedRenderProfileArgs(profile: Exclude<MpvRenderProfile, "legacy">): string[] {
+  return profile === "d3d11"
+    ? ["--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0"]
+    : ["--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0"];
+}
+
+function hasVideoTrack(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => Boolean(entry)
+    && typeof entry === "object"
+    && (entry as Record<string, unknown>).type === "video");
+}
+
+function hasAudioOrVideoTrack(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => Boolean(entry)
+    && typeof entry === "object"
+    && ["audio", "video"].includes(String((entry as Record<string, unknown>).type)));
+}
 
 interface MutablePlaybackSnapshot {
   volume: number;
@@ -45,6 +66,8 @@ function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
       sourceKind: null, playbackRate: 1, bufferAheadTicks: null, container: null,
       videoCodec: null, audioCodec: null, audioChannels: null, resolution: null,
       bitrate: null, videoRange: null, transcodeReason: null,
+      videoOutput: null, videoOutputHealthy: null, hardwareDecoding: null,
+      renderFallbackUsed: false,
     },
     positionTicks: 0,
     durationTicks: 0,
@@ -116,6 +139,7 @@ export class MpvPlayerService implements PlayerController {
   private timelineBaseTicks = 0;
   private rawTimePositionSeconds = 0;
   private demuxerCacheTimeSeconds: number | null = null;
+  private activeRenderProfile: MpvRenderProfile = "legacy";
   private readonly externalSubtitleStreamByTrackId = new Map<number, number>();
 
   constructor(
@@ -425,6 +449,7 @@ export class MpvPlayerService implements PlayerController {
       this.timelineBaseTicks = 0;
       this.rawTimePositionSeconds = 0;
       this.demuxerCacheTimeSeconds = null;
+      this.activeRenderProfile = "legacy";
       this.playbackRate = 1;
       this.pendingPause = null;
       this.pendingSeek = null;
@@ -450,6 +475,7 @@ export class MpvPlayerService implements PlayerController {
       this.timelineBaseTicks = 0;
       this.rawTimePositionSeconds = 0;
       this.demuxerCacheTimeSeconds = null;
+      this.activeRenderProfile = "legacy";
       this.videoHost?.hide();
       this.update(emptyState(), "stop", { origin: "system" });
     }
@@ -474,6 +500,7 @@ export class MpvPlayerService implements PlayerController {
     this.timelineBaseTicks = 0;
     this.rawTimePositionSeconds = 0;
     this.demuxerCacheTimeSeconds = null;
+    this.activeRenderProfile = "legacy";
     this.externalSubtitleStreamByTrackId.clear();
     this.playbackRate = 1;
     this.pendingPause = null;
@@ -517,6 +544,16 @@ export class MpvPlayerService implements PlayerController {
   }
 
   private async discardLaunchAttempt(): Promise<void> {
+    await this.discardProcessAttempt();
+    await this.proxy.close().catch(() => undefined);
+    this.playbackTarget = null;
+    this.source = null;
+    this.timelineBaseTicks = 0;
+    this.rawTimePositionSeconds = 0;
+    this.demuxerCacheTimeSeconds = null;
+  }
+
+  private async discardProcessAttempt(): Promise<void> {
     const process = this.process;
     const ipc = this.ipc;
     this.process = null;
@@ -524,12 +561,6 @@ export class MpvPlayerService implements PlayerController {
     await ipc?.command(["quit"]).catch(() => undefined);
     ipc?.close();
     if (process && !process.killed) process.kill();
-    await this.proxy.close().catch(() => undefined);
-    this.playbackTarget = null;
-    this.source = null;
-    this.timelineBaseTicks = 0;
-    this.rawTimePositionSeconds = 0;
-    this.demuxerCacheTimeSeconds = null;
   }
 
   private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
@@ -549,9 +580,52 @@ export class MpvPlayerService implements PlayerController {
   }
 
   private async launchProcess(playbackTargets: PlaybackTargets, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
+    if (!this.videoHost) {
+      await this.launchProcessAttempt(playbackTargets, positionTicks, paused, windowMaximized, "legacy");
+      return;
+    }
+    try {
+      await this.launchProcessAttempt(playbackTargets, positionTicks, paused, windowMaximized, "d3d11");
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== "VIDEO_OUTPUT_UNAVAILABLE") throw error;
+      await this.discardProcessAttempt();
+      this.update({
+        ...this.state,
+        diagnostics: {
+          ...this.state.diagnostics!,
+          videoOutput: "opengl-software",
+          videoOutputHealthy: false,
+          hardwareDecoding: false,
+          renderFallbackUsed: true,
+        },
+      });
+      try {
+        await this.launchProcessAttempt(playbackTargets, positionTicks, paused, windowMaximized, "opengl-software");
+      } catch (fallbackError) {
+        await this.discardProcessAttempt();
+        if (!(fallbackError instanceof AppError) || fallbackError.code !== "VIDEO_OUTPUT_UNAVAILABLE") {
+          throw fallbackError;
+        }
+        throw new AppError(
+          "VIDEO_OUTPUT_UNAVAILABLE",
+          "Embedded video output could not be initialized. The legacy player remains available in playback settings.",
+          503,
+        );
+      }
+    }
+  }
+
+  private async launchProcessAttempt(
+    playbackTargets: PlaybackTargets,
+    positionTicks: number,
+    paused: boolean,
+    windowMaximized: boolean,
+    profile: MpvRenderProfile,
+  ): Promise<void> {
     this.eofArmed = false;
     this.rawTimePositionSeconds = 0;
     this.demuxerCacheTimeSeconds = null;
+    this.activeRenderProfile = profile;
     const pipePath = `\\\\.\\pipe\\seeing-stone-${randomUUID()}`;
     const windowId = this.videoHost?.getWindowId();
     const args = [
@@ -559,11 +633,10 @@ export class MpvPlayerService implements PlayerController {
       "--terminal=no",
       "--force-window=immediate",
       "--keep-open=yes",
-      "--hwdec=auto-safe",
+      ...(profile === "legacy" ? ["--hwdec=auto-safe"] : embeddedRenderProfileArgs(profile)),
       `--osc=${this.videoHost ? "no" : "yes"}`,
       `--input-default-bindings=${this.videoHost ? "no" : "yes"}`,
       `--input-vo-keyboard=${this.videoHost ? "no" : "yes"}`,
-      ...(this.videoHost ? ["--gpu-api=opengl"] : []),
       "--title=Seeing Stone Player",
       ...(windowId ? [`--wid=${windowId}`] : ["--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
       `--input-conf=${this.runtime.inputConfig}`,
@@ -613,9 +686,16 @@ export class MpvPlayerService implements PlayerController {
         ipc.observe(10, "demuxer-cache-duration"),
         ipc.observe(11, "demuxer-cache-time"),
         ipc.observe(12, "volume"),
+        ipc.observe(13, "current-vo"),
+        ipc.observe(14, "video-format"),
+        ipc.observe(15, "hwdec-current"),
+        ipc.observe(16, "vo-configured"),
       ]);
       const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
       const rawPositionTicks = Math.max(0, Math.round(authoritativePosition * TICKS_PER_SECOND));
+      const videoReadiness = profile === "legacy"
+        ? { hasVideo: false, hardwareDecoding: null as boolean | null }
+        : await this.waitForEmbeddedVideoOutput(ipc);
       await this.addExternalSubtitles(ipc, playbackTargets);
       this.update({
         ...this.state,
@@ -623,6 +703,13 @@ export class MpvPlayerService implements PlayerController {
         paused,
         seekable: this.source?.usesServerTimelineOffset ? true : this.state.seekable,
         phase: "ready",
+        diagnostics: {
+          ...this.state.diagnostics!,
+          videoOutput: profile === "legacy" ? null : profile,
+          videoOutputHealthy: profile === "legacy" || !videoReadiness.hasVideo ? null : true,
+          hardwareDecoding: videoReadiness.hardwareDecoding,
+          renderFallbackUsed: profile === "opengl-software",
+        },
       }, "ready", { origin: "system" });
     };
     await Promise.race([initialize(), startupFailure]);
@@ -994,6 +1081,34 @@ export class MpvPlayerService implements PlayerController {
     await this.preferences.setWindowMaximized(maximized);
   }
 
+  private async waitForEmbeddedVideoOutput(ipc: MpvIpcClient): Promise<{ hasVideo: boolean; hardwareDecoding: boolean | null }> {
+    const deadline = Date.now() + VIDEO_OUTPUT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const trackList = await ipc.command(["get_property", "track-list"]).catch(() => null);
+      const videoPresent = hasVideoTrack(trackList);
+      if (!videoPresent && hasAudioOrVideoTrack(trackList)) {
+        return { hasVideo: false, hardwareDecoding: null };
+      }
+      if (videoPresent) {
+        const [configured, currentVo, videoFormat, hwdec] = await Promise.all([
+          ipc.command(["get_property", "vo-configured"]).catch(() => null),
+          ipc.command(["get_property", "current-vo"]).catch(() => null),
+          ipc.command(["get_property", "video-format"]).catch(() => null),
+          ipc.command(["get_property", "hwdec-current"]).catch(() => null),
+        ]);
+        if (configured === true && typeof currentVo === "string" && currentVo.length > 0
+          && typeof videoFormat === "string" && videoFormat.length > 0) {
+          return {
+            hasVideo: true,
+            hardwareDecoding: typeof hwdec === "string" && hwdec.length > 0 && hwdec !== "no",
+          };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "Embedded video output did not become ready.", 503);
+  }
+
   private async waitForPropertyNumber(ipc: MpvIpcClient, property: string): Promise<number> {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
@@ -1104,6 +1219,22 @@ export class MpvPlayerService implements PlayerController {
       if (this.demuxerCacheTimeSeconds === null) {
         next.diagnostics = { ...next.diagnostics!, bufferAheadTicks: Math.max(0, Math.round(message.data * TICKS_PER_SECOND)) };
       }
+    }
+    if (this.activeRenderProfile !== "legacy" && message.name === "current-vo" && typeof message.data === "string") {
+      next.diagnostics = {
+        ...next.diagnostics!,
+        videoOutput: this.activeRenderProfile,
+        renderFallbackUsed: this.activeRenderProfile === "opengl-software",
+      };
+    }
+    if (this.activeRenderProfile !== "legacy" && message.name === "vo-configured" && typeof message.data === "boolean") {
+      next.diagnostics = { ...next.diagnostics!, videoOutputHealthy: message.data };
+    }
+    if (this.activeRenderProfile !== "legacy" && message.name === "hwdec-current") {
+      next.diagnostics = {
+        ...next.diagnostics!,
+        hardwareDecoding: typeof message.data === "string" && message.data.length > 0 && message.data !== "no",
+      };
     }
     if (message.name === "fullscreen" && typeof message.data === "boolean") {
       next.fullscreen = message.data;

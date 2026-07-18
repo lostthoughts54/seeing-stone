@@ -143,4 +143,8 @@ export const cachedPlaybackDiagnosticsSchema = z.object({
   bitrate: cachedNonnegativeInteger.nullable(),
   videoRange: cachedOptionalText(64),
   transcodeReason: cachedOptionalText(1024),
+  videoOutput: z.enum(["d3d11", "opengl-software"]).nullable().optional(),
+  videoOutputHealthy: z.boolean().nullable().optional(),
+  hardwareDecoding: z.boolean().nullable().optional(),
+  renderFallbackUsed: z.boolean().optional(),
 }).strict();

@@ -1914,6 +1914,10 @@ function playerStructureKey(playback: PlaybackState | null): string {
       bitrate: diagnostics?.bitrate,
       videoRange: diagnostics?.videoRange,
       transcodeReason: diagnostics?.transcodeReason,
+      videoOutput: diagnostics?.videoOutput,
+      videoOutputHealthy: diagnostics?.videoOutputHealthy,
+      hardwareDecoding: diagnostics?.hardwareDecoding,
+      renderFallbackUsed: diagnostics?.renderFallbackUsed,
       audioTracks: trackStructure(playback.audioTracks),
       subtitleTracks: trackStructure(playback.subtitleTracks),
     } : null,
@@ -2109,6 +2113,14 @@ function renderSoloSessionPanel(): void {
     ...(snapshot?.connection.serverVersion ? [{ label: "Server version", value: snapshot.connection.serverVersion }] : []),
     ...(formatPlaybackRate(diagnostics?.playbackRate) ? [{ label: "Playback rate", value: formatPlaybackRate(diagnostics?.playbackRate) as string }] : []),
     ...(diagnostics?.transcodeReason ? [{ label: "Transcode reason", value: diagnostics.transcodeReason, tone: "amber" }] : []),
+    ...(diagnostics?.videoOutput ? [{ label: "Video output", value: diagnostics.videoOutput === "d3d11" ? "D3D11" : "Software OpenGL" }] : []),
+    ...(diagnostics?.videoOutputHealthy !== undefined && diagnostics.videoOutputHealthy !== null
+      ? [{ label: "Video output health", value: diagnostics.videoOutputHealthy ? "Ready" : "Unavailable", tone: diagnostics.videoOutputHealthy ? "green" : "amber" }]
+      : []),
+    ...(diagnostics?.hardwareDecoding !== undefined && diagnostics.hardwareDecoding !== null
+      ? [{ label: "Hardware decoding", value: diagnostics.hardwareDecoding ? "Active" : "Off" }]
+      : []),
+    ...(diagnostics?.renderFallbackUsed ? [{ label: "Render fallback", value: "Software rendering", tone: "amber" }] : []),
   ];
   if (advanced.length > 0) {
     const details = document.createElement("details");

@@ -79,6 +79,10 @@ describe("offline cache schemas", () => {
     bitrate: 5_000_000,
     videoRange: "SDR",
     transcodeReason: null,
+    videoOutput: "d3d11" as const,
+    videoOutputHealthy: true,
+    hardwareDecoding: true,
+    renderFallbackUsed: false,
   };
 
   it("accepts bounded sanitized values and rejects privileged or unknown fields", () => {

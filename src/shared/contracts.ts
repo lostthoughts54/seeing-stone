@@ -125,6 +125,11 @@ export interface PlaybackDiagnostics {
   bitrate: number | null;
   videoRange: string | null;
   transcodeReason: string | null;
+  /** Sanitized embedded renderer profile; never contains device or driver names. */
+  videoOutput?: "d3d11" | "opengl-software" | null;
+  videoOutputHealthy?: boolean | null;
+  hardwareDecoding?: boolean | null;
+  renderFallbackUsed?: boolean;
 }
 
 export interface PlaybackTrack {

@@ -128,7 +128,11 @@ describe("renderer and preload security boundary", () => {
     expect(player).toContain("this.mainWindow.show()");
     expect(player).not.toContain("this.mainWindow.hide()");
     expect(player).toContain("`--wid=${windowId}`");
-    expect(player).toContain('["--gpu-api=opengl"]');
+    expect(player).toContain('"--gpu-api=d3d11"');
+    expect(player).toContain('"--gpu-context=d3d11"');
+    expect(player).toContain('"--gpu-api=opengl"');
+    expect(player).toContain('"--gpu-context=win"');
+    expect(player).toContain('"--panscan=0"');
     expect(host).toContain("new BaseWindow({");
     expect(host).not.toContain("new BrowserWindow({");
     expect(host).toContain("getNativeWindowHandle()");
