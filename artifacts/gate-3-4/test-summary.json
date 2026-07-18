@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "gate": "3-4",
+  "sourceRevision": "949c1290b0eba8e054d9207497d40b9867acdb02",
+  "sourceTree": "clean",
+  "environment": {
+    "platform": "win32",
+    "architecture": "x64",
+    "appVersion": "0.4.3",
+    "electronVersion": "43.1.0",
+    "fixturePolicy": "repository-owned or isolated synthetic data only"
+  },
+  "results": [
+    { "name": "typescript", "status": "passed", "targets": 3 },
+    { "name": "license-policy", "status": "passed" },
+    { "name": "unit", "status": "passed", "files": 30, "tests": 192 },
+    { "name": "compiled-core", "status": "passed", "tests": 22 },
+    { "name": "electron-integration", "status": "passed", "tests": 21 },
+    { "name": "electron-persistence", "status": "passed", "schemaVersion": 3 },
+    { "name": "media-probe", "status": "passed" },
+    { "name": "mpv-runtime", "status": "passed", "runtimeVersion": "v0.41.0-dev-ge5486b96d" },
+    { "name": "mpv-completion", "status": "passed" },
+    { "name": "player-shell-visual", "status": "passed", "screenshots": 8, "rendererErrors": 0 }
+  ],
+  "intentionallyNotRun": [
+    {
+      "name": "authenticated-jellyfin",
+      "reason": "No disposable isolated Jellyfin service was provisioned; the normal user server was not contacted."
+    },
+    {
+      "name": "syncplay-service",
+      "reason": "Gate 5 isolated SyncPlay acceptance remains pending."
+    },
+    {
+      "name": "desktop-pixel-capture",
+      "reason": "Evidence uses Electron capturePage and synthetic media only; no desktop pixels were captured."
+    }
+  ]
+}

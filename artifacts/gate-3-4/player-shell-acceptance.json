@@ -1,30 +1,79 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "harness": "isolated-visual-fixture",
+  "provenance": {
+    "commit": "949c1290b0eba8e054d9207497d40b9867acdb02",
+    "sourceTree": "clean",
+    "appVersion": "0.4.3",
+    "platform": "win32",
+    "architecture": "x64",
+    "electronVersion": "43.1.0",
+    "fixture": "isolated-visual-fixture"
+  },
   "screenshots": [
     {
       "filename": "player-wide.png",
       "width": 1664,
       "height": 915,
-      "panelCollapsed": false
+      "panelCollapsed": false,
+      "settingsVisible": false,
+      "sha256": "3e3a86965afaad101be866c071a2349a7439287cfe7ab859152d3c2cf5383cbe"
+    },
+    {
+      "filename": "player-intermediate.png",
+      "width": 1184,
+      "height": 735,
+      "panelCollapsed": false,
+      "settingsVisible": false,
+      "sha256": "6b4994f10b550846f6bf497fc1bc3959701df7765683f9f1ccdad82ad610f5e8"
     },
     {
       "filename": "player-constrained.png",
       "width": 964,
       "height": 695,
-      "panelCollapsed": true
+      "panelCollapsed": true,
+      "settingsVisible": false,
+      "sha256": "d6e6694137e412a4ea571658a952db3644f9a44029b286cf1466d72dfa1dfdc9"
     },
     {
       "filename": "player-constrained-session-drawer.png",
       "width": 964,
       "height": 695,
-      "panelCollapsed": false
+      "panelCollapsed": false,
+      "settingsVisible": false,
+      "sha256": "4a8865b9217435289798d27bb84b5536ebf6881241ef5cb70bb22d65a2c8b91e"
+    },
+    {
+      "filename": "player-compact-session-drawer.png",
+      "width": 744,
+      "height": 585,
+      "panelCollapsed": false,
+      "settingsVisible": false,
+      "sha256": "fa1a5bb6bdf51e8c319a3696def44e8ae744a17f15dca5e975d637b0f1cc44cf"
+    },
+    {
+      "filename": "player-compact-settings.png",
+      "width": 744,
+      "height": 585,
+      "panelCollapsed": true,
+      "settingsVisible": true,
+      "sha256": "2d5957cfd657a30e7cce9dd0500de04d52c14bf5ffaf5ab5f231ae6d01ed2037"
     },
     {
       "filename": "player-text-scale-125.png",
       "width": 1264,
       "height": 795,
-      "panelCollapsed": false
+      "panelCollapsed": true,
+      "settingsVisible": false,
+      "sha256": "11c3ae173a91414158c53bf84a697e92e9b9ddf5725eab93a3be4f323e9c1039"
+    },
+    {
+      "filename": "player-disconnected.png",
+      "width": 1264,
+      "height": 755,
+      "panelCollapsed": false,
+      "settingsVisible": false,
+      "sha256": "14d5737d55ddd27989b18da82dd2ff1952d68761502e79cf5f4d8b894eb6ab25"
     }
   ],
   "assertions": {
@@ -32,16 +81,69 @@
     "viewportNonZero": true,
     "panelDoesNotCoverViewport": true,
     "namedControls": true,
-    "focusableCount": 23,
-    "focusedCount": 23,
-    "focusOutlineWidth": "2.4px",
+    "focusableCount": 25,
+    "focusedCount": 25,
+    "focusOutlineWidth": "3px",
     "horizontalOverflow": false,
     "interLoaded": true,
     "spectralLoaded": true,
+    "reducedMotionActive": true,
+    "reducedMotionAnimation": "none",
     "unavailableRowsHidden": true,
     "sourceLabel": "Direct Play",
     "connectionLabel": "Connected",
     "diagnosticsContainSensitiveText": false
   },
+  "interactions": {
+    "panelStableDuringTicks": true,
+    "viewportHiddenWhenScrolled": true,
+    "viewportRestoredAfterScroll": true,
+    "settingsReachable": true,
+    "settingsExpanded": "false",
+    "settingsClosedByEscape": true,
+    "settingsFocusReturned": true,
+    "selectedRate": 1.25,
+    "selectedAudio": 2,
+    "selectedSubtitle": 3,
+    "timelinePositionTicks": 16800000000,
+    "volume": 33,
+    "expectedHalfTicks": 16800000000
+  },
+  "keyboard": {
+    "kPaused": true,
+    "spaceResumed": true,
+    "jSoughtBackTenSeconds": true,
+    "lSoughtForwardTenSeconds": true,
+    "mMuted": true,
+    "fEnteredFullscreen": true
+  },
+  "autoHide": {
+    "visibleWithControlFocus": true,
+    "hiddenWithoutControlFocus": true,
+    "restoredByKeyboardFocus": true
+  },
+  "itemTransition": {
+    "playerVisible": true,
+    "topMeta": "S1 E4 - The Hidden Gate",
+    "metadataTitle": "The Hidden Gate",
+    "playbackId": "visual-transition"
+  },
+  "terminalState": {
+    "playerVisible": true,
+    "phaseLabel": "Player disconnected",
+    "viewportHidden": true,
+    "playDisabled": true,
+    "settingsTracksDisabled": true
+  },
+  "checks": [
+    {
+      "name": "renderer-build",
+      "status": "passed"
+    },
+    {
+      "name": "player-shell-visual",
+      "status": "passed"
+    }
+  ],
   "rendererErrorCount": 0
 }
