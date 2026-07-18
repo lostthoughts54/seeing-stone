@@ -123,10 +123,16 @@ async function runChild() {
     const resetPolicy = panel.querySelector('[data-session-action="buffering-policy"]');
     resetPolicy.value = "wait-for-all";
     resetPolicy.dispatchEvent(new Event("change", { bubbles: true }));
-    await delay(80);
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const current = panel.querySelector('[data-session-action="buffering-policy"]');
+      if (current?.value === "wait-for-all" && !current.disabled) break;
+      await delay(20);
+    }
     const toast = document.getElementById("toast");
     toast.textContent = "";
     toast.classList.add("is-hidden");
+    toast.style.display = "none";
+    toast.setAttribute("aria-hidden", "true");
     const visibleText = document.body.innerText;
     return {
       actionLabels,
