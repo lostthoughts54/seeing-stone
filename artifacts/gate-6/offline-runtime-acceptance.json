@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "gate": 6,
   "fixture": "isolated-real-mpv-offline-reconnect",
-  "sourceRevision": "6f6d454126bfda66699a1b32198a14c1ec53f238",
-  "sourceTree": "working-tree",
+  "sourceRevision": "c716bee218bebeeb2d128b5abc6510eaba145367",
+  "sourceTree": "clean",
   "assertions": {
     "verifiedLocalLaunch": true,
     "sourceKind": "offline-local",
