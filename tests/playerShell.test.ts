@@ -26,12 +26,18 @@ describe("Seeing Stone player shell", () => {
       "playerSubtitleSelect",
       "playerFullscreenButton",
       "playerNextButton",
+      "playerSettingsMenu",
+      "playerSettingsRateSelect",
+      "playerSettingsAudioSelect",
+      "playerSettingsSubtitleSelect",
       "sessionPanel",
       "sessionSoloTab",
       "sessionWatchpartyTab",
       "sessionChatTab",
     ]) expect(html).toContain(`id="${id}"`);
     expect(html).toMatch(/id="sessionChatTab"[^>]*aria-disabled="true"[^>]*disabled/);
+    expect(html).toMatch(/id="playerSettingsButton"[^>]*aria-controls="playerSettingsMenu"[^>]*aria-expanded="false"/);
+    expect(html).toMatch(/id="openSessionPanelButton"[^>]*aria-controls="sessionPanel"[^>]*aria-expanded="true"/);
   });
 
   it("bundles local fonts, responsive layouts, reduced motion, and visible focus", async () => {
@@ -63,6 +69,38 @@ describe("Seeing Stone player shell", () => {
     expect(styles).toContain('.player-controls:not(:focus-within)');
     expect(renderer).toContain('!playerControls.contains(document.activeElement)');
     expect(renderer).toContain('playerView.addEventListener("focusin", markPlayerActivity)');
+  });
+
+  it("keeps compact playback options reachable through the real settings surface", async () => {
+    const [html, styles, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(html).toContain('role="dialog" aria-labelledby="playerSettingsTitle"');
+    expect(html).toContain("Open playback diagnostics");
+    expect(styles).not.toContain(".compact-control:nth-of-type(2)");
+    expect(styles).toContain(".player-settings-grid { grid-template-columns: 1fr; }");
+    expect(renderer).toContain("playerSettingsRateSelect.addEventListener");
+    expect(renderer).toContain("playerSettingsAudioSelect.addEventListener");
+    expect(renderer).toContain("playerSettingsSubtitleSelect.addEventListener");
+    expect(renderer).toContain("closePlayerSettings()");
+  });
+
+  it("does not rebuild dynamic panel content for every position tick", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("let playerStructuralRenderKey");
+    expect(renderer).toContain("if (forceStructure || structureKey !== playerStructuralRenderKey)");
+    expect(renderer).toContain("const advancedOpen = Boolean");
+    expect(renderer).toContain("const activeAction = activeElement?.dataset.sessionAction");
+  });
+
+  it("preserves a visible safe terminal state after forced player termination", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("const lostActivePlayback");
+    expect(renderer).toContain('playback.phase === "disconnected"');
+    expect(renderer).toContain("void syncPlayerViewport(false)");
+    expect(renderer).not.toContain('playerView.classList.add("is-hidden");\n  document.body.classList.remove("is-playing");\n  void syncPlayerViewport(false);\n  state.lastFocusElement?.focus?.();');
   });
 
   it("reconciles the native host on player scrolling and hides it outside the scrollport", async () => {

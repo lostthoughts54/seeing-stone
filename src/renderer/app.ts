@@ -152,6 +152,12 @@ const playerRateSelect = byId<HTMLSelectElement>("playerRateSelect");
 const playerAudioSelect = byId<HTMLSelectElement>("playerAudioSelect");
 const playerSubtitleSelect = byId<HTMLSelectElement>("playerSubtitleSelect");
 const playerSettingsButton = byId<HTMLButtonElement>("playerSettingsButton");
+const playerSettingsMenu = byId<HTMLElement>("playerSettingsMenu");
+const closePlayerSettingsButton = byId<HTMLButtonElement>("closePlayerSettingsButton");
+const playerSettingsRateSelect = byId<HTMLSelectElement>("playerSettingsRateSelect");
+const playerSettingsAudioSelect = byId<HTMLSelectElement>("playerSettingsAudioSelect");
+const playerSettingsSubtitleSelect = byId<HTMLSelectElement>("playerSettingsSubtitleSelect");
+const playerSettingsDiagnosticsButton = byId<HTMLButtonElement>("playerSettingsDiagnosticsButton");
 const playerNextButton = byId<HTMLButtonElement>("playerNextButton");
 const playerFullscreenButton = byId<HTMLButtonElement>("playerFullscreenButton");
 const playerEyebrow = byId<HTMLElement>("playerEyebrow");
@@ -283,6 +289,8 @@ let volumeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAudibleVolume = 100;
 let soloDiagnosticsRefreshedAt = 0;
 let licensesLastFocus: HTMLElement | null = null;
+let playerSettingsLastFocus: HTMLElement | null = null;
+let playerStructuralRenderKey = "";
 let playerDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
 
 document.title = BRANDING.productName;
@@ -1748,7 +1756,7 @@ interface PlaybackPresentation {
 let playerViewportRevision = 0;
 let playerViewportFrame: number | null = null;
 
-async function syncPlayerViewport(visible = !playerView.classList.contains("is-hidden")): Promise<boolean> {
+async function syncPlayerViewport(visible = !playerView.classList.contains("is-hidden") && Boolean(state.playbackId)): Promise<boolean> {
   const bounds = playerViewport.getBoundingClientRect();
   const scrollport = playerCenter.getBoundingClientRect();
   const fullyInsideScrollport = bounds.left >= scrollport.left
@@ -1795,7 +1803,10 @@ function replacePlayPauseIcon(paused: boolean): void {
 
 function playbackForPlayer(): PlaybackState | null {
   const playback = state.playbackState;
-  return playback && (!state.playbackId || playback.playbackId === state.playbackId) ? playback : null;
+  if (!playback) return null;
+  if (!state.playbackId || playback.playbackId === state.playbackId) return playback;
+  if (playback.playbackId === null && ["ended", "stopped", "error", "disconnected"].includes(playback.phase)) return playback;
+  return null;
 }
 
 function playbackSourceKind(): PlaybackSourceKind | null {
@@ -1826,6 +1837,87 @@ function renderTrackSelect(select: HTMLSelectElement, tracks: PlaybackTrack[], i
   }
   if (includeOff && selected === null) select.value = "";
   select.disabled = tracks.length === 0;
+}
+
+function renderRateSelect(select: HTMLSelectElement, rate: number, disabled: boolean): void {
+  const value = String(rate);
+  for (const transient of select.querySelectorAll<HTMLOptionElement>("option[data-transient-rate]")) transient.remove();
+  if (!Array.from(select.options).some((option) => option.value === value)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = `${rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}×`;
+    option.dataset.transientRate = "true";
+    select.append(option);
+  }
+  select.value = value;
+  select.disabled = disabled;
+}
+
+function trackStructure(tracks: PlaybackTrack[]): unknown[] {
+  return tracks.map((track) => [
+    track.id,
+    track.type,
+    track.title,
+    track.language,
+    track.codec,
+    track.channels,
+    track.selected,
+    track.external,
+    track.isForced,
+    track.isDefault,
+  ]);
+}
+
+function playerStructureKey(playback: PlaybackState | null): string {
+  const diagnostics = playback?.diagnostics;
+  const item = state.soloDiagnostics?.item || state.playbackItem;
+  const next = state.soloDiagnostics?.nextUp || null;
+  const connection = state.soloDiagnostics?.connection;
+  const group = state.watchParties?.joinedGroup;
+  return JSON.stringify({
+    playback: playback ? {
+      playbackId: playback.playbackId,
+      itemId: playback.itemId,
+      phase: playback.phase,
+      source: playback.source,
+      sourceKind: diagnostics?.sourceKind,
+      rate: diagnostics?.playbackRate,
+      bufferAheadTicks: diagnostics?.bufferAheadTicks,
+      container: diagnostics?.container,
+      resolution: diagnostics?.resolution,
+      videoCodec: diagnostics?.videoCodec,
+      audioCodec: diagnostics?.audioCodec,
+      audioChannels: diagnostics?.audioChannels,
+      bitrate: diagnostics?.bitrate,
+      videoRange: diagnostics?.videoRange,
+      transcodeReason: diagnostics?.transcodeReason,
+      audioTracks: trackStructure(playback.audioTracks),
+      subtitleTracks: trackStructure(playback.subtitleTracks),
+    } : null,
+    item: item ? [item.id, item.name, item.type, item.seriesName, item.indexNumber, item.parentIndexNumber, item.runTimeTicks, item.overview] : null,
+    next: next ? [next.id, next.name, next.type, next.seriesName, next.indexNumber, next.parentIndexNumber, next.runTimeTicks] : null,
+    connection: connection ? [connection.state, connection.serverName, connection.serverVersion, connection.requestLatencyMs] : null,
+    panelView: state.sessionPanelView,
+    group: group ? [group.groupId, group.name, group.playbackState, group.participantCount, group.participants, group.currentItemId, group.playlistItemId] : null,
+    watchPartyAvailability: state.watchParties?.availability,
+    watchPartyConnection: state.watchParties?.connection,
+    watchPartyError: state.watchParties?.error,
+  });
+}
+
+function renderPlayerStructure(playback: PlaybackState | null): void {
+  renderTrackSelect(playerAudioSelect, playback?.audioTracks || [], false);
+  renderTrackSelect(playerSubtitleSelect, playback?.subtitleTracks || [], true);
+  renderTrackSelect(playerSettingsAudioSelect, playback?.audioTracks || [], false);
+  renderTrackSelect(playerSettingsSubtitleSelect, playback?.subtitleTracks || [], true);
+  if (!state.playbackId) {
+    playerAudioSelect.disabled = true;
+    playerSubtitleSelect.disabled = true;
+    playerSettingsAudioSelect.disabled = true;
+    playerSettingsSubtitleSelect.disabled = true;
+  }
+  renderPlayerMetadata();
+  renderSessionPanel();
 }
 
 function renderPlayerMetadata(): void {
@@ -1871,7 +1963,7 @@ function renderPlayerMetadata(): void {
   }
 }
 
-function renderPlayerState(): void {
+function renderPlayerState(forceStructure = false): void {
   const playback = playbackForPlayer();
   const phase = playbackPhasePresentation(playback);
   const sourceKind = playbackSourceKind();
@@ -1909,18 +2001,20 @@ function renderPlayerState(): void {
   playerVolume.value = String(volume);
   playerMuteButton.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
   playerMuteButton.title = volume === 0 ? "Unmute (M)" : "Mute (M)";
-  playerRateSelect.value = String(playback?.diagnostics?.playbackRate || 1);
-  playerRateSelect.disabled = !state.playbackId;
+  const playbackRate = playback?.diagnostics?.playbackRate || 1;
+  renderRateSelect(playerRateSelect, playbackRate, !state.playbackId);
+  renderRateSelect(playerSettingsRateSelect, playbackRate, !state.playbackId);
   playerVolume.disabled = !state.playbackId;
   playerMuteButton.disabled = !state.playbackId;
   playerFullscreenButton.disabled = !state.playbackId;
   playerFullscreenButton.setAttribute("aria-label", playback?.fullscreen ? "Exit fullscreen" : "Enter fullscreen");
   playerFullscreenButton.title = playback?.fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)";
   playerView.dataset.fullscreen = String(Boolean(playback?.fullscreen));
-  renderTrackSelect(playerAudioSelect, playback?.audioTracks || [], false);
-  renderTrackSelect(playerSubtitleSelect, playback?.subtitleTracks || [], true);
-  renderPlayerMetadata();
-  renderSessionPanel();
+  const structureKey = playerStructureKey(playback);
+  if (forceStructure || structureKey !== playerStructuralRenderKey) {
+    playerStructuralRenderKey = structureKey;
+    renderPlayerStructure(playback);
+  }
 }
 
 type SessionRow = { label: string; value: string; tone?: string };
@@ -1995,6 +2089,7 @@ function renderSoloSessionPanel(): void {
     const body = document.createElement("div");
     details.className = "session-details";
     summary.textContent = "Advanced diagnostics";
+    summary.dataset.sessionAction = "advanced-diagnostics";
     details.append(summary);
     for (const row of advanced) {
       const element = document.createElement("div");
@@ -2026,6 +2121,7 @@ function renderSoloSessionPanel(): void {
     meta.textContent = [episodeCode(next), next.seriesName, runtime(next)].filter(Boolean).join(" · ");
     button.type = "button";
     button.textContent = "Play next";
+    button.dataset.sessionAction = "play-next";
     button.disabled = !canPlay(next);
     button.addEventListener("click", () => { void playItem(next); });
     card.append(title, meta, button);
@@ -2052,6 +2148,7 @@ function renderWatchpartySessionPanel(): void {
     empty.textContent = value?.error?.message || "Join a Jellyfin watch party to share playback controls.";
     open.type = "button";
     open.textContent = "Open Watch Parties";
+    open.dataset.sessionAction = "open-watch-parties";
     open.addEventListener("click", async () => {
       await closePlayer();
       await openWatchParties();
@@ -2076,36 +2173,81 @@ function renderWatchpartySessionPanel(): void {
   actions.className = "session-party-actions";
   resync.type = "button";
   resync.textContent = "Resync";
+  resync.dataset.sessionAction = "resync";
   resync.addEventListener("click", () => { void resyncWatchParty(resync); });
   leave.type = "button";
   leave.textContent = "Leave Party";
+  leave.dataset.sessionAction = "leave-party";
   leave.addEventListener("click", () => { void leaveWatchParty(leave); });
   actions.append(resync, leave);
   sessionPanelContent.append(enhanced, actions);
 }
 
 function renderSessionPanel(): void {
-  sessionSoloTab.setAttribute("aria-selected", String(state.sessionPanelView === "solo"));
-  sessionWatchpartyTab.setAttribute("aria-selected", String(state.sessionPanelView === "watchparty"));
+  const scrollTop = sessionPanelContent.scrollTop;
+  const activeElement = document.activeElement instanceof HTMLElement && sessionPanelContent.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  const activeAction = activeElement?.dataset.sessionAction || null;
+  const advancedOpen = Boolean(sessionPanelContent.querySelector<HTMLDetailsElement>(".session-details")?.open);
+  const soloSelected = state.sessionPanelView === "solo";
+  sessionSoloTab.setAttribute("aria-selected", String(soloSelected));
+  sessionSoloTab.tabIndex = soloSelected ? 0 : -1;
+  sessionWatchpartyTab.setAttribute("aria-selected", String(!soloSelected));
+  sessionWatchpartyTab.tabIndex = soloSelected ? -1 : 0;
+  sessionPanelContent.setAttribute("aria-labelledby", soloSelected ? "sessionSoloTab" : "sessionWatchpartyTab");
   if (state.sessionPanelView === "watchparty") renderWatchpartySessionPanel();
   else renderSoloSessionPanel();
+  const advanced = sessionPanelContent.querySelector<HTMLDetailsElement>(".session-details");
+  if (advanced && advancedOpen) advanced.open = true;
+  sessionPanelContent.scrollTop = scrollTop;
+  if (activeAction) {
+    const replacement = Array.from(sessionPanelContent.querySelectorAll<HTMLElement>("[data-session-action]"))
+      .find((element) => element.dataset.sessionAction === activeAction);
+    replacement?.focus();
+  }
 }
 
 function setSessionPanelView(view: SessionPanelView): void {
   if (view === "chat") return;
   state.sessionPanelView = view;
-  renderSessionPanel();
+  playerStructuralRenderKey = "";
+  renderPlayerState(true);
 }
 
 function setSessionPanelCollapsed(collapsed: boolean): void {
   state.sessionPanelCollapsed = collapsed;
   playerView.classList.toggle("is-panel-collapsed", collapsed);
   toggleSessionPanelButton.setAttribute("aria-label", collapsed ? "Open Session Panel" : "Collapse Session Panel");
+  toggleSessionPanelButton.setAttribute("aria-expanded", String(!collapsed));
   toggleSessionPanelButton.title = collapsed ? "Open Session Panel" : "Collapse Session Panel";
+  openSessionPanelButton.setAttribute("aria-expanded", String(!collapsed));
   const drawerMode = window.matchMedia("(max-width: 1120px)").matches;
   sessionPanelScrim.classList.toggle("is-hidden", collapsed || !drawerMode);
   sessionPanel.setAttribute("aria-hidden", String(collapsed));
   requestAnimationFrame(() => requestAnimationFrame(schedulePlayerViewport));
+}
+
+function closePlayerSettings(restoreFocus = true): void {
+  if (playerSettingsMenu.classList.contains("is-hidden")) return;
+  playerSettingsMenu.classList.add("is-hidden");
+  playerSettingsButton.setAttribute("aria-expanded", "false");
+  if (restoreFocus) (playerSettingsLastFocus || playerSettingsButton).focus();
+  playerSettingsLastFocus = null;
+}
+
+function openPlayerSettings(): void {
+  playerSettingsLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : playerSettingsButton;
+  playerSettingsMenu.classList.remove("is-hidden");
+  playerSettingsButton.setAttribute("aria-expanded", "true");
+  const firstControl = playerSettingsMenu.querySelector<HTMLElement>("select:not(:disabled), button:not(:disabled)");
+  firstControl?.focus();
+  markPlayerActivity();
+}
+
+function togglePlayerSettings(): void {
+  if (playerSettingsMenu.classList.contains("is-hidden")) openPlayerSettings();
+  else closePlayerSettings();
 }
 
 function markPlayerActivity(): void {
@@ -2193,6 +2335,8 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   state.playbackState = null;
   state.soloDiagnostics = null;
   state.soloDiagnosticsRequestId += 1;
+  playerStructuralRenderKey = "";
+  closePlayerSettings(false);
   soloDiagnosticsRefreshedAt = 0;
   playerTitle.textContent = presentation.title;
   playerMeta.textContent = presentation.meta;
@@ -2274,6 +2418,8 @@ async function closePlayer(): Promise<void> {
   state.playbackSourceKind = null;
   state.playbackState = null;
   state.soloDiagnostics = null;
+  playerStructuralRenderKey = "";
+  closePlayerSettings(false);
   playerView.classList.remove("is-controls-idle");
   if (playerControlsTimer) clearTimeout(playerControlsTimer);
   playerControlsTimer = null;
@@ -2285,6 +2431,7 @@ window.jellyfin.playback.subscribe((playback) => {
   const previousPlaybackId = state.playbackState?.playbackId;
   const previousItemId = state.playbackState?.itemId;
   const playerVisible = !playerView.classList.contains("is-hidden");
+  const lostActivePlayback = playerVisible && Boolean(state.playbackId) && playback.playbackId === null;
   const itemChanged = Boolean(playback.playbackId && (playback.playbackId !== previousPlaybackId || playback.itemId !== previousItemId));
   if (playerVisible && playback.playbackId && playback.playbackId !== state.playbackId) {
     state.playbackId = playback.playbackId;
@@ -2295,6 +2442,7 @@ window.jellyfin.playback.subscribe((playback) => {
     state.soloDiagnosticsRequestId += 1;
     soloDiagnosticsRefreshedAt = 0;
   }
+  if (lostActivePlayback) state.playbackId = null;
   state.playbackState = playback;
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
@@ -2303,15 +2451,10 @@ window.jellyfin.playback.subscribe((playback) => {
     void refreshSoloDiagnostics(itemChanged);
   }
   if (state.currentRoute === "watch-parties") renderWatchParties();
-  if (playback.playbackId || !state.playbackId) return;
-  state.playbackId = null;
-  state.playbackItem = null;
-  state.playbackSourceKind = null;
-  state.soloDiagnostics = null;
-  playerView.classList.add("is-hidden");
-  document.body.classList.remove("is-playing");
+  if (!lostActivePlayback) return;
   void syncPlayerViewport(false);
-  state.lastFocusElement?.focus?.();
+  if (playback.phase === "disconnected") showToast("Playback disconnected. The external player remains available in developer settings.");
+  else if (playback.phase === "error") showToast("Playback stopped because the player reported an error.");
 });
 
 new ResizeObserver(schedulePlayerViewport).observe(playerViewport);
@@ -2710,29 +2853,35 @@ playerMuteButton.addEventListener("click", () => {
     "Volume could not be changed.",
   );
 });
-playerRateSelect.addEventListener("change", () => {
+const changePlayerRate = (select: HTMLSelectElement): void => {
   if (!state.playbackId) return;
-  const rate = Number(playerRateSelect.value);
+  const rate = Number(select.value);
   void applyPlaybackCommand(
     () => window.jellyfin.playback.setRate({ playbackId: state.playbackId as string, rate }),
     "Playback speed could not be changed.",
   );
-});
-playerAudioSelect.addEventListener("change", () => {
-  if (!state.playbackId || !playerAudioSelect.value) return;
+};
+const changePlayerAudio = (select: HTMLSelectElement): void => {
+  if (!state.playbackId || !select.value) return;
   void applyPlaybackCommand(
-    () => window.jellyfin.playback.selectAudio({ playbackId: state.playbackId as string, trackId: Number(playerAudioSelect.value) }),
+    () => window.jellyfin.playback.selectAudio({ playbackId: state.playbackId as string, trackId: Number(select.value) }),
     "The audio track could not be selected.",
   );
-});
-playerSubtitleSelect.addEventListener("change", () => {
+};
+const changePlayerSubtitle = (select: HTMLSelectElement): void => {
   if (!state.playbackId) return;
-  const trackId = playerSubtitleSelect.value ? Number(playerSubtitleSelect.value) : null;
+  const trackId = select.value ? Number(select.value) : null;
   void applyPlaybackCommand(
     () => window.jellyfin.playback.selectSubtitle({ playbackId: state.playbackId as string, trackId }),
     "The subtitle track could not be selected.",
   );
-});
+};
+playerRateSelect.addEventListener("change", () => changePlayerRate(playerRateSelect));
+playerSettingsRateSelect.addEventListener("change", () => changePlayerRate(playerSettingsRateSelect));
+playerAudioSelect.addEventListener("change", () => changePlayerAudio(playerAudioSelect));
+playerSettingsAudioSelect.addEventListener("change", () => changePlayerAudio(playerSettingsAudioSelect));
+playerSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSubtitleSelect));
+playerSettingsSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSettingsSubtitleSelect));
 playerFullscreenButton.addEventListener("click", () => {
   const playback = playbackForPlayer();
   if (!state.playbackId || !playback) return;
@@ -2748,18 +2897,39 @@ const playNext = (): void => {
 };
 playerNextButton.addEventListener("click", playNext);
 playerNextCardButton.addEventListener("click", playNext);
-playerSettingsButton.addEventListener("click", () => {
+playerSettingsButton.addEventListener("click", togglePlayerSettings);
+closePlayerSettingsButton.addEventListener("click", () => closePlayerSettings());
+playerSettingsDiagnosticsButton.addEventListener("click", () => {
+  closePlayerSettings(false);
   setSessionPanelView("solo");
   setSessionPanelCollapsed(false);
   const advanced = sessionPanelContent.querySelector<HTMLDetailsElement>(".session-details");
   if (advanced) advanced.open = true;
-  sessionPanelContent.focus();
+  (advanced?.querySelector<HTMLElement>("summary") || sessionPanelContent).focus();
 });
 sessionSoloTab.addEventListener("click", () => setSessionPanelView("solo"));
 sessionWatchpartyTab.addEventListener("click", () => setSessionPanelView("watchparty"));
-toggleSessionPanelButton.addEventListener("click", () => setSessionPanelCollapsed(true));
-openSessionPanelButton.addEventListener("click", () => setSessionPanelCollapsed(false));
-sessionPanelScrim.addEventListener("click", () => setSessionPanelCollapsed(true));
+for (const tab of [sessionSoloTab, sessionWatchpartyTab]) {
+  tab.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const nextView: SessionPanelView = state.sessionPanelView === "solo" ? "watchparty" : "solo";
+    setSessionPanelView(nextView);
+    (nextView === "solo" ? sessionSoloTab : sessionWatchpartyTab).focus();
+  });
+}
+toggleSessionPanelButton.addEventListener("click", () => {
+  setSessionPanelCollapsed(true);
+  openSessionPanelButton.focus();
+});
+openSessionPanelButton.addEventListener("click", () => {
+  setSessionPanelCollapsed(false);
+  requestAnimationFrame(() => (state.sessionPanelView === "solo" ? sessionSoloTab : sessionWatchpartyTab).focus());
+});
+sessionPanelScrim.addEventListener("click", () => {
+  setSessionPanelCollapsed(true);
+  openSessionPanelButton.focus();
+});
 playerView.addEventListener("pointermove", markPlayerActivity);
 playerView.addEventListener("focusin", markPlayerActivity);
 
@@ -2799,7 +2969,11 @@ document.addEventListener("keydown", (event) => {
     markPlayerActivity();
     if (event.key === "Escape") {
       event.preventDefault();
-      if (playerDrawerMode && !state.sessionPanelCollapsed) setSessionPanelCollapsed(true);
+      if (!playerSettingsMenu.classList.contains("is-hidden")) closePlayerSettings();
+      else if (playerDrawerMode && !state.sessionPanelCollapsed) {
+        setSessionPanelCollapsed(true);
+        openSessionPanelButton.focus();
+      }
       else void closePlayer();
       return;
     }

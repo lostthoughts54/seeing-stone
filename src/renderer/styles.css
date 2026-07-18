@@ -1879,6 +1879,69 @@ select option {
   padding: 0 22px 0 8px;
 }
 
+.player-settings-menu {
+  background: linear-gradient(145deg, rgba(31, 22, 48, 0.98), rgba(10, 10, 18, 0.99));
+  border: 1px solid rgba(183, 141, 240, 0.24);
+  border-radius: 10px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38), inset 0 1px rgba(255, 255, 255, 0.035);
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.player-settings-menu header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.player-settings-menu header span {
+  color: #8f8a99;
+  display: block;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.player-settings-menu h2 {
+  color: #e8def3;
+  font-family: "Spectral", Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1px 0 0;
+}
+
+.player-settings-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.player-settings-grid label {
+  color: #aba5b4;
+  display: grid;
+  font-size: 0.68rem;
+  gap: 5px;
+}
+
+.player-settings-grid select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 7px;
+  color: #ded7e6;
+  min-width: 0;
+  width: 100%;
+}
+
+.player-settings-diagnostics {
+  background: rgba(167, 92, 255, 0.075);
+  border-color: rgba(167, 92, 255, 0.17);
+  color: #c7a8ec;
+  margin-top: 10px;
+  min-height: 34px;
+  width: 100%;
+}
+
 .player-metadata {
   display: grid;
   gap: 20px;
@@ -2679,10 +2742,13 @@ select option {
   .player-view.is-panel-collapsed .open-session-panel-button { display: inline-flex; }
   .player-control-row {
     gap: 8px;
-    grid-template-columns: minmax(100px, 1fr) auto minmax(210px, 1fr);
+    grid-template-columns: minmax(100px, 1fr) auto;
   }
-  .compact-control:nth-of-type(2),
-  .compact-control:nth-of-type(3) { display: none; }
+  .player-options {
+    flex-wrap: wrap;
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 880px) {
@@ -2701,8 +2767,10 @@ select option {
   .player-control-row {
     grid-template-columns: 1fr auto 1fr;
   }
-  .player-volume-group input { display: none; }
+  .player-volume-group input { max-width: 90px; min-width: 54px; }
   .player-options .compact-control { display: none; }
+  .player-options { grid-column: auto; justify-content: flex-end; }
+  .player-settings-grid { grid-template-columns: 1fr; }
   .player-metadata { grid-template-columns: 1fr; }
   .player-next-card { min-height: 0; }
   .license-entry { align-items: start; grid-template-columns: 1fr auto; }

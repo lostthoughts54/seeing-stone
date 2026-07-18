@@ -98,6 +98,45 @@ Safety and limitations:
 - A live isolated Jellyfin matrix remains deferred until a disposable server can be provisioned without touching the user's normal server.
 - The embedded adapter remains disabled in packaged builds, and the legacy player remains selectable.
 
-## Gates 3–6
+## Gates 3–4 — Seeing Stone shell and solo Session Panel
+
+Status: accepted for guarded development use. The packaged application still selects the legacy adapter.
+
+Implemented behavior:
+
+- The placeholder player route is replaced by the approved Now Playing hierarchy: existing navigation rail, identity and status bar, native video surface, external controls, media metadata, Next Up, and a contextual Session Panel.
+- Original replaceable orb branding, locally bundled Inter and Spectral fonts, obsidian/plum surfaces, restrained violet focus and active states, and semantic blue, green, amber, and rose state colors are applied through reusable tokens.
+- Play/pause, ten-second seek, timeline, time labels, volume, mute, playback rate, audio, subtitles, fullscreen, settings, and Next Up use the narrow playback bridge. Controls have accessible names, visible focus, familiar shortcuts, and tooltips.
+- Required rate and track controls remain reachable at compact widths through a real playback-settings surface; compact layouts no longer remove the volume slider.
+- The Session Panel supports solo and Watchparty views while reserving disabled chat architecture. Panel toggles expose expanded state, tabs support arrow navigation, and drawer focus is restored on close.
+- Solo diagnostics show only sanitized available connection, source, state, buffer, media, selected-track, transcode, server-version, and Next Up data. Missing values create no placeholder rows.
+- High-frequency position events update playback controls without rebuilding the Session Panel. Open diagnostics, panel scroll, and focused dynamic actions survive ordinary playback ticks.
+- Automatic item transitions refresh the top identity and lower metadata. Forced player termination hides the native surface while retaining a visible, sanitized disconnected state and the legacy fallback guidance.
+- Open Source Licenses is backed by the generated Gate 0 inventory and rendered through a modal with filtering, keyboard containment, Escape handling, and focus return.
+
+Autonomous evidence:
+
+- Three TypeScript targets passed type checking and the deterministic license policy passed.
+- 192 unit tests passed across 30 files, including shell structure, contrast, responsive settings, state presentation, diagnostics suppression, license inventory, and boundary enforcement.
+- 22 compiled SQLite/core tests passed.
+- 21 hidden Electron integration and security tests passed, including the generated license view and narrow renderer bridge.
+- Persistence, media-probe, pinned-mpv runtime, and real-mpv completion acceptance all passed.
+- `player-shell-acceptance.json` records an isolated-fixture run with source revision, platform/runtime provenance, screenshot hashes, zero renderer errors, and successful assertions for:
+  - wide, intermediate, constrained, compact drawer, compact settings, and 125% text-scale layouts;
+  - viewport/control separation and native-host hide/restore on player scrolling;
+  - focus traversal, bundled font loading, reduced motion, unavailable-data suppression, and sensitive-text rejection;
+  - trusted K, Space, J, L, M, and F input;
+  - timeline, volume, rate, audio, subtitle, settings Escape/focus return, and fullscreen auto-hide;
+  - focus-preserving high-frequency updates, automatic item transitions, and forced-player termination.
+- Eight sanitized screenshots are stored under `artifacts/gate-3-4`, including a compact settings surface and disconnected terminal state. Every screenshot is generated from the visibly named isolated visual fixture; no real account or server data is used.
+
+Deferred manual evidence:
+
+- Subjective visual approval on the user's physical displays.
+- Screen-reader testing with the user's preferred assistive technology.
+- Physical keyboard/media-key variations and unusual Windows text-rendering configurations.
+- GPU, HDR, and multi-device scenarios remain deferred with Gate 1 physical checks.
+
+## Gates 5–6
 
 Status: in progress. Later sections will be added only as their acceptance evidence passes.

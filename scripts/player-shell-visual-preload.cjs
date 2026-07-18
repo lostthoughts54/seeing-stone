@@ -43,6 +43,15 @@ const watchPartyState = Object.freeze({
   sharedControls: true,
   error: null,
 });
+const audioTracks = Object.freeze([
+  Object.freeze({ id: 1, streamIndex: 0, type: "audio", title: "Fixture stereo", language: "eng", selected: true, codec: "aac", channels: 2, isDefault: true, isForced: false, external: false }),
+  Object.freeze({ id: 2, streamIndex: 1, type: "audio", title: "Fixture commentary", language: "eng", selected: false, codec: "aac", channels: 2, isDefault: false, isForced: false, external: false }),
+]);
+const subtitleTracks = Object.freeze([
+  Object.freeze({ id: 3, streamIndex: 2, type: "subtitle", title: "Fixture English", language: "eng", selected: false, codec: "ass", channels: null, isDefault: true, isForced: false, external: false }),
+  Object.freeze({ id: 4, streamIndex: 3, type: "subtitle", title: "Fixture forced", language: "eng", selected: false, codec: "ass", channels: null, isDefault: false, isForced: true, external: false }),
+]);
+const viewportInputs = [];
 let playback = {
   playbackId: null,
   itemId: null,
@@ -80,6 +89,14 @@ function updatePlayback(changes) {
   playback = { ...playback, ...changes };
   emitPlayback();
   return copy(playback);
+}
+
+function selectedTracks(tracks, selectedId) {
+  return tracks.map((track) => ({ ...track, selected: track.id === selectedId }));
+}
+
+function playbackItem() {
+  return playback.itemId === nextItem.id ? nextItem : item;
 }
 
 const downloads = Object.freeze({
@@ -126,29 +143,37 @@ const bridge = Object.freeze({
   mediaSources: Object.freeze({ getCapabilities: async () => ({ itemId: item.id, sources: [] }) }),
   downloads,
   playback: Object.freeze({
-    async start() {
+    async start({ itemId }) {
+      const selectedItem = itemId === nextItem.id ? nextItem : item;
       updatePlayback({
         playbackId: "visual-playback",
-        itemId: item.id,
+        itemId: selectedItem.id,
         phase: "playing",
         source: "server",
         diagnostics: { ...playback.diagnostics, sourceKind: "direct-play" },
-        durationTicks: item.runTimeTicks,
+        positionTicks: 0,
+        durationTicks: selectedItem.runTimeTicks,
         paused: false,
         seekable: true,
+        audioTracks: copy(audioTracks),
+        subtitleTracks: copy(subtitleTracks),
       });
-      return { playbackId: "visual-playback", resumePositionTicks: 0, durationTicks: item.runTimeTicks, source: "server", sourceKind: "direct-play" };
+      return { playbackId: "visual-playback", resumePositionTicks: 0, durationTicks: selectedItem.runTimeTicks, source: "server", sourceKind: "direct-play" };
     },
     setPaused: async ({ paused }) => updatePlayback({ paused, phase: paused ? "paused" : "playing" }),
     seek: async ({ positionTicks }) => updatePlayback({ positionTicks }),
     setRate: async ({ rate }) => updatePlayback({ diagnostics: { ...playback.diagnostics, playbackRate: rate } }),
     setVolume: async ({ volume }) => updatePlayback({ volume }),
-    selectAudio: async () => copy(playback),
-    selectSubtitle: async () => copy(playback),
+    selectAudio: async ({ trackId }) => updatePlayback({ audioTracks: selectedTracks(playback.audioTracks, trackId) }),
+    selectSubtitle: async ({ trackId }) => updatePlayback({ subtitleTracks: selectedTracks(playback.subtitleTracks, trackId) }),
     setFullscreen: async ({ fullscreen }) => updatePlayback({ fullscreen }),
     stop: async () => updatePlayback({ playbackId: null, itemId: null, phase: "stopped", source: null, paused: true, seekable: false }),
     getState: async () => copy(playback),
-    setViewport: async () => ({ embedded: true }),
+    setViewport: async (input) => {
+      viewportInputs.push(copy(input));
+      if (viewportInputs.length > 200) viewportInputs.shift();
+      return { embedded: true };
+    },
     getAdapterPreference: async () => ({ active: "embedded", selected: "embedded", embeddedAvailable: true, restartRequired: false }),
     setAdapterPreference: async () => ({ active: "embedded", selected: "embedded", embeddedAvailable: true, restartRequired: false }),
     subscribe(listener) { playbackListeners.add(listener); queueMicrotask(() => listener(copy(playback))); return () => playbackListeners.delete(listener); },
@@ -157,8 +182,8 @@ const bridge = Object.freeze({
     getSolo: async () => ({
       playback: copy(playback),
       connection: { state: "connected", serverName: "Isolated visual harness", serverVersion: "test-fixture", requestLatencyMs: null, measuredAt: null },
-      item: copy(item),
-      nextUp: copy(nextItem),
+      item: copy(playbackItem()),
+      nextUp: playback.itemId === nextItem.id ? null : copy(nextItem),
     }),
   }),
   licenses: Object.freeze({ list: async () => ({ schemaVersion: 1, projectName: "Seeing Stone", projectLicense: "GPL-2.0-or-later", entries: [] }) }),
@@ -175,3 +200,24 @@ const bridge = Object.freeze({
 });
 
 contextBridge.exposeInMainWorld("jellyfin", bridge);
+contextBridge.exposeInMainWorld("seeingStoneVisualAcceptance", Object.freeze({
+  getPlayback: () => copy(playback),
+  getViewportInputs: () => copy(viewportInputs),
+  clearViewportInputs: () => { viewportInputs.length = 0; },
+  transitionToNext: () => updatePlayback({
+    playbackId: "visual-transition",
+    itemId: nextItem.id,
+    phase: "playing",
+    positionTicks: 0,
+    durationTicks: nextItem.runTimeTicks,
+  }),
+  terminatePlayer: () => updatePlayback({
+    playbackId: null,
+    itemId: null,
+    phase: "disconnected",
+    source: null,
+    paused: true,
+    seekable: false,
+    error: "Visual fixture termination",
+  }),
+}));
