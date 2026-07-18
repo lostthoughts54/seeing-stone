@@ -29,6 +29,7 @@
     "test:mpv-visual": "pnpm run build:main && node scripts/mpv-visual-acceptance.cjs",
     "test:mpv-completion": "pnpm run build:main && node scripts/mpv-completion-acceptance.cjs",
     "test:embedded-window": "pnpm run build:main && electron scripts/embedded-window-spike.cjs",
+    "test:player-shell-visual": "pnpm run build && node scripts/player-shell-visual-acceptance.cjs",
     "test:package": "node scripts/windows-package-acceptance.cjs",
     "test:authenticated": "pnpm run build && node scripts/authenticated-parity.cjs",
     "test:syncplay-spike": "pnpm run build:main && node scripts/syncplay-protocol-spike.cjs",

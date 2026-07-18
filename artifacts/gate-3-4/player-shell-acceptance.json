@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "harness": "isolated-visual-fixture",
+  "screenshots": [
+    {
+      "filename": "player-wide.png",
+      "width": 1664,
+      "height": 915,
+      "panelCollapsed": false
+    },
+    {
+      "filename": "player-constrained.png",
+      "width": 964,
+      "height": 695,
+      "panelCollapsed": true
+    },
+    {
+      "filename": "player-constrained-session-drawer.png",
+      "width": 964,
+      "height": 695,
+      "panelCollapsed": false
+    },
+    {
+      "filename": "player-text-scale-125.png",
+      "width": 1264,
+      "height": 795,
+      "panelCollapsed": false
+    }
+  ],
+  "assertions": {
+    "viewportAboveControls": true,
+    "viewportNonZero": true,
+    "panelDoesNotCoverViewport": true,
+    "namedControls": true,
+    "focusableCount": 23,
+    "focusedCount": 23,
+    "focusOutlineWidth": "2.4px",
+    "horizontalOverflow": false,
+    "interLoaded": true,
+    "spectralLoaded": true,
+    "unavailableRowsHidden": true,
+    "sourceLabel": "Direct Play",
+    "connectionLabel": "Connected",
+    "diagnosticsContainSensitiveText": false
+  },
+  "rendererErrorCount": 0
+}

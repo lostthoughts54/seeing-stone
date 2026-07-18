@@ -5,9 +5,28 @@ import type {
   ImageKind,
   LibrarySummary,
   MediaItem,
+  OpenSourceLicenseInventory,
+  PlaybackSourceKind,
+  PlaybackState,
+  PlaybackTrack,
   SafeSession,
+  SessionPanelView,
+  SoloSessionDiagnostics,
   WatchPartyViewState,
 } from "../shared/contracts";
+import { BRANDING } from "../shared/branding";
+import {
+  connectionStatePresentation,
+  formatBitrate,
+  formatBufferAhead,
+  formatPlaybackRate,
+  formatPlaybackTime,
+  playbackPhasePresentation,
+  safeTimelineValue,
+  sourceKindLabel,
+  timelineTicks,
+  trackLabel,
+} from "./playerPresentation";
 
 const TICKS_PER_SECOND = 10000000;
 type Route = "home" | "library" | "search" | "details" | "watch-parties";
@@ -16,10 +35,10 @@ type ImageOptions = { width?: number; height?: number };
 type LibraryFilter = "all" | "unwatched" | "watched" | "downloaded";
 type LibrarySort = "title-ascending" | "title-descending" | "year-descending" | "year-ascending" | "rating-descending";
 
-function byId<T extends HTMLElement>(id: string): T {
+function byId<T extends Element>(id: string): T {
   const element = document.getElementById(id);
   if (!element) throw new Error(`Missing required UI element: ${id}`);
-  return element as T;
+  return element as unknown as T;
 }
 
 const loginView = byId<HTMLElement>("loginView");
@@ -110,11 +129,55 @@ const mobileSearchButton = byId<HTMLButtonElement>("mobileSearchButton");
 const mobileLibraryButton = byId<HTMLButtonElement>("mobileLibraryButton");
 const mobileWatchPartiesButton = byId<HTMLButtonElement>("mobileWatchPartiesButton");
 const playerView = byId<HTMLElement>("playerView");
-const videoPlayer = byId<HTMLVideoElement>("videoPlayer");
+const playerCenter = byId<HTMLElement>("playerCenter");
+const playerViewport = byId<HTMLElement>("playerViewport");
 const playerTitle = byId<HTMLElement>("playerTitle");
 const playerMeta = byId<HTMLElement>("playerMeta");
 const playerSourceBadge = byId<HTMLElement>("playerSourceBadge");
+const playerConnectionBadge = byId<HTMLElement>("playerConnectionBadge");
+const playerSyncBadge = byId<HTMLElement>("playerSyncBadge");
+const playerFrameStatus = byId<HTMLElement>("playerFrameStatus");
+const playerPhaseLabel = byId<HTMLElement>("playerPhaseLabel");
+const playerControls = byId<HTMLElement>("playerControls");
+const playerTimeline = byId<HTMLInputElement>("playerTimeline");
+const playerCurrentTime = byId<HTMLElement>("playerCurrentTime");
+const playerDuration = byId<HTMLElement>("playerDuration");
+const playerMuteButton = byId<HTMLButtonElement>("playerMuteButton");
+const playerVolume = byId<HTMLInputElement>("playerVolume");
+const playerBack10Button = byId<HTMLButtonElement>("playerBack10Button");
+const playerPlayPauseButton = byId<HTMLButtonElement>("playerPlayPauseButton");
+const playerPlayIcon = byId<SVGElement>("playerPlayIcon");
+const playerForward10Button = byId<HTMLButtonElement>("playerForward10Button");
+const playerRateSelect = byId<HTMLSelectElement>("playerRateSelect");
+const playerAudioSelect = byId<HTMLSelectElement>("playerAudioSelect");
+const playerSubtitleSelect = byId<HTMLSelectElement>("playerSubtitleSelect");
+const playerSettingsButton = byId<HTMLButtonElement>("playerSettingsButton");
+const playerNextButton = byId<HTMLButtonElement>("playerNextButton");
+const playerFullscreenButton = byId<HTMLButtonElement>("playerFullscreenButton");
+const playerEyebrow = byId<HTMLElement>("playerEyebrow");
+const playerMetadataTitle = byId<HTMLElement>("playerMetadataTitle");
+const playerOverview = byId<HTMLElement>("playerOverview");
+const playerMediaPills = byId<HTMLElement>("playerMediaPills");
+const playerNextCard = byId<HTMLElement>("playerNextCard");
+const playerNextTitle = byId<HTMLElement>("playerNextTitle");
+const playerNextMeta = byId<HTMLElement>("playerNextMeta");
+const playerNextCardButton = byId<HTMLButtonElement>("playerNextCardButton");
+const sessionPanel = byId<HTMLElement>("sessionPanel");
+const sessionPanelContent = byId<HTMLElement>("sessionPanelContent");
+const sessionSoloTab = byId<HTMLButtonElement>("sessionSoloTab");
+const sessionWatchpartyTab = byId<HTMLButtonElement>("sessionWatchpartyTab");
+const toggleSessionPanelButton = byId<HTMLButtonElement>("toggleSessionPanelButton");
+const openSessionPanelButton = byId<HTMLButtonElement>("openSessionPanelButton");
+const sessionPanelScrim = byId<HTMLButtonElement>("sessionPanelScrim");
+const playerExitButton = byId<HTMLButtonElement>("playerExitButton");
 const closePlayerButton = byId<HTMLButtonElement>("closePlayerButton");
+const licensesButton = byId<HTMLButtonElement>("licensesButton");
+const licensesScrim = byId<HTMLElement>("licensesScrim");
+const licensesPanel = byId<HTMLElement>("licensesPanel");
+const closeLicensesButton = byId<HTMLButtonElement>("closeLicensesButton");
+const licensesSearchInput = byId<HTMLInputElement>("licensesSearchInput");
+const licensesSummary = byId<HTMLElement>("licensesSummary");
+const licensesList = byId<HTMLElement>("licensesList");
 const downloadsScrim = byId<HTMLElement>("downloadsScrim");
 const downloadsPanel = byId<HTMLElement>("downloadsPanel");
 const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
@@ -152,7 +215,14 @@ interface RendererState {
   playbackItem: MediaItem | null;
   playbackId: string | null;
   playbackSource: "server" | "local" | null;
+  playbackSourceKind: PlaybackSourceKind | null;
+  playbackState: PlaybackState | null;
   playbackRequestId: number;
+  soloDiagnostics: SoloSessionDiagnostics | null;
+  soloDiagnosticsRequestId: number;
+  sessionPanelView: SessionPanelView;
+  sessionPanelCollapsed: boolean;
+  licenseInventory: OpenSourceLicenseInventory | null;
   downloads: DownloadSummary[];
   downloadLocation: DownloadLocationSummary | null;
   lastFocusElement: HTMLElement | null;
@@ -189,7 +259,14 @@ const state: RendererState = {
   playbackItem: null,
   playbackId: null,
   playbackSource: null,
+  playbackSourceKind: null,
+  playbackState: null,
   playbackRequestId: 0,
+  soloDiagnostics: null,
+  soloDiagnosticsRequestId: 0,
+  sessionPanelView: "solo",
+  sessionPanelCollapsed: false,
+  licenseInventory: null,
   downloads: [],
   downloadLocation: null,
   lastFocusElement: null,
@@ -201,6 +278,14 @@ const state: RendererState = {
 
 let connectionRetryInFlight = false;
 let watchPartiesVisible = false;
+let playerControlsTimer: ReturnType<typeof setTimeout> | null = null;
+let volumeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+let lastAudibleVolume = 100;
+let soloDiagnosticsRefreshedAt = 0;
+let licensesLastFocus: HTMLElement | null = null;
+let playerDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
+
+document.title = BRANDING.productName;
 
 function normalizeServerUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -529,7 +614,7 @@ function renderWatchParties(): void {
         : "This computer: Waiting for shared media";
     const resyncAccess = document.createElement("p");
     resyncAccess.className = "watch-party-delivery-note";
-    resyncAccess.textContent = "During playback, restore LocalFirst Jellyfin from the taskbar or press Ctrl+R in the player to resync this computer.";
+    resyncAccess.textContent = "During playback, restore Seeing Stone from the taskbar or press Ctrl+R in the player to resync this computer.";
     joinedWatchParty.append(heading, participants, shared, delivery, resyncAccess);
   }
 
@@ -607,6 +692,7 @@ async function joinWatchParty(groupId: string, button: HTMLButtonElement): Promi
   try {
     state.watchParties = await window.jellyfin.watchParties.join({ groupId });
     renderWatchParties();
+    if (!playerView.classList.contains("is-hidden")) renderPlayerState();
     showToast("Joined. Playback controls are now shared with the party.");
   } catch (error) {
     button.disabled = false;
@@ -619,6 +705,7 @@ async function leaveWatchParty(button: HTMLButtonElement): Promise<void> {
   try {
     state.watchParties = await window.jellyfin.watchParties.leave();
     renderWatchParties();
+    if (!playerView.classList.contains("is-hidden")) renderPlayerState();
     showToast("Left the party. Playback controls are independent again.");
   } catch (error) {
     button.disabled = false;
@@ -632,8 +719,11 @@ async function resyncWatchParty(button: HTMLButtonElement): Promise<void> {
   button.textContent = "Resyncing...";
   try {
     const playback = await window.jellyfin.watchParties.resync();
+    state.playbackState = playback;
     state.playbackSource = playback.source;
+    state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
     renderWatchParties();
+    if (!playerView.classList.contains("is-hidden")) renderPlayerState();
     showToast("This computer was resynced to the party.");
   } catch (error) {
     button.disabled = false;
@@ -1659,13 +1749,18 @@ let playerViewportRevision = 0;
 let playerViewportFrame: number | null = null;
 
 async function syncPlayerViewport(visible = !playerView.classList.contains("is-hidden")): Promise<boolean> {
-  const bounds = videoPlayer.getBoundingClientRect();
+  const bounds = playerViewport.getBoundingClientRect();
+  const scrollport = playerCenter.getBoundingClientRect();
+  const fullyInsideScrollport = bounds.left >= scrollport.left
+    && bounds.right <= scrollport.right
+    && bounds.top >= scrollport.top
+    && bounds.bottom <= scrollport.bottom;
   const result = await window.jellyfin.playback.setViewport({
     x: bounds.x,
     y: bounds.y,
     width: bounds.width,
     height: bounds.height,
-    visible: visible && bounds.width >= 16 && bounds.height >= 16,
+    visible: visible && fullyInsideScrollport && bounds.width >= 16 && bounds.height >= 16,
     revision: ++playerViewportRevision,
   }).catch(() => ({ embedded: false }));
   return result.embedded;
@@ -1679,14 +1774,437 @@ function schedulePlayerViewport(): void {
   });
 }
 
+function setTone(element: HTMLElement, tone: string): void {
+  element.dataset.tone = tone;
+}
+
+function replacePlayPauseIcon(paused: boolean): void {
+  playerPlayIcon.replaceChildren();
+  if (paused) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "m8 5 11 7-11 7z");
+    playerPlayIcon.append(path);
+    return;
+  }
+  const left = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  const right = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  left.setAttribute("d", "M8 5v14");
+  right.setAttribute("d", "M16 5v14");
+  playerPlayIcon.append(left, right);
+}
+
+function playbackForPlayer(): PlaybackState | null {
+  const playback = state.playbackState;
+  return playback && (!state.playbackId || playback.playbackId === state.playbackId) ? playback : null;
+}
+
+function playbackSourceKind(): PlaybackSourceKind | null {
+  return playbackForPlayer()?.diagnostics?.sourceKind || state.playbackSourceKind;
+}
+
+function renderTrackSelect(select: HTMLSelectElement, tracks: PlaybackTrack[], includeOff: boolean): void {
+  const selected = tracks.find((track) => track.selected)?.id ?? null;
+  select.replaceChildren();
+  if (includeOff) {
+    const off = document.createElement("option");
+    off.value = "";
+    off.textContent = "Off";
+    select.append(off);
+  }
+  for (const track of tracks) {
+    const option = document.createElement("option");
+    option.value = String(track.id);
+    option.textContent = trackLabel(track);
+    option.selected = selected === track.id;
+    select.append(option);
+  }
+  if (!includeOff && tracks.length === 0) {
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = "Default";
+    select.append(fallback);
+  }
+  if (includeOff && selected === null) select.value = "";
+  select.disabled = tracks.length === 0;
+}
+
+function renderPlayerMetadata(): void {
+  const playback = playbackForPlayer();
+  const item = state.soloDiagnostics?.item || state.playbackItem;
+  const diagnostics = playback?.diagnostics;
+  playerMetadataTitle.textContent = item?.name || playerTitle.textContent || "Now Playing";
+  playerEyebrow.textContent = item?.type === "Episode"
+    ? [item.seriesName, episodeCode(item)].filter(Boolean).join(" · ")
+    : item?.type || "";
+  playerOverview.textContent = item?.overview || "";
+  playerOverview.classList.toggle("is-hidden", !item?.overview);
+
+  const pills = [
+    item && itemYear(item) ? String(itemYear(item)) : null,
+    item ? runtime(item) : null,
+    diagnostics?.resolution,
+    diagnostics?.container?.toUpperCase() || null,
+    diagnostics?.videoCodec?.toUpperCase() || null,
+    diagnostics?.audioCodec?.toUpperCase() || null,
+    diagnostics?.audioChannels,
+    diagnostics?.videoRange,
+  ].filter((value): value is string => Boolean(value));
+  playerMediaPills.replaceChildren();
+  for (const value of pills) {
+    const pill = document.createElement("span");
+    pill.textContent = value;
+    playerMediaPills.append(pill);
+  }
+  playerMediaPills.classList.toggle("is-hidden", pills.length === 0);
+
+  const next = state.soloDiagnostics?.nextUp || null;
+  playerNextCard.classList.toggle("is-hidden", !next);
+  playerNextButton.disabled = !next || !canPlay(next);
+  if (next) {
+    playerNextTitle.textContent = next.name;
+    playerNextMeta.textContent = [episodeCode(next), next.seriesName, runtime(next)].filter(Boolean).join(" · ");
+    playerNextCardButton.disabled = !canPlay(next);
+  } else {
+    playerNextTitle.textContent = "";
+    playerNextMeta.textContent = "";
+    playerNextCardButton.disabled = true;
+  }
+}
+
+function renderPlayerState(): void {
+  const playback = playbackForPlayer();
+  const phase = playbackPhasePresentation(playback);
+  const sourceKind = playbackSourceKind();
+  const connection = connectionStatePresentation(state.soloDiagnostics?.connection.state || "unknown");
+  const joinedParty = state.watchParties?.joinedGroup || null;
+
+  playerPhaseLabel.textContent = phase.label;
+  setTone(playerFrameStatus, phase.tone);
+  playerFrameStatus.classList.toggle("is-active", phase.active);
+
+  playerSourceBadge.textContent = sourceKindLabel(sourceKind);
+  setTone(playerSourceBadge, sourceKind === "transcode" ? "amber" : sourceKind === "offline-local" ? "amber" : "violet");
+  playerConnectionBadge.textContent = connection.label;
+  setTone(playerConnectionBadge, connection.tone);
+  playerSyncBadge.textContent = joinedParty ? `${joinedParty.name} · ${joinedParty.participantCount}` : "Solo";
+  setTone(playerSyncBadge, joinedParty ? "blue" : "neutral");
+
+  const positionTicks = playback?.positionTicks || 0;
+  const durationTicks = playback?.durationTicks || 0;
+  if (playerTimeline.dataset.scrubbing !== "true") playerTimeline.value = String(safeTimelineValue(positionTicks, durationTicks));
+  playerTimeline.disabled = !playback?.seekable || durationTicks <= 0;
+  playerCurrentTime.textContent = formatPlaybackTime(positionTicks);
+  playerDuration.textContent = formatPlaybackTime(durationTicks);
+
+  const paused = playback?.paused !== false;
+  replacePlayPauseIcon(paused);
+  playerPlayPauseButton.setAttribute("aria-label", paused ? "Play" : "Pause");
+  playerPlayPauseButton.title = paused ? "Play (Space or K)" : "Pause (Space or K)";
+  playerPlayPauseButton.disabled = !state.playbackId || !playback || ["resolving", "loading", "ended", "stopped", "error", "disconnected"].includes(playback.phase);
+  playerBack10Button.disabled = !state.playbackId || !playback?.seekable;
+  playerForward10Button.disabled = !state.playbackId || !playback?.seekable;
+
+  const volume = Math.max(0, Math.min(100, Math.round(playback?.volume ?? (Number(playerVolume.value) || 100))));
+  if (volume > 0) lastAudibleVolume = volume;
+  playerVolume.value = String(volume);
+  playerMuteButton.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
+  playerMuteButton.title = volume === 0 ? "Unmute (M)" : "Mute (M)";
+  playerRateSelect.value = String(playback?.diagnostics?.playbackRate || 1);
+  playerRateSelect.disabled = !state.playbackId;
+  playerVolume.disabled = !state.playbackId;
+  playerMuteButton.disabled = !state.playbackId;
+  playerFullscreenButton.disabled = !state.playbackId;
+  playerFullscreenButton.setAttribute("aria-label", playback?.fullscreen ? "Exit fullscreen" : "Enter fullscreen");
+  playerFullscreenButton.title = playback?.fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)";
+  playerView.dataset.fullscreen = String(Boolean(playback?.fullscreen));
+  renderTrackSelect(playerAudioSelect, playback?.audioTracks || [], false);
+  renderTrackSelect(playerSubtitleSelect, playback?.subtitleTracks || [], true);
+  renderPlayerMetadata();
+  renderSessionPanel();
+}
+
+type SessionRow = { label: string; value: string; tone?: string };
+
+function appendSessionSection(title: string, rows: SessionRow[]): void {
+  if (rows.length === 0) return;
+  const section = document.createElement("section");
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.className = "session-section";
+  section.append(heading);
+  for (const row of rows) {
+    const element = document.createElement("div");
+    const label = document.createElement("span");
+    const value = document.createElement("span");
+    element.className = "session-row";
+    if (row.tone) element.dataset.tone = row.tone;
+    label.textContent = row.label;
+    value.textContent = row.value;
+    element.append(label, value);
+    section.append(element);
+  }
+  sessionPanelContent.append(section);
+}
+
+function renderSoloSessionPanel(): void {
+  sessionPanelContent.replaceChildren();
+  const snapshot = state.soloDiagnostics;
+  const playback = playbackForPlayer();
+  const diagnostics = playback?.diagnostics;
+  const connection = connectionStatePresentation(snapshot?.connection.state || "unknown");
+
+  appendSessionSection("Connection", [
+    { label: "Status", value: connection.label, tone: connection.tone },
+    ...(snapshot?.connection.serverName ? [{ label: "Server", value: snapshot.connection.serverName }] : []),
+    ...(snapshot?.connection.requestLatencyMs !== null && snapshot?.connection.requestLatencyMs !== undefined
+      ? [{ label: "Request", value: `${Math.round(snapshot.connection.requestLatencyMs)} ms`, tone: "blue" }]
+      : []),
+  ]);
+
+  appendSessionSection("Playback", [
+    ...(playbackSourceKind() ? [{ label: "Source", value: sourceKindLabel(playbackSourceKind()) }] : []),
+    ...(playback ? [{ label: "State", value: playbackPhasePresentation(playback).label }] : []),
+    ...(formatBufferAhead(diagnostics?.bufferAheadTicks) ? [{ label: "Buffer ahead", value: formatBufferAhead(diagnostics?.bufferAheadTicks) as string }] : []),
+  ]);
+
+  appendSessionSection("Media", [
+    ...(diagnostics?.container ? [{ label: "Container", value: diagnostics.container.toUpperCase() }] : []),
+    ...(diagnostics?.resolution ? [{ label: "Resolution", value: diagnostics.resolution }] : []),
+    ...(diagnostics?.videoCodec ? [{ label: "Video", value: diagnostics.videoCodec.toUpperCase() }] : []),
+    ...(diagnostics?.audioCodec ? [{ label: "Audio", value: diagnostics.audioCodec.toUpperCase() }] : []),
+    ...(diagnostics?.audioChannels ? [{ label: "Channels", value: diagnostics.audioChannels }] : []),
+    ...(formatBitrate(diagnostics?.bitrate) ? [{ label: "Bitrate", value: formatBitrate(diagnostics?.bitrate) as string }] : []),
+    ...(diagnostics?.videoRange ? [{ label: "Range", value: diagnostics.videoRange }] : []),
+  ]);
+
+  const audio = playback?.audioTracks.find((track) => track.selected);
+  const subtitles = playback?.subtitleTracks.find((track) => track.selected);
+  appendSessionSection("Selected tracks", [
+    ...(audio ? [{ label: "Audio", value: trackLabel(audio) }] : []),
+    ...(subtitles ? [{ label: "Subtitles", value: trackLabel(subtitles) }] : []),
+  ]);
+
+  const advanced: SessionRow[] = [
+    ...(snapshot?.connection.serverVersion ? [{ label: "Server version", value: snapshot.connection.serverVersion }] : []),
+    ...(formatPlaybackRate(diagnostics?.playbackRate) ? [{ label: "Playback rate", value: formatPlaybackRate(diagnostics?.playbackRate) as string }] : []),
+    ...(diagnostics?.transcodeReason ? [{ label: "Transcode reason", value: diagnostics.transcodeReason, tone: "amber" }] : []),
+  ];
+  if (advanced.length > 0) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const body = document.createElement("div");
+    details.className = "session-details";
+    summary.textContent = "Advanced diagnostics";
+    details.append(summary);
+    for (const row of advanced) {
+      const element = document.createElement("div");
+      const label = document.createElement("span");
+      const value = document.createElement("span");
+      element.className = "session-row";
+      if (row.tone) element.dataset.tone = row.tone;
+      label.textContent = row.label;
+      value.textContent = row.value;
+      element.append(label, value);
+      body.append(element);
+    }
+    details.append(body);
+    sessionPanelContent.append(details);
+  }
+
+  const next = snapshot?.nextUp || null;
+  if (next) {
+    const section = document.createElement("section");
+    const heading = document.createElement("h3");
+    const card = document.createElement("div");
+    const title = document.createElement("strong");
+    const meta = document.createElement("span");
+    const button = document.createElement("button");
+    section.className = "session-section";
+    heading.textContent = "Next Up";
+    card.className = "session-next-card";
+    title.textContent = next.name;
+    meta.textContent = [episodeCode(next), next.seriesName, runtime(next)].filter(Boolean).join(" · ");
+    button.type = "button";
+    button.textContent = "Play next";
+    button.disabled = !canPlay(next);
+    button.addEventListener("click", () => { void playItem(next); });
+    card.append(title, meta, button);
+    section.append(heading, card);
+    sessionPanelContent.append(section);
+  }
+
+  if (!snapshot && !playback) {
+    const empty = document.createElement("p");
+    empty.className = "session-empty";
+    empty.textContent = "Playback diagnostics will appear when the player is ready.";
+    sessionPanelContent.append(empty);
+  }
+}
+
+function renderWatchpartySessionPanel(): void {
+  sessionPanelContent.replaceChildren();
+  const value = state.watchParties;
+  const group = value?.joinedGroup || null;
+  if (!group) {
+    const empty = document.createElement("p");
+    const open = document.createElement("button");
+    empty.className = "session-empty";
+    empty.textContent = value?.error?.message || "Join a Jellyfin watch party to share playback controls.";
+    open.type = "button";
+    open.textContent = "Open Watch Parties";
+    open.addEventListener("click", async () => {
+      await closePlayer();
+      await openWatchParties();
+    });
+    sessionPanelContent.append(empty, open);
+    return;
+  }
+
+  appendSessionSection("Jellyfin SyncPlay", [
+    { label: "Group", value: group.name },
+    { label: "State", value: watchPartyStateLabel(group.playbackState), tone: group.playbackState === "Playing" ? "green" : "blue" },
+    { label: "Participants", value: String(group.participantCount) },
+  ]);
+  appendSessionSection("Participants", group.participants.map((name) => ({ label: name, value: "Jellyfin member" })));
+
+  const enhanced = document.createElement("p");
+  enhanced.className = "session-empty";
+  enhanced.textContent = "Enhanced participant diagnostics are unavailable. Standard Jellyfin SyncPlay remains active.";
+  const actions = document.createElement("div");
+  const resync = document.createElement("button");
+  const leave = document.createElement("button");
+  actions.className = "session-party-actions";
+  resync.type = "button";
+  resync.textContent = "Resync";
+  resync.addEventListener("click", () => { void resyncWatchParty(resync); });
+  leave.type = "button";
+  leave.textContent = "Leave Party";
+  leave.addEventListener("click", () => { void leaveWatchParty(leave); });
+  actions.append(resync, leave);
+  sessionPanelContent.append(enhanced, actions);
+}
+
+function renderSessionPanel(): void {
+  sessionSoloTab.setAttribute("aria-selected", String(state.sessionPanelView === "solo"));
+  sessionWatchpartyTab.setAttribute("aria-selected", String(state.sessionPanelView === "watchparty"));
+  if (state.sessionPanelView === "watchparty") renderWatchpartySessionPanel();
+  else renderSoloSessionPanel();
+}
+
+function setSessionPanelView(view: SessionPanelView): void {
+  if (view === "chat") return;
+  state.sessionPanelView = view;
+  renderSessionPanel();
+}
+
+function setSessionPanelCollapsed(collapsed: boolean): void {
+  state.sessionPanelCollapsed = collapsed;
+  playerView.classList.toggle("is-panel-collapsed", collapsed);
+  toggleSessionPanelButton.setAttribute("aria-label", collapsed ? "Open Session Panel" : "Collapse Session Panel");
+  toggleSessionPanelButton.title = collapsed ? "Open Session Panel" : "Collapse Session Panel";
+  const drawerMode = window.matchMedia("(max-width: 1120px)").matches;
+  sessionPanelScrim.classList.toggle("is-hidden", collapsed || !drawerMode);
+  sessionPanel.setAttribute("aria-hidden", String(collapsed));
+  requestAnimationFrame(() => requestAnimationFrame(schedulePlayerViewport));
+}
+
+function markPlayerActivity(): void {
+  playerView.classList.remove("is-controls-idle");
+  if (playerControlsTimer) clearTimeout(playerControlsTimer);
+  playerControlsTimer = setTimeout(() => {
+    if (playbackForPlayer()?.fullscreen && !playerControls.contains(document.activeElement)) {
+      playerView.classList.add("is-controls-idle");
+    }
+  }, 2600);
+}
+
+async function refreshSoloDiagnostics(force = false): Promise<void> {
+  const expectedPlaybackId = state.playbackId;
+  if (!expectedPlaybackId) return;
+  const now = Date.now();
+  if (!force && now - soloDiagnosticsRefreshedAt < 30_000) return;
+  soloDiagnosticsRefreshedAt = now;
+  const requestId = ++state.soloDiagnosticsRequestId;
+  try {
+    const snapshot = await window.jellyfin.sessionPanel.getSolo();
+    if (requestId !== state.soloDiagnosticsRequestId || expectedPlaybackId !== state.playbackId) return;
+    if (snapshot.playback.playbackId !== expectedPlaybackId) return;
+    state.soloDiagnostics = snapshot;
+    state.playbackState = snapshot.playback;
+    state.playbackSource = snapshot.playback.source;
+    state.playbackSourceKind = snapshot.playback.diagnostics?.sourceKind || state.playbackSourceKind;
+    if (snapshot.item) {
+      state.playbackItem = snapshot.item;
+      playerTitle.textContent = snapshot.item.type === "Episode" && snapshot.item.seriesName
+        ? snapshot.item.seriesName
+        : snapshot.item.name || "Now Playing";
+      playerMeta.textContent = snapshot.item.type === "Episode"
+        ? [episodeCode(snapshot.item), snapshot.item.name].filter(Boolean).join(" - ")
+        : metadataParts(snapshot.item).join(" - ");
+    }
+    renderPlayerState();
+  } catch {
+    if (requestId === state.soloDiagnosticsRequestId) renderPlayerState();
+  }
+}
+
+async function applyPlaybackCommand(command: () => Promise<PlaybackState>, fallback: string): Promise<void> {
+  try {
+    const playback = await command();
+    if (state.playbackId && playback.playbackId === state.playbackId) {
+      state.playbackState = playback;
+      state.playbackSource = playback.source;
+      state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
+      renderPlayerState();
+    }
+  } catch (error) {
+    showToast(errorMessage(error, fallback));
+  }
+}
+
+async function togglePlayerPaused(): Promise<void> {
+  const playback = playbackForPlayer();
+  if (!state.playbackId || !playback) return;
+  await applyPlaybackCommand(
+    () => window.jellyfin.playback.setPaused({ playbackId: state.playbackId as string, paused: !playback.paused }),
+    "Playback could not be changed.",
+  );
+}
+
+async function seekPlayerBy(seconds: number): Promise<void> {
+  const playback = playbackForPlayer();
+  if (!state.playbackId || !playback?.seekable) return;
+  const positionTicks = Math.max(0, Math.min(playback.durationTicks || Number.MAX_SAFE_INTEGER, playback.positionTicks + seconds * TICKS_PER_SECOND));
+  await applyPlaybackCommand(
+    () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks }),
+    "Playback could not be seeked.",
+  );
+}
+
 async function startPresentedPlayback(presentation: PlaybackPresentation): Promise<void> {
   const requestId = ++state.playbackRequestId;
-  state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (playerView.classList.contains("is-hidden")) {
+    state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
   state.playbackItem = presentation.item;
+  state.playbackId = null;
+  state.playbackSource = null;
+  state.playbackSourceKind = null;
+  state.playbackState = null;
+  state.soloDiagnostics = null;
+  state.soloDiagnosticsRequestId += 1;
+  soloDiagnosticsRefreshedAt = 0;
   playerTitle.textContent = presentation.title;
   playerMeta.textContent = presentation.meta;
+  playerMetadataTitle.textContent = presentation.item?.name || presentation.title;
+  playerEyebrow.textContent = presentation.item?.type === "Episode"
+    ? [presentation.item.seriesName, episodeCode(presentation.item)].filter(Boolean).join(" · ")
+    : presentation.item?.type || "";
+  playerOverview.textContent = presentation.item?.overview || "";
   playerView.classList.remove("is-hidden");
   document.body.classList.add("is-playing");
+  setSessionPanelCollapsed(window.matchMedia("(max-width: 1120px)").matches);
+  renderPlayerState();
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await syncPlayerViewport(true);
 
@@ -1708,7 +2226,12 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   }
   state.playbackId = resolved.playbackId;
   state.playbackSource = resolved.source;
-  playerSourceBadge.textContent = resolved.source === "local" ? "Local" : "Jellyfin";
+  state.playbackSourceKind = resolved.sourceKind;
+  state.playbackState = await window.jellyfin.playback.getState().catch(() => null);
+  renderPlayerState();
+  void refreshSoloDiagnostics(true);
+  playerPlayPauseButton.focus();
+  markPlayerActivity();
   if (state.currentRoute === "watch-parties") renderWatchParties();
 }
 
@@ -1740,6 +2263,7 @@ async function playItem(item: MediaItem): Promise<void> {
 
 async function closePlayer(): Promise<void> {
   state.playbackRequestId += 1;
+  state.soloDiagnosticsRequestId += 1;
   const playbackId = state.playbackId;
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
@@ -1747,27 +2271,133 @@ async function closePlayer(): Promise<void> {
   state.playbackItem = null;
   state.playbackId = null;
   state.playbackSource = null;
-  state.downloads = [];
-  state.downloadLocation = null;
-  renderDownloadLocation();
+  state.playbackSourceKind = null;
+  state.playbackState = null;
+  state.soloDiagnostics = null;
+  playerView.classList.remove("is-controls-idle");
+  if (playerControlsTimer) clearTimeout(playerControlsTimer);
+  playerControlsTimer = null;
   state.lastFocusElement?.focus?.();
   if (playbackId) await window.jellyfin.playback.stop({ playbackId }).catch(() => undefined);
 }
 
 window.jellyfin.playback.subscribe((playback) => {
+  const previousPlaybackId = state.playbackState?.playbackId;
+  const previousItemId = state.playbackState?.itemId;
+  const playerVisible = !playerView.classList.contains("is-hidden");
+  const itemChanged = Boolean(playback.playbackId && (playback.playbackId !== previousPlaybackId || playback.itemId !== previousItemId));
+  if (playerVisible && playback.playbackId && playback.playbackId !== state.playbackId) {
+    state.playbackId = playback.playbackId;
+  }
+  if (playerVisible && itemChanged) {
+    state.playbackItem = null;
+    state.soloDiagnostics = null;
+    state.soloDiagnosticsRequestId += 1;
+    soloDiagnosticsRefreshedAt = 0;
+  }
+  state.playbackState = playback;
   state.playbackSource = playback.source;
+  state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
+  renderPlayerState();
+  if (playback.playbackId && playback.playbackId === state.playbackId && (itemChanged || Date.now() - soloDiagnosticsRefreshedAt >= 30_000)) {
+    void refreshSoloDiagnostics(itemChanged);
+  }
   if (state.currentRoute === "watch-parties") renderWatchParties();
   if (playback.playbackId || !state.playbackId) return;
   state.playbackId = null;
   state.playbackItem = null;
+  state.playbackSourceKind = null;
+  state.soloDiagnostics = null;
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
   void syncPlayerViewport(false);
   state.lastFocusElement?.focus?.();
 });
 
-new ResizeObserver(schedulePlayerViewport).observe(videoPlayer);
-window.addEventListener("resize", schedulePlayerViewport);
+new ResizeObserver(schedulePlayerViewport).observe(playerViewport);
+playerCenter.addEventListener("scroll", schedulePlayerViewport, { passive: true });
+window.addEventListener("resize", () => {
+  schedulePlayerViewport();
+  const nextDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
+  if (nextDrawerMode !== playerDrawerMode) setSessionPanelCollapsed(nextDrawerMode);
+  playerDrawerMode = nextDrawerMode;
+});
+
+function licenseStatusLabel(status: string): string {
+  if (status === "source-and-binary") return "Source and binary";
+  if (status === "source-only") return "Source only";
+  return "Internal only — provenance incomplete";
+}
+
+function renderLicenses(): void {
+  licensesList.replaceChildren();
+  const inventory = state.licenseInventory;
+  const query = licensesSearchInput.value.trim().toLocaleLowerCase();
+  if (!inventory) {
+    licensesSummary.textContent = "Loading license inventory…";
+    return;
+  }
+  const entries = inventory.entries.filter((entry) => {
+    const searchable = [entry.name, entry.version, entry.license, entry.category].join(" ").toLocaleLowerCase();
+    return !query || searchable.includes(query);
+  });
+  licensesSummary.textContent = `${entries.length} of ${inventory.entries.length} components · ${inventory.projectLicense}`;
+  for (const entry of entries) {
+    const card = document.createElement("article");
+    const identity = document.createElement("div");
+    const name = document.createElement("strong");
+    const version = document.createElement("small");
+    const license = document.createElement("span");
+    const status = document.createElement("span");
+    card.className = "license-entry";
+    name.textContent = entry.name;
+    version.textContent = [entry.version, entry.category].filter(Boolean).join(" · ");
+    if (entry.projectUrl) {
+      try {
+        version.textContent += ` · ${new URL(entry.projectUrl).hostname}`;
+      } catch { /* The generated inventory validates URLs before this view is built. */ }
+    }
+    license.textContent = entry.license;
+    status.className = "license-status";
+    status.dataset.status = entry.redistributionStatus;
+    status.textContent = licenseStatusLabel(entry.redistributionStatus);
+    identity.append(name, version);
+    card.append(identity, license, status);
+    licensesList.append(card);
+  }
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "session-empty";
+    empty.textContent = "No components match this filter.";
+    licensesList.append(empty);
+  }
+}
+
+async function openLicenses(): Promise<void> {
+  licensesLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  licensesScrim.classList.remove("is-hidden");
+  licensesPanel.classList.remove("is-hidden");
+  licensesSearchInput.value = "";
+  renderLicenses();
+  closeLicensesButton.focus();
+  if (state.licenseInventory) return;
+  try {
+    state.licenseInventory = await window.jellyfin.licenses.list();
+    renderLicenses();
+  } catch (error) {
+    licensesSummary.textContent = errorMessage(error, "The license inventory could not be loaded.");
+  }
+}
+
+function closeLicenses(): void {
+  if (licensesPanel.classList.contains("is-hidden")) return;
+  licensesScrim.classList.add("is-hidden");
+  licensesPanel.classList.add("is-hidden");
+  licensesLastFocus?.focus?.();
+  licensesLastFocus = null;
+}
 
 function resetSignedInState(): void {
   if (state.searchTimer) clearTimeout(state.searchTimer);
@@ -1803,6 +2433,12 @@ function resetSignedInState(): void {
   state.playbackItem = null;
   state.playbackId = null;
   state.playbackSource = null;
+  state.playbackSourceKind = null;
+  state.playbackState = null;
+  state.soloDiagnostics = null;
+  state.soloDiagnosticsRequestId += 1;
+  state.sessionPanelView = "solo";
+  state.sessionPanelCollapsed = false;
   state.lastFocusElement = null;
   state.watchParties = null;
 
@@ -1849,15 +2485,24 @@ function resetSignedInState(): void {
   detailWatchedButton.onclick = null;
   detailWatchedLabel.textContent = "Mark Watched";
 
-  videoPlayer.pause();
-  videoPlayer.onloadedmetadata = null;
-  videoPlayer.removeAttribute("src");
-  videoPlayer.load();
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
   playerTitle.textContent = "";
   playerMeta.textContent = "";
   playerSourceBadge.textContent = "";
+  playerConnectionBadge.textContent = "Connection unknown";
+  playerSyncBadge.textContent = "Solo";
+  playerMetadataTitle.textContent = "Now Playing";
+  playerEyebrow.textContent = "";
+  playerOverview.textContent = "";
+  playerMediaPills.replaceChildren();
+  playerNextCard.classList.add("is-hidden");
+  playerTimeline.value = "0";
+  playerTimeline.disabled = true;
+  playerCurrentTime.textContent = "0:00";
+  playerDuration.textContent = "0:00";
+  sessionPanelContent.replaceChildren();
+  setSessionPanelCollapsed(false);
 
   searchInput.value = "";
   userLabel.textContent = "";
@@ -1874,6 +2519,7 @@ function resetSignedInState(): void {
   watchPartyStatus.textContent = "";
   watchPartyNameInput.value = "";
   closeDownloads();
+  closeLicenses();
   setButtonActive(libraryMoviesButton, true);
   setButtonActive(libraryShowsButton, false);
   setRoute("home");
@@ -1995,6 +2641,10 @@ refreshButton.addEventListener("click", () => { void retryConnection(refreshButt
 downloadsButton.addEventListener("click", () => openDownloads());
 closeDownloadsButton.addEventListener("click", closeDownloads);
 downloadsScrim.addEventListener("click", closeDownloads);
+licensesButton.addEventListener("click", () => { void openLicenses(); });
+closeLicensesButton.addEventListener("click", closeLicenses);
+licensesScrim.addEventListener("click", closeLicenses);
+licensesSearchInput.addEventListener("input", renderLicenses);
 chooseDownloadLocationButton.addEventListener("click", () => { void chooseDownloadLocation(); });
 openDownloadLocationButton.addEventListener("click", () => { void openDownloadLocation(); });
 defaultDownloadLocationButton.addEventListener("click", () => { void useDefaultDownloadLocation(); });
@@ -2014,12 +2664,170 @@ logoutButton.addEventListener("click", async () => {
 });
 
 closePlayerButton.addEventListener("click", () => { void closePlayer(); });
+playerExitButton.addEventListener("click", () => { void closePlayer(); });
+playerPlayPauseButton.addEventListener("click", () => { void togglePlayerPaused(); });
+playerBack10Button.addEventListener("click", () => { void seekPlayerBy(-10); });
+playerForward10Button.addEventListener("click", () => { void seekPlayerBy(10); });
+
+playerTimeline.addEventListener("pointerdown", () => { playerTimeline.dataset.scrubbing = "true"; });
+playerTimeline.addEventListener("input", () => {
+  const playback = playbackForPlayer();
+  if (!playback) return;
+  playerTimeline.dataset.scrubbing = "true";
+  playerCurrentTime.textContent = formatPlaybackTime(timelineTicks(Number(playerTimeline.value), playback.durationTicks));
+});
+playerTimeline.addEventListener("change", () => {
+  const playback = playbackForPlayer();
+  delete playerTimeline.dataset.scrubbing;
+  if (!state.playbackId || !playback?.seekable) return;
+  const positionTicks = timelineTicks(Number(playerTimeline.value), playback.durationTicks);
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks }),
+    "Playback could not be seeked.",
+  );
+});
+playerTimeline.addEventListener("pointercancel", () => { delete playerTimeline.dataset.scrubbing; });
+
+playerVolume.addEventListener("input", () => {
+  const volume = Math.max(0, Math.min(100, Math.round(Number(playerVolume.value))));
+  if (volume > 0) lastAudibleVolume = volume;
+  playerMuteButton.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
+  if (volumeUpdateTimer) clearTimeout(volumeUpdateTimer);
+  volumeUpdateTimer = setTimeout(() => {
+    if (!state.playbackId) return;
+    void applyPlaybackCommand(
+      () => window.jellyfin.playback.setVolume({ playbackId: state.playbackId as string, volume }),
+      "Volume could not be changed.",
+    );
+  }, 75);
+});
+playerMuteButton.addEventListener("click", () => {
+  const playback = playbackForPlayer();
+  if (!state.playbackId || !playback) return;
+  const volume = playback.volume > 0 ? 0 : Math.max(1, lastAudibleVolume);
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.setVolume({ playbackId: state.playbackId as string, volume }),
+    "Volume could not be changed.",
+  );
+});
+playerRateSelect.addEventListener("change", () => {
+  if (!state.playbackId) return;
+  const rate = Number(playerRateSelect.value);
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.setRate({ playbackId: state.playbackId as string, rate }),
+    "Playback speed could not be changed.",
+  );
+});
+playerAudioSelect.addEventListener("change", () => {
+  if (!state.playbackId || !playerAudioSelect.value) return;
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.selectAudio({ playbackId: state.playbackId as string, trackId: Number(playerAudioSelect.value) }),
+    "The audio track could not be selected.",
+  );
+});
+playerSubtitleSelect.addEventListener("change", () => {
+  if (!state.playbackId) return;
+  const trackId = playerSubtitleSelect.value ? Number(playerSubtitleSelect.value) : null;
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.selectSubtitle({ playbackId: state.playbackId as string, trackId }),
+    "The subtitle track could not be selected.",
+  );
+});
+playerFullscreenButton.addEventListener("click", () => {
+  const playback = playbackForPlayer();
+  if (!state.playbackId || !playback) return;
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.setFullscreen({ playbackId: state.playbackId as string, fullscreen: !playback.fullscreen }),
+    "Fullscreen could not be changed.",
+  ).then(schedulePlayerViewport);
+});
+
+const playNext = (): void => {
+  const next = state.soloDiagnostics?.nextUp;
+  if (next && canPlay(next)) void playItem(next);
+};
+playerNextButton.addEventListener("click", playNext);
+playerNextCardButton.addEventListener("click", playNext);
+playerSettingsButton.addEventListener("click", () => {
+  setSessionPanelView("solo");
+  setSessionPanelCollapsed(false);
+  const advanced = sessionPanelContent.querySelector<HTMLDetailsElement>(".session-details");
+  if (advanced) advanced.open = true;
+  sessionPanelContent.focus();
+});
+sessionSoloTab.addEventListener("click", () => setSessionPanelView("solo"));
+sessionWatchpartyTab.addEventListener("click", () => setSessionPanelView("watchparty"));
+toggleSessionPanelButton.addEventListener("click", () => setSessionPanelCollapsed(true));
+openSessionPanelButton.addEventListener("click", () => setSessionPanelCollapsed(false));
+sessionPanelScrim.addEventListener("click", () => setSessionPanelCollapsed(true));
+playerView.addEventListener("pointermove", markPlayerActivity);
+playerView.addEventListener("focusin", markPlayerActivity);
+
+for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-player-route]")) {
+  button.addEventListener("click", async () => {
+    const route = button.dataset.playerRoute;
+    await closePlayer();
+    if (route === "library" || route === "movies") openLibraryCategory("Movie");
+    else if (route === "shows") openLibraryCategory("Series");
+    else if (route === "watch-parties") await openWatchParties();
+  });
+}
 
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
+  if (!licensesPanel.classList.contains("is-hidden")) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeLicenses();
+      return;
+    }
+    if (event.key === "Tab") {
+      const focusable = Array.from(licensesPanel.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])"));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (first && last && event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (first && last && !event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    return;
+  }
+
   if (!playerView.classList.contains("is-hidden")) {
-    void closePlayer();
-  } else if (!profileMenu.classList.contains("is-hidden")) {
+    markPlayerActivity();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (playerDrawerMode && !state.sessionPanelCollapsed) setSessionPanelCollapsed(true);
+      else void closePlayer();
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, select, textarea")) return;
+    const key = event.key.toLocaleLowerCase();
+    if (target?.closest("button") && (key === " " || key === "enter")) return;
+    if (key === " " || key === "k") {
+      event.preventDefault();
+      void togglePlayerPaused();
+    } else if (key === "arrowleft" || key === "j") {
+      event.preventDefault();
+      void seekPlayerBy(-10);
+    } else if (key === "arrowright" || key === "l") {
+      event.preventDefault();
+      void seekPlayerBy(10);
+    } else if (key === "m") {
+      event.preventDefault();
+      playerMuteButton.click();
+    } else if (key === "f") {
+      event.preventDefault();
+      playerFullscreenButton.click();
+    }
+    return;
+  }
+
+  if (event.key !== "Escape") return;
+  if (!profileMenu.classList.contains("is-hidden")) {
     profileMenu.classList.add("is-hidden");
     profileButton.setAttribute("aria-expanded", "false");
   } else if (!downloadsPanel.classList.contains("is-hidden")) {
@@ -2039,6 +2847,7 @@ window.jellyfin.downloads.subscribe((downloads) => {
 window.jellyfin.watchParties.subscribe((watchParties) => {
   state.watchParties = watchParties;
   if (state.currentRoute === "watch-parties") renderWatchParties();
+  if (!playerView.classList.contains("is-hidden")) renderPlayerState();
 });
 
 void bootstrap();

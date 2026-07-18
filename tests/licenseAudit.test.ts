@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import {
   assertLicensePolicy,
   evaluateLicensePolicy,
   loadDependencyManifest,
+  loadLegalComponents,
 } from "../scripts/license-audit.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -91,5 +93,62 @@ describe("explicit SPDX license policy", () => {
       { name: "safe", version: "1.0.0", license: "MIT" },
       { name: "restricted", version: "2.0.0", license: "SSPL-1.0" },
     ])).toThrow(/restricted@2\.0\.0: SSPL-1\.0/);
+  });
+});
+
+describe("versioned legal component manifest", () => {
+  async function fixture(componentOverrides: Record<string, unknown> = {}): Promise<{ directory: string; manifest: string }> {
+    const directory = await temporaryDirectory();
+    const artifact = "font.woff2";
+    const licenseFile = "OFL.txt";
+    const artifactContent = "verified-font-fixture";
+    const licenseContent = "Open Font License fixture";
+    const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+    await writeFile(join(directory, artifact), artifactContent);
+    await writeFile(join(directory, licenseFile), licenseContent);
+    const component = {
+      category: "font",
+      name: "Fixture Font",
+      version: "1.0.0",
+      license: "OFL-1.1",
+      projectUrl: "https://example.invalid/fixture-font",
+      sourceRevision: "1111111111111111111111111111111111111111",
+      redistributionStatus: "source-and-binary",
+      artifacts: [{ path: artifact, sha256: sha256(artifactContent) }],
+      licenseFile: { path: licenseFile, sha256: sha256(licenseContent) },
+      ...componentOverrides,
+    };
+    const manifest = join(directory, "legal-components.json");
+    await writeFile(manifest, JSON.stringify({ schemaVersion: 1, components: [component] }));
+    return { directory, manifest };
+  }
+
+  it("accepts pinned, hashed, redistributable font provenance", async () => {
+    const value = await fixture();
+    await expect(loadLegalComponents(value.manifest, value.directory)).resolves.toMatchObject([{
+      category: "font",
+      name: "Fixture Font",
+      license: "OFL-1.1",
+      redistributionStatus: "source-and-binary",
+    }]);
+  });
+
+  it("fails unknown categories and redistribution statuses", async () => {
+    const category = await fixture({ category: "theme" });
+    await expect(loadLegalComponents(category.manifest, category.directory)).rejects.toThrow("unknown category: theme");
+    const status = await fixture({ redistributionStatus: "private-binary" });
+    await expect(loadLegalComponents(status.manifest, status.directory)).rejects.toThrow("unknown redistribution status: private-binary");
+  });
+
+  it("fails proprietary component licenses before generating notices", async () => {
+    const value = await fixture({ license: "Proprietary" });
+    await expect(loadLegalComponents(value.manifest, value.directory)).rejects.toThrow(/Proprietary.*restricted or non-redistributable/);
+  });
+
+  it("fails missing artifacts and incorrect hashes", async () => {
+    const missing = await fixture({ artifacts: [{ path: "missing.woff2", sha256: "0".repeat(64) }] });
+    await expect(loadLegalComponents(missing.manifest, missing.directory)).rejects.toThrow(/artifact 1 is unreadable/);
+    const incorrect = await fixture({ artifacts: [{ path: "font.woff2", sha256: "0".repeat(64) }] });
+    await expect(loadLegalComponents(incorrect.manifest, incorrect.directory)).rejects.toThrow(/failed SHA-256 verification/);
   });
 });

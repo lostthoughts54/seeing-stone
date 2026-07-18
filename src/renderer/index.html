@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LocalFirst Jellyfin</title>
+    <title>Seeing Stone</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -22,10 +22,10 @@
 
         <form id="loginForm" class="login-card">
           <div class="brand large">
-            <span class="brand-mark">LF</span>
+            <span class="brand-mark"><img src="./assets/seeing-stone-orb.svg" alt="" /></span>
             <div>
-              <strong>LocalFirst</strong>
-              <span>Jellyfin, with downloads in mind</span>
+              <strong>Seeing Stone</strong>
+              <span>A Jellyfin client</span>
             </div>
           </div>
 
@@ -66,8 +66,8 @@
       <section id="mainView" class="main-view is-hidden">
         <header class="app-header">
           <button id="brandHomeButton" class="brand-button" type="button" aria-label="Home">
-            <span class="brand-mark">LF</span>
-            <strong>LocalFirst</strong>
+            <span class="brand-mark"><img src="./assets/seeing-stone-orb.svg" alt="" /></span>
+            <strong>Seeing Stone</strong>
           </button>
 
           <nav class="desktop-nav" aria-label="Primary navigation">
@@ -94,6 +94,7 @@
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
             <button id="downloadsButton" type="button">Downloads</button>
+            <button id="licensesButton" type="button">Open Source Licenses</button>
             <button id="refreshButton" type="button">Refresh Connection</button>
             <button id="logoutButton" type="button">Sign Out</button>
           </div>
@@ -266,18 +267,147 @@
         </nav>
       </section>
 
-      <section id="playerView" class="player-view is-hidden" aria-label="Video player">
-        <video id="videoPlayer" controls preload="metadata"></video>
-        <div class="player-topbar">
-          <div class="player-title-block">
-            <strong id="playerTitle">Now Playing</strong>
-            <span id="playerMeta"></span>
+      <section id="playerView" class="player-view is-hidden" aria-label="Now Playing">
+        <aside class="player-rail" aria-label="Player navigation">
+          <div class="player-rail-brand" aria-label="Seeing Stone">
+            <img src="./assets/seeing-stone-orb.svg" alt="" />
+            <span><strong>Seeing Stone</strong><small>A Jellyfin client</small></span>
           </div>
-          <span id="playerSourceBadge" class="source-badge">Server</span>
+          <nav class="player-rail-nav">
+            <button class="is-active" type="button" aria-current="page" data-player-route="now-playing" title="Now Playing">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg><span>Now Playing</span>
+            </button>
+            <button type="button" data-player-route="library" title="Library">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v14h-6z"></path></svg><span>Library</span>
+            </button>
+            <button type="button" disabled title="Collections are not available in this build">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span>Collections</span>
+            </button>
+            <button type="button" disabled title="Watchlist is not available in this build">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg><span>Watchlist</span>
+            </button>
+            <button type="button" disabled title="Live TV is not available in this build">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
+            </button>
+            <span class="player-rail-divider"></span>
+            <button type="button" data-player-route="movies" title="Movies">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M4 8h16M9 3v5m6-5v5"></path></svg><span>Movies</span>
+            </button>
+            <button type="button" data-player-route="shows" title="Shows">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 2h8"></path></svg><span>Shows</span>
+            </button>
+            <button type="button" data-player-route="watch-parties" title="Watch Parties">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6m0 0c0-4 2-6 5-6s5 2 5 6"></path></svg><span>Watch Parties</span>
+            </button>
+          </nav>
+          <button id="playerExitButton" class="player-rail-exit" type="button" title="Return to library">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg><span>Exit player</span>
+          </button>
+        </aside>
+
+        <div class="player-shell">
+          <header class="player-identity-bar">
+            <div class="player-title-block">
+              <span class="player-now-playing-label">Now Playing</span>
+              <strong id="playerTitle">Now Playing</strong>
+              <span id="playerMeta"></span>
+            </div>
+            <div class="player-status-chips" aria-label="Playback status">
+              <span id="playerConnectionBadge" class="status-chip" data-tone="neutral">Connection unknown</span>
+              <span id="playerSourceBadge" class="status-chip" data-tone="violet">Resolving source</span>
+              <span id="playerSyncBadge" class="status-chip" data-tone="blue">Solo</span>
+              <button id="openSessionPanelButton" class="open-session-panel-button" type="button" aria-label="Open Session Panel" title="Open Session Panel">Session</button>
+            </div>
+            <button id="closePlayerButton" class="player-close" type="button" aria-label="Close player" title="Close player">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg>
+            </button>
+          </header>
+
+          <div class="player-workspace">
+            <main id="playerCenter" class="player-center">
+              <section class="seeing-frame" aria-labelledby="playerTitle">
+                <div class="seeing-frame-glow" aria-hidden="true"></div>
+                <div id="playerViewport" class="player-viewport" aria-label="Native video surface"></div>
+                <div id="playerFrameStatus" class="player-frame-status" role="status" aria-live="polite">
+                  <span class="frame-status-orb" aria-hidden="true"></span>
+                  <span id="playerPhaseLabel">Preparing playback</span>
+                </div>
+              </section>
+
+              <section id="playerControls" class="player-controls" aria-label="Playback controls">
+                <div class="player-timeline-row">
+                  <span id="playerCurrentTime">0:00</span>
+                  <input id="playerTimeline" type="range" min="0" max="1000" value="0" step="1" aria-label="Playback position" disabled />
+                  <span id="playerDuration">0:00</span>
+                </div>
+                <div class="player-control-row">
+                  <div class="player-control-group player-volume-group">
+                    <button id="playerMuteButton" class="icon-button" type="button" aria-label="Mute" title="Mute (M)">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h4l5 4V6L9 10z"></path><path d="M17 9c1.4 1.6 1.4 4.4 0 6"></path></svg>
+                    </button>
+                    <input id="playerVolume" type="range" min="0" max="100" value="100" step="1" aria-label="Volume" />
+                  </div>
+                  <div class="player-control-group player-transport">
+                    <button id="playerBack10Button" class="icon-button" type="button" aria-label="Seek back 10 seconds" title="Back 10 seconds (Left arrow)">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 0 2-4"></path><path d="M4 4v6h6"></path><text x="10" y="16" class="svg-label">10</text></svg>
+                    </button>
+                    <button id="playerPlayPauseButton" class="player-primary-control" type="button" aria-label="Play" title="Play or pause (Space or K)">
+                      <svg id="playerPlayIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg>
+                    </button>
+                    <button id="playerForward10Button" class="icon-button" type="button" aria-label="Seek forward 10 seconds" title="Forward 10 seconds (Right arrow)">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10a8 8 0 1 1-2-4"></path><path d="M20 4v6h-6"></path><text x="5" y="16" class="svg-label">10</text></svg>
+                    </button>
+                  </div>
+                  <div class="player-control-group player-options">
+                    <label class="compact-control" title="Playback speed"><span>Speed</span><select id="playerRateSelect" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+                    <label class="compact-control" title="Audio track"><span>Audio</span><select id="playerAudioSelect" aria-label="Audio track" disabled><option>Default</option></select></label>
+                    <label class="compact-control" title="Subtitle track"><span>Subtitles</span><select id="playerSubtitleSelect" aria-label="Subtitle track" disabled><option value="">Off</option></select></label>
+                    <button id="playerSettingsButton" class="icon-button" type="button" aria-label="Show playback diagnostics" title="Playback diagnostics">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2m4 0h10M14 5v4M8 15v4"></path></svg>
+                    </button>
+                    <button id="playerNextButton" class="icon-button" type="button" aria-label="Play next item" title="Play next item" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 5 10 7-10 7zM18 5v14"></path></svg>
+                    </button>
+                    <button id="playerFullscreenButton" class="icon-button" type="button" aria-label="Enter fullscreen" title="Fullscreen (F)">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"></path></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="player-metadata" aria-label="Now playing details">
+                <div class="player-metadata-copy">
+                  <p id="playerEyebrow" class="player-eyebrow"></p>
+                  <h1 id="playerMetadataTitle">Now Playing</h1>
+                  <p id="playerOverview" class="player-overview"></p>
+                  <div id="playerMediaPills" class="player-media-pills" aria-label="Media details"></div>
+                </div>
+                <article id="playerNextCard" class="player-next-card is-hidden">
+                  <p>Next Up</p>
+                  <strong id="playerNextTitle"></strong>
+                  <span id="playerNextMeta"></span>
+                  <button id="playerNextCardButton" type="button">Play next</button>
+                </article>
+              </section>
+            </main>
+
+            <button id="sessionPanelScrim" class="session-panel-scrim is-hidden" type="button" aria-label="Close Session Panel"></button>
+            <aside id="sessionPanel" class="session-panel" aria-labelledby="sessionPanelTitle">
+              <header class="session-panel-header">
+                <div><span class="session-panel-kicker">Context</span><h2 id="sessionPanelTitle">Session</h2></div>
+                <button id="toggleSessionPanelButton" class="icon-button" type="button" aria-label="Collapse Session Panel" title="Collapse Session Panel">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+                </button>
+              </header>
+              <div class="session-panel-tabs" role="tablist" aria-label="Session Panel view">
+                <button id="sessionSoloTab" type="button" role="tab" aria-selected="true" data-session-view="solo">Solo</button>
+                <button id="sessionWatchpartyTab" type="button" role="tab" aria-selected="false" data-session-view="watchparty">Watchparty</button>
+                <button id="sessionChatTab" type="button" role="tab" aria-selected="false" aria-disabled="true" disabled title="Chat is reserved for a future milestone">Chat</button>
+              </div>
+              <div id="sessionPanelContent" class="session-panel-content" role="tabpanel" tabindex="0"></div>
+            </aside>
+          </div>
         </div>
-        <button id="closePlayerButton" class="player-close" type="button" aria-label="Close player" title="Close player">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg>
-        </button>
       </section>
 
       <div id="downloadsScrim" class="downloads-scrim is-hidden"></div>
@@ -303,6 +433,18 @@
           </div>
         </section>
         <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
+      </section>
+
+      <div id="licensesScrim" class="licenses-scrim is-hidden"></div>
+      <section id="licensesPanel" class="licenses-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="licensesTitle">
+        <header class="licenses-header">
+          <div><p class="eyebrow">Seeing Stone</p><h2 id="licensesTitle">Open Source Licenses</h2></div>
+          <button id="closeLicensesButton" type="button" aria-label="Close licenses" title="Close licenses">×</button>
+        </header>
+        <p class="licenses-intro">Components shipped with or used to build this application. Entries with incomplete binary provenance remain internal-only.</p>
+        <label class="licenses-search" for="licensesSearchInput"><span>Filter licenses</span><input id="licensesSearchInput" type="search" autocomplete="off" placeholder="Search name, license, or version" /></label>
+        <div id="licensesSummary" class="licenses-summary" role="status"></div>
+        <div id="licensesList" class="licenses-list"></div>
       </section>
 
       <div id="toast" class="toast is-hidden" role="status"></div>

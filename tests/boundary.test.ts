@@ -14,7 +14,10 @@ describe("renderer and preload security boundary", () => {
     expect(Object.keys(IPC)).not.toContain("request");
     expect(Object.values(IPC).join(" ")).not.toMatch(/report-start|report-progress|report-stop|sessions\/playing/i);
     const preload = await readFile("src/preload/index.ts", "utf8");
-    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    const renderer = [
+      await readFile("src/renderer/app.ts", "utf8"),
+      await readFile("src/renderer/playerPresentation.ts", "utf8"),
+    ].join("\n");
     expect(preload).not.toMatch(/exposeInMainWorld\([^,]+,\s*ipcRenderer/);
     expect(preload).not.toMatch(/\b(send|sendSync|on)\s*:/);
     expect(preload).toContain("code: result.error.code");
@@ -23,7 +26,10 @@ describe("renderer and preload security boundary", () => {
   });
 
   it("contains no renderer networking, token storage, Node, or privileged imports", async () => {
-    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    const renderer = [
+      await readFile("src/renderer/app.ts", "utf8"),
+      await readFile("src/renderer/playerPresentation.ts", "utf8"),
+    ].join("\n");
     expect(renderer).not.toMatch(/\bfetch\s*\(/);
     expect(renderer).not.toMatch(/localStorage|sessionStorage|accessToken|api_key|X-MediaBrowser-Token/);
     expect(renderer).not.toMatch(/from\s+["'](?:node:|electron|.*\/main\/)/);
@@ -198,7 +204,9 @@ describe("renderer and preload security boundary", () => {
       "libraryGrid.replaceChildren()",
       "searchRows.replaceChildren()",
       "episodeList.replaceChildren()",
-      'videoPlayer.removeAttribute("src")',
+      "state.playbackState = null",
+      "state.soloDiagnostics = null",
+      "sessionPanelContent.replaceChildren()",
       'userLabel.textContent = ""',
       'serverLabel.textContent = ""',
       'setRoute("home")',

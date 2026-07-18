@@ -29,6 +29,7 @@ const contentTypes: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
 };
 
 export function appContentSecurityPolicy(): string {

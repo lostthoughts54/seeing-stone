@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 20;
+const EXPECTED_TESTS = 21;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -549,7 +549,45 @@ async function runElectronChild() {
       },
       async setViewVisible() { return structuredClone(watchPartyState); },
     };
-    registerIpcHandlers(ipcMain, mainWindow, api, artwork, playerController, downloads, synchronization, syncPlay, downloadLocation);
+    const soloSessionDiagnostics = {
+      async getSnapshot() {
+        const current = playback.getState();
+        return {
+          playback: current,
+          connection: { state: "connected", serverName: "Runtime server", serverVersion: "10.11.11", requestLatencyMs: null, measuredAt: null },
+          item: current.itemId === runtimeItem.id ? runtimeItem : null,
+          nextUp: null,
+        };
+      },
+    };
+    const openSourceLicenses = {
+      list() {
+        return {
+          schemaVersion: 1,
+          projectName: "Seeing Stone",
+          projectLicense: "GPL-2.0-or-later",
+          entries: [
+            { category: "application", name: "Seeing Stone", version: "0.4.3", license: "GPL-2.0-or-later", projectUrl: null, redistributionStatus: "source-only" },
+            { category: "font", name: "Inter", version: "4.1", license: "OFL-1.1", projectUrl: "https://github.com/rsms/inter", redistributionStatus: "source-and-binary" },
+          ],
+        };
+      },
+    };
+    registerIpcHandlers(
+      ipcMain,
+      mainWindow,
+      api,
+      artwork,
+      playerController,
+      downloads,
+      synchronization,
+      syncPlay,
+      downloadLocation,
+      undefined,
+      undefined,
+      soloSessionDiagnostics,
+      openSourceLicenses,
+    );
     let rendererExit = null;
     let failedLoad = null;
     mainWindow.webContents.once("render-process-gone", (_event, details) => { rendererExit = details; });
@@ -658,6 +696,8 @@ async function runElectronChild() {
         mediaSources: ["getCapabilities"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
         playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "stop", "subscribe"],
+        sessionPanel: ["getSolo"],
+        licenses: ["list"],
         watchParties: ["create", "getState", "join", "leave", "list", "resync", "setVisible", "subscribe"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
@@ -676,6 +716,31 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("renderer opens the generated sanitized open-source license inventory", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("profileButton").click();
+        document.getElementById("licensesButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelectorAll(".license-entry").length === 2) break;
+          await delay(20);
+        }
+        const text = document.getElementById("licensesPanel").textContent;
+        const value = {
+          visible: !document.getElementById("licensesPanel").classList.contains("is-hidden"),
+          title: document.getElementById("licensesTitle").textContent,
+          entries: [...document.querySelectorAll(".license-entry strong")].map((entry) => entry.textContent),
+          containsSensitiveText: /(?:access.?token|authorization|api[_-]?key|file:\\/|runtime-server\\.invalid)/i.test(text),
+        };
+        document.getElementById("closeLicensesButton").click();
+        return value;
+      })()`);
+      assert.equal(result.visible, true);
+      assert.equal(result.title, "Open Source Licenses");
+      assert.deepEqual(result.entries, ["Seeing Stone", "Inter"]);
+      assert.equal(result.containsSensitiveText, false);
     });
 
     await test("download settings use narrow native actions without exposing a path", async () => {
@@ -925,7 +990,7 @@ async function runElectronChild() {
       assert.equal(result.title, runtimeSeries.name);
       assert.equal(result.episodeSectionVisible, true);
       assert.equal(result.seasonId, runtimeSeasonTwo.id);
-      assert.equal(result.optionBackground, "rgb(27, 27, 31)");
+      assert.equal(result.optionBackground, "rgb(26, 23, 39)");
       assert.equal(result.optionColor, "rgb(247, 247, 248)");
       assert.equal(result.seriesButtonHidden, true);
       assert.deepEqual(detailRequests.slice(-2), [runtimeEpisode.id, runtimeSeries.id]);
@@ -1114,7 +1179,7 @@ async function runElectronChild() {
       assert.deepEqual(result.buttonLabels, ["Play", "Delete copy"]);
       assert.equal(result.playerTitle, downloadedItem.name);
       assert.equal(result.playerMeta, "Episode - Downloaded");
-      assert.equal(result.sourceBadge, "Jellyfin");
+      assert.equal(result.sourceBadge, "Direct Play");
       assert.equal(result.playbackItemId, downloadedItem.itemId);
       const playbackState = playback.getState();
       assert.equal(playbackState.itemId, downloadedItem.itemId);
