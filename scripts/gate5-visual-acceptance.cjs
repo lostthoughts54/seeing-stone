@@ -139,6 +139,8 @@ async function runChild() {
     toast.classList.add("is-hidden");
     toast.style.display = "none";
     toast.setAttribute("aria-hidden", "true");
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await delay(50);
     const visibleText = document.body.innerText;
     return {
       actionLabels,
