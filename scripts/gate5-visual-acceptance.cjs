@@ -170,7 +170,8 @@ async function runChild() {
   assert(rendererErrors.length === 0, "Renderer errors occurred during Gate 5 visual acceptance.");
 
   window.webContents.invalidate();
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await window.webContents.capturePage();
+  await new Promise((resolve) => setTimeout(resolve, 500));
   const image = await window.webContents.capturePage();
   const png = image.toPNG();
   const screenshotName = "watchparty-disabled-fallback.png";
