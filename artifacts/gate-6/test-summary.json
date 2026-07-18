@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "gate": 6,
+  "completedAt": "2026-07-18T08:29:33.3649506Z",
+  "branch": "codex/seeing-stone-player",
+  "sourceCheckpoint": "c716bee218bebeeb2d128b5abc6510eaba145367",
+  "runtimeEvidenceSource": "c716bee218bebeeb2d128b5abc6510eaba145367",
+  "visualEvidenceSource": "ede6d75d2907400a4ca0e83ff042620d66db59b2",
+  "results": {
+    "typecheckTargets": { "passed": 3, "failed": 0 },
+    "licensePolicy": "passed",
+    "mainBuild": "passed",
+    "preloadBuild": "passed",
+    "rendererBuild": "passed",
+    "workerIntegrity": "passed",
+    "unit": { "filesPassed": 33, "testsPassed": 232, "failed": 0 },
+    "compiledCore": { "testsPassed": 23, "failed": 0 },
+    "hiddenElectron": { "testsPassed": 21, "failed": 0 },
+    "persistenceRuntime": "passed",
+    "mediaProbe": "passed",
+    "offlineRealMpvRuntime": "passed",
+    "isolatedVisual": { "screenshots": 3, "rendererErrors": 0, "status": "passed" },
+    "independentSafetyReview": "safe-to-checkpoint"
+  },
+  "retryEvidence": {
+    "hiddenElectron": "The first launch exposed two stale test-fixture expectations for additive bridge methods and cached episode titles. The fixture was corrected and the single justified retry passed all 21 checks."
+  },
+  "intentionallyExcluded": [
+    "Windows packaging and publishing",
+    "Authenticated or destructive Jellyfin testing",
+    "Live-server and plugin testing",
+    "Earlier-gate mpv visual and SyncPlay acceptance reruns"
+  ],
+  "safety": {
+    "normalJellyfinServerTouched": false,
+    "serverOrPluginChanged": false,
+    "binaryOrReleasePublished": false,
+    "packagedDefaultChanged": false,
+    "legacyPlayerRemoved": false,
+    "gate7Started": false
+  }
+}
