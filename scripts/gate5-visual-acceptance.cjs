@@ -150,6 +150,7 @@ async function runChild() {
       savedPolicy,
       restoredPolicy,
       resetCompleted,
+      toastHidden: toast.classList.contains("is-hidden") && getComputedStyle(toast).display === "none",
       waitState,
       continueState,
       hasLatencyRow: /Server latency|Local drift/.test(panel.textContent),
@@ -162,11 +163,14 @@ async function runChild() {
   assert(result.participantValues.length === 2 && result.participantValues.every((value) => value === "Jellyfin member"), "Unverified participants must show only native Jellyfin membership.");
   assert(result.explanation.includes("unavailable") && result.explanation.includes("Standard Jellyfin SyncPlay remains active"), "Disabled telemetry explanation is missing.");
   assert(result.initialPolicy === "wait-for-all" && result.savedPolicy === "continue" && result.restoredPolicy === "wait-for-all" && result.resetCompleted, "Buffering policy controls did not round-trip.");
+  assert(result.toastHidden, "Transient policy feedback remained visible before capture.");
   assert(result.waitState && result.continueState, "Wait and Continue did not update the isolated Jellyfin group state.");
   assert(!result.hasLatencyRow && !result.hasIncident, "Unavailable enhanced diagnostics must be suppressed.");
   assert(!result.sensitiveText, "Gate 5 visual fixture exposed sensitive-looking text.");
   assert(rendererErrors.length === 0, "Renderer errors occurred during Gate 5 visual acceptance.");
 
+  window.webContents.invalidate();
+  await new Promise((resolve) => setTimeout(resolve, 100));
   const image = await window.webContents.capturePage();
   const png = image.toPNG();
   const screenshotName = "watchparty-disabled-fallback.png";
