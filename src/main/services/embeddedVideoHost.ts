@@ -38,7 +38,7 @@ export function videoHostBounds(content: Rectangle, viewport: VideoViewport): Re
 }
 
 export function initializedVideoSurfaceBounds(bounds: Rectangle): Rectangle {
-  return { ...bounds, width: Math.max(16, bounds.width - 1) };
+  return bounds;
 }
 
 const user32 = koffi.load("user32.dll");
@@ -48,6 +48,7 @@ const setWindowLongPtr = user32.func("__stdcall", "SetWindowLongPtrA", "intptr_t
 const setWindowPos = user32.func("__stdcall", "SetWindowPos", "int", ["void *", "void *", "int", "int", "int", "int", "uint"]);
 const showWindow = user32.func("__stdcall", "ShowWindow", "int", ["void *", "int"]);
 const isWindow = user32.func("__stdcall", "IsWindow", "int", ["void *"]);
+const enableWindow = user32.func("__stdcall", "EnableWindow", "int", ["void *", "int"]);
 const setLayeredWindowAttributes = user32.func("__stdcall", "SetLayeredWindowAttributes", "int", ["void *", "uint", "uchar", "uint"]);
 const kernel32 = koffi.load("kernel32.dll");
 const getLastError = kernel32.func("__stdcall", "GetLastError", "uint", []);
@@ -92,6 +93,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   private lastBounds: Rectangle | null = null;
   private reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private surfaceInitializationTimer: ReturnType<typeof setTimeout> | null = null;
+  private ownerResizeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   private videoSurfaceInitialized = false;
   private destroyed = false;
   private readonly displayMetricsListener = () => this.scheduleReconcile();
@@ -133,6 +135,8 @@ export class EmbeddedVideoHost implements MpvVideoHost {
   detachWindow(): void {
     if (this.surfaceInitializationTimer) clearTimeout(this.surfaceInitializationTimer);
     this.surfaceInitializationTimer = null;
+    if (this.ownerResizeRestoreTimer) clearTimeout(this.ownerResizeRestoreTimer);
+    this.ownerResizeRestoreTimer = null;
     this.hide();
     this.overlay = null;
     this.lastBounds = null;
@@ -150,17 +154,19 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     this.surfaceInitializationTimer = setTimeout(() => {
       this.videoSurfaceInitialized = true;
       this.applyBounds();
+      const ownerResizePulse = this.pulseOwnerResize();
       this.surfaceInitializationTimer = setTimeout(() => {
         this.surfaceInitializationTimer = null;
         const overlay = this.validOverlay();
         try {
-          if (overlay === null || !this.applyManagedStyleBits(overlay)) this.hide();
+          if (!ownerResizePulse) this.pulseOverlaySurface();
+          if (overlay === null || !this.reapplyManagedStyles(overlay)) this.hide();
           else this.scheduleReconcile();
         } catch {
           this.hide();
         }
-      }, 100);
-    }, 500);
+      }, ownerResizePulse ? 180 : 100);
+    }, 250);
   }
 
   setFullscreen(fullscreen: boolean): void {
@@ -181,6 +187,8 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     this.reconcileTimer = null;
     if (this.surfaceInitializationTimer) clearTimeout(this.surfaceInitializationTimer);
     this.surfaceInitializationTimer = null;
+    if (this.ownerResizeRestoreTimer) clearTimeout(this.ownerResizeRestoreTimer);
+    this.ownerResizeRestoreTimer = null;
     screen.removeListener("display-metrics-changed", this.displayMetricsListener);
     this.detachWindow();
   }
@@ -195,6 +203,12 @@ export class EmbeddedVideoHost implements MpvVideoHost {
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) !== 0;
   }
 
+  private reapplyManagedStyles(overlay: bigint): boolean {
+    if (!this.applyManagedStyleBits(overlay)) return false;
+    return setWindowPos(overlay, null, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) !== 0;
+  }
+
   private applyManagedStyleBits(overlay: bigint): boolean {
     const ownerHandle = windowsWindowHandle(this.owner.getNativeWindowHandle());
     setWindowLongChecked(overlay, GWLP_HWNDPARENT, ownerHandle);
@@ -202,6 +216,7 @@ export class EmbeddedVideoHost implements MpvVideoHost {
     const managedStyle = (existingStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED)
       & ~WS_EX_APPWINDOW;
     setWindowLongChecked(overlay, GWL_EXSTYLE, managedStyle);
+    enableWindow(overlay, 0);
     return setLayeredWindowAttributes(overlay, 0, 255, LWA_ALPHA) !== 0;
   }
 
@@ -212,6 +227,42 @@ export class EmbeddedVideoHost implements MpvVideoHost {
       this.reconcileTimer = null;
       this.applyBounds();
     }, 500);
+  }
+
+  private pulseOwnerResize(): boolean {
+    if (this.owner.isDestroyed() || this.owner.isMinimized() || this.owner.isMaximized() || this.owner.isFullScreen()) {
+      return false;
+    }
+    const bounds = this.owner.getBounds();
+    if (bounds.width < 32 || bounds.height < 32) return false;
+    try {
+      this.owner.setBounds({ ...bounds, width: bounds.width + 1 }, false);
+      if (this.ownerResizeRestoreTimer) clearTimeout(this.ownerResizeRestoreTimer);
+      this.ownerResizeRestoreTimer = setTimeout(() => {
+        this.ownerResizeRestoreTimer = null;
+        if (this.destroyed || this.owner.isDestroyed() || this.owner.isMinimized()
+          || this.owner.isMaximized() || this.owner.isFullScreen()) return;
+        this.owner.setBounds(bounds, false);
+        this.scheduleReconcile();
+      }, 80);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private pulseOverlaySurface(): void {
+    const overlay = this.validOverlay();
+    if (overlay === null || this.destroyed || this.owner.isDestroyed() || this.owner.isMinimized()
+      || !this.owner.isVisible() || !this.viewport.visible) return;
+    const bounds = videoHostBounds(this.owner.getContentBounds(), this.viewport);
+    if (bounds.width < 32 || bounds.height < 16) return;
+    setWindowPos(overlay, null, bounds.x, bounds.y, bounds.width - 1, bounds.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    setTimeout(() => {
+      if (this.validOverlay() !== overlay || this.destroyed || this.owner.isDestroyed()) return;
+      setWindowPos(overlay, null, bounds.x, bounds.y, bounds.width, bounds.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+      this.lastBounds = bounds;
+    }, 60);
   }
 
   private applyBounds(): void {

@@ -32,9 +32,9 @@ describe("EmbeddedVideoHost platform boundary", () => {
       .toEqual({ x: 0, y: 0, width: 1920, height: 1077 });
   });
 
-  it("keeps the initialized D3D surface one physical resize away from its pre-video bounds", () => {
+  it("returns the initialized D3D surface to the exact renderer viewport", () => {
     expect(initializedVideoSurfaceBounds({ x: 10, y: 20, width: 1280, height: 720 }))
-      .toEqual({ x: 10, y: 20, width: 1279, height: 720 });
+      .toEqual({ x: 10, y: 20, width: 1280, height: 720 });
     expect(initializedVideoSurfaceBounds({ x: 10, y: 20, width: 16, height: 16 }))
       .toEqual({ x: 10, y: 20, width: 16, height: 16 });
   });
@@ -50,8 +50,11 @@ describe("EmbeddedVideoHost platform boundary", () => {
     expect(source).toContain("WS_EX_LAYERED");
     expect(source).toContain("setLayeredWindowAttributes(overlay, 0, 255, LWA_ALPHA)");
     expect(source).toContain("setWindowLongChecked(overlay, GWLP_HWNDPARENT, ownerHandle)");
+    expect(source).toContain("enableWindow(overlay, 0)");
     expect(source).toContain("if (!this.applyManagedStyles(candidate))");
     expect(source).toContain("!this.applyManagedStyleBits(overlay)");
+    expect(source).toContain("pulseOwnerResize()");
+    expect(source).toContain("pulseOverlaySurface()");
     expect(source).toContain("SWP_FRAMECHANGED");
     expect(source).toContain("SWP_NOACTIVATE | SWP_SHOWWINDOW");
     expect(source).toContain("raise(): void");
