@@ -66,6 +66,8 @@ const profileInitial = byId<HTMLElement>("profileInitial");
 const profileMenu = byId<HTMLElement>("profileMenu");
 const userLabel = byId<HTMLElement>("userLabel");
 const serverLabel = byId<HTMLElement>("serverLabel");
+const profileAdapterSelect = byId<HTMLSelectElement>("profileAdapterSelect");
+const profileAdapterStatus = byId<HTMLElement>("profileAdapterStatus");
 const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
@@ -2371,21 +2373,32 @@ function renderPlayerAdapterPreference(): void {
   const preference = playerAdapterPreference;
   if (!preference) {
     playerAdapterSelect.disabled = true;
+    profileAdapterSelect.disabled = true;
     playerAdapterStatus.textContent = "Player engine status is unavailable.";
+    profileAdapterStatus.textContent = "Player engine status is unavailable.";
     playerAdapterStatus.dataset.tone = "amber";
+    profileAdapterStatus.dataset.tone = "amber";
     return;
   }
   playerAdapterSelect.disabled = false;
+  profileAdapterSelect.disabled = false;
   playerAdapterSelect.value = preference.selected;
+  profileAdapterSelect.value = preference.selected;
   const embeddedOption = playerAdapterSelect.querySelector<HTMLOptionElement>('option[value="embedded"]');
   if (embeddedOption) embeddedOption.disabled = !preference.embeddedAvailable;
+  const profileEmbeddedOption = profileAdapterSelect.querySelector<HTMLOptionElement>('option[value="embedded"]');
+  if (profileEmbeddedOption) profileEmbeddedOption.disabled = !preference.embeddedAvailable;
   const activeLabel = preference.active === "embedded" ? "Embedded player" : "Legacy external player";
   if (preference.restartRequired) {
     playerAdapterStatus.textContent = `${activeLabel} is active. Restart Seeing Stone to apply this change.`;
+    profileAdapterStatus.textContent = `${activeLabel} is active. Restart Seeing Stone to apply this change.`;
     playerAdapterStatus.dataset.tone = "amber";
+    profileAdapterStatus.dataset.tone = "amber";
   } else {
     playerAdapterStatus.textContent = `${activeLabel} is active.`;
+    profileAdapterStatus.textContent = `${activeLabel} is active.`;
     playerAdapterStatus.dataset.tone = "green";
+    profileAdapterStatus.dataset.tone = "green";
   }
 }
 
@@ -3089,20 +3102,29 @@ playerAudioSelect.addEventListener("change", () => changePlayerAudio(playerAudio
 playerSettingsAudioSelect.addEventListener("change", () => changePlayerAudio(playerSettingsAudioSelect));
 playerSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSubtitleSelect));
 playerSettingsSubtitleSelect.addEventListener("change", () => changePlayerSubtitle(playerSettingsSubtitleSelect));
-playerAdapterSelect.addEventListener("change", async () => {
+async function changePlayerAdapterPreference(mode: "embedded" | "legacy"): Promise<void> {
   const previous = playerAdapterPreference?.selected;
   playerAdapterSelect.disabled = true;
+  profileAdapterSelect.disabled = true;
   try {
     playerAdapterPreference = await window.jellyfin.playback.setAdapterPreference({
-      mode: playerAdapterSelect.value === "legacy" ? "legacy" : "embedded",
+      mode,
     });
     renderPlayerAdapterPreference();
     if (playerAdapterPreference.restartRequired) showToast("Player engine saved. Restart Seeing Stone to apply it.");
   } catch (error) {
     if (previous) playerAdapterSelect.value = previous;
+    if (previous) profileAdapterSelect.value = previous;
     showToast(errorMessage(error, "The player engine could not be changed."));
     renderPlayerAdapterPreference();
   }
+}
+
+playerAdapterSelect.addEventListener("change", () => {
+  void changePlayerAdapterPreference(playerAdapterSelect.value === "legacy" ? "legacy" : "embedded");
+});
+profileAdapterSelect.addEventListener("change", () => {
+  void changePlayerAdapterPreference(profileAdapterSelect.value === "legacy" ? "legacy" : "embedded");
 });
 function togglePlayerFullscreen(): void {
   const playback = playbackForPlayer();

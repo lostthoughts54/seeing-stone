@@ -93,6 +93,14 @@
           <div id="profileMenu" class="profile-menu is-hidden">
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
+            <label class="profile-engine-setting">
+              <span>Player engine</span>
+              <select id="profileAdapterSelect" aria-label="Player engine">
+                <option value="embedded">Embedded (recommended)</option>
+                <option value="legacy">Legacy external</option>
+              </select>
+            </label>
+            <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
             <button id="downloadsButton" type="button">Downloads</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
             <button id="refreshButton" type="button">Refresh Connection</button>

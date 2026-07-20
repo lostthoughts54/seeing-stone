@@ -263,13 +263,12 @@ export function registerIpcHandlers(
     if (!playerPreferences) throw new AppError("PLAYER_PREFERENCES_UNAVAILABLE", "Player preferences are unavailable.", 503);
     const selected = (await playerPreferences.get()).adapterMode ?? "legacy";
     const active = videoHost ? "embedded" : "legacy";
-    return { active, selected, embeddedAvailable: !app.isPackaged, restartRequired: active !== selected } as const;
+    return { active, selected, embeddedAvailable: true, restartRequired: active !== selected } as const;
   };
   register(IPC.playbackGetAdapterPreference, adapterPreference);
   register(IPC.playbackSetAdapterPreference, async (input) => {
     if (!playerPreferences) throw new AppError("PLAYER_PREFERENCES_UNAVAILABLE", "Player preferences are unavailable.", 503);
     const { mode } = playbackAdapterPreferenceSchema.strict().parse(input);
-    if (mode === "embedded" && app.isPackaged) throw new AppError("EMBEDDED_PLAYER_GUARDED", "The embedded player is not enabled in packaged builds.", 409);
     await playerPreferences.setAdapterMode(mode);
     return adapterPreference();
   });

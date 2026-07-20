@@ -534,6 +534,27 @@ select option {
   width: 100%;
 }
 
+.profile-engine-setting {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+.profile-engine-setting span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.profile-engine-setting select {
+  min-height: 38px;
+  width: 100%;
+}
+
 .content-scroller {
   min-height: 0;
   overflow-x: hidden;
