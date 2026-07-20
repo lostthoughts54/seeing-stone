@@ -41,6 +41,7 @@ import type { PlayerController } from "./services/playerController";
 import { SoloSessionDiagnosticsService } from "./services/soloSessionDiagnostics";
 import { OpenSourceLicensesService } from "./services/openSourceLicenses";
 import { ApplicationPreferencesService } from "./services/applicationPreferences";
+import { requestedPlayerAdapterMode } from "./services/playerAdapterSelection";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -146,10 +147,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
   });
   const storedPlayerPreferences = await playerPreferences.get();
-  const requestedMode = process.env.SEEING_STONE_PLAYER === "embedded" || process.env.SEEING_STONE_PLAYER === "legacy"
-    ? process.env.SEEING_STONE_PLAYER
-    : storedPlayerPreferences.adapterMode ?? "legacy";
-  const embeddedRequested = !app.isPackaged && requestedMode === "embedded";
+  const requestedMode = requestedPlayerAdapterMode(process.env.SEEING_STONE_PLAYER, storedPlayerPreferences.adapterMode);
+  const embeddedRequested = requestedMode === "embedded";
   const videoHost = embeddedRequested ? new EmbeddedVideoHost(mainWindow) : undefined;
   const playback = videoHost
     ? new EmbeddedMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost)
