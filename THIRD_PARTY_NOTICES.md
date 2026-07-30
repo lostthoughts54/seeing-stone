@@ -7,9 +7,14 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.4.3 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.5.0 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
+| native | node-addon-api | 8.5.0 | MIT | source-and-binary |
+| native | mpv libmpv source input | 0.41.0 | GPL-2.0-or-later | source-only |
+| native | Seeing Stone libmpv bridge | 0.4.3 milestone-4 | GPL-2.0-or-later | source-and-binary |
+| native | ANGLE runtime from Electron | Electron 43.1.0 / Chromium 150.0.7871.47 | BSD-3-Clause | source-and-binary |
+| native | FFmpeg libmpv source input | 8.1.2 | LGPL-2.1-or-later | source-only |
 | native | mpv | v0.41.0-dev-ge5486b96d | GPL-2.0-or-later | internal-only-unverified-provenance |
 | native | FFmpeg | ff59522 | GPL-2.0-or-later | internal-only-unverified-provenance |
 | native | Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | internal-only-unverified-provenance |
@@ -32,48 +37,9 @@ The current native runtime remains internal-only because upstream did not record
 | @electron/rebuild | 4.2.0 | MIT |
 | @electron/universal | 2.0.3 | MIT |
 | @electron/windows-sign | 1.2.2 | BSD-2-Clause |
-| @esbuild/aix-ppc64 | 0.28.1 | MIT |
-| @esbuild/android-arm | 0.28.1 | MIT |
-| @esbuild/android-arm64 | 0.28.1 | MIT |
-| @esbuild/android-x64 | 0.28.1 | MIT |
-| @esbuild/darwin-arm64 | 0.28.1 | MIT |
-| @esbuild/darwin-x64 | 0.28.1 | MIT |
-| @esbuild/freebsd-arm64 | 0.28.1 | MIT |
-| @esbuild/freebsd-x64 | 0.28.1 | MIT |
-| @esbuild/linux-arm | 0.28.1 | MIT |
-| @esbuild/linux-arm64 | 0.28.1 | MIT |
-| @esbuild/linux-ia32 | 0.28.1 | MIT |
-| @esbuild/linux-loong64 | 0.28.1 | MIT |
-| @esbuild/linux-mips64el | 0.28.1 | MIT |
-| @esbuild/linux-ppc64 | 0.28.1 | MIT |
-| @esbuild/linux-riscv64 | 0.28.1 | MIT |
-| @esbuild/linux-s390x | 0.28.1 | MIT |
-| @esbuild/linux-x64 | 0.28.1 | MIT |
-| @esbuild/netbsd-arm64 | 0.28.1 | MIT |
-| @esbuild/netbsd-x64 | 0.28.1 | MIT |
-| @esbuild/openbsd-arm64 | 0.28.1 | MIT |
-| @esbuild/openbsd-x64 | 0.28.1 | MIT |
-| @esbuild/openharmony-arm64 | 0.28.1 | MIT |
-| @esbuild/sunos-x64 | 0.28.1 | MIT |
-| @esbuild/win32-arm64 | 0.28.1 | MIT |
-| @esbuild/win32-ia32 | 0.28.1 | MIT |
 | @esbuild/win32-x64 | 0.28.1 | MIT |
 | @isaacs/fs-minipass | 4.0.1 | ISC |
 | @jridgewell/sourcemap-codec | 1.5.5 | MIT |
-| @koromix/koffi-darwin-arm64 | 3.1.1 | MIT |
-| @koromix/koffi-darwin-x64 | 3.1.1 | MIT |
-| @koromix/koffi-freebsd-arm64 | 3.1.1 | MIT |
-| @koromix/koffi-freebsd-ia32 | 3.1.1 | MIT |
-| @koromix/koffi-freebsd-x64 | 3.1.1 | MIT |
-| @koromix/koffi-linux-arm64 | 3.1.1 | MIT |
-| @koromix/koffi-linux-ia32 | 3.1.1 | MIT |
-| @koromix/koffi-linux-loong64 | 3.1.1 | MIT |
-| @koromix/koffi-linux-riscv64 | 3.1.1 | MIT |
-| @koromix/koffi-linux-x64 | 3.1.1 | MIT |
-| @koromix/koffi-openbsd-ia32 | 3.1.1 | MIT |
-| @koromix/koffi-openbsd-x64 | 3.1.1 | MIT |
-| @koromix/koffi-win32-arm64 | 3.1.1 | MIT |
-| @koromix/koffi-win32-ia32 | 3.1.1 | MIT |
 | @koromix/koffi-win32-x64 | 3.1.1 | MIT |
 | @malept/cross-spawn-promise | 2.0.0 | Apache-2.0 |
 | @malept/flatpak-bundler | 0.4.0 | MIT |
@@ -82,29 +48,6 @@ The current native runtime remains internal-only because upstream did not record
 | @peculiar/json-schema | 1.1.12 | MIT |
 | @peculiar/utils | 2.0.3 | MIT |
 | @peculiar/webcrypto | 1.7.1 | MIT |
-| @rollup/rollup-android-arm-eabi | 4.62.2 | MIT |
-| @rollup/rollup-android-arm64 | 4.62.2 | MIT |
-| @rollup/rollup-darwin-arm64 | 4.62.2 | MIT |
-| @rollup/rollup-darwin-x64 | 4.62.2 | MIT |
-| @rollup/rollup-freebsd-arm64 | 4.62.2 | MIT |
-| @rollup/rollup-freebsd-x64 | 4.62.2 | MIT |
-| @rollup/rollup-linux-arm-gnueabihf | 4.62.2 | MIT |
-| @rollup/rollup-linux-arm-musleabihf | 4.62.2 | MIT |
-| @rollup/rollup-linux-arm64-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-arm64-musl | 4.62.2 | MIT |
-| @rollup/rollup-linux-loong64-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-loong64-musl | 4.62.2 | MIT |
-| @rollup/rollup-linux-ppc64-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-ppc64-musl | 4.62.2 | MIT |
-| @rollup/rollup-linux-riscv64-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-riscv64-musl | 4.62.2 | MIT |
-| @rollup/rollup-linux-s390x-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-x64-gnu | 4.62.2 | MIT |
-| @rollup/rollup-linux-x64-musl | 4.62.2 | MIT |
-| @rollup/rollup-openbsd-x64 | 4.62.2 | MIT |
-| @rollup/rollup-openharmony-arm64 | 4.62.2 | MIT |
-| @rollup/rollup-win32-arm64-msvc | 4.62.2 | MIT |
-| @rollup/rollup-win32-ia32-msvc | 4.62.2 | MIT |
 | @rollup/rollup-win32-x64-gnu | 4.62.2 | MIT |
 | @rollup/rollup-win32-x64-msvc | 4.62.2 | MIT |
 | @sindresorhus/is | 4.6.0 | MIT |
@@ -215,7 +158,6 @@ The current native runtime remains internal-only because upstream did not record
 | form-data | 4.0.6 | MIT |
 | fs-extra | 10.1.0 | MIT |
 | fs.realpath | 1.0.0 | ISC |
-| fsevents | 2.3.3 | MIT |
 | function-bind | 1.1.2 | MIT |
 | get-caller-file | 2.0.5 | ISC |
 | get-intrinsic | 1.3.0 | MIT |
@@ -274,6 +216,7 @@ The current native runtime remains internal-only because upstream did not record
 | ms | 2.1.3 | MIT |
 | nanoid | 3.3.15 | MIT |
 | node-abi | 4.33.0 | MIT |
+| node-addon-api | 8.5.0 | MIT |
 | node-api-version | 0.2.1 | MIT |
 | node-gyp | 12.4.0 | MIT |
 | node-int64 | 0.4.0 | MIT |

@@ -2,6 +2,21 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("Seeing Stone player shell", () => {
+  it("ships guide-first Live TV across desktop, mobile, and player navigation", async () => {
+    const [html, app] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    for (const id of [
+      "navLiveTvButton", "mobileLiveTvButton", "liveTvView", "liveTvGuideTab",
+      "liveTvRecordingsTab", "liveTvScheduledTab", "playerMiniGuide", "playerGoLiveButton",
+    ]) expect(html).toContain(`id="${id}"`);
+    expect(html).toContain('data-player-route="live-tv"');
+    expect(app).toContain("window.jellyfin.playback.startLive");
+    expect(app).toContain("window.jellyfin.liveTv.createRecording");
+    expect(app).toContain("window.confirm");
+  });
+
   it("uses a dedicated inert native viewport with sibling controls", async () => {
     const html = await readFile("src/renderer/index.html", "utf8");
     const player = html.slice(html.indexOf('<section id="playerView"'), html.indexOf('<div id="downloadsScrim"'));
@@ -42,6 +57,75 @@ describe("Seeing Stone player shell", () => {
     expect(html).toMatch(/id="openSessionPanelButton"[^>]*aria-controls="sessionPanel"[^>]*aria-expanded="true"/);
   });
 
+  it("offers an actionable automatic Next Episode countdown above the video surface", async () => {
+    const [html, styles, renderer, preload] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/preload/index.ts", "utf8"),
+    ]);
+    for (const id of [
+      "nextEpisodeCountdown",
+      "nextEpisodeCountdownTitle",
+      "nextEpisodeCountdownProgress",
+      "nextEpisodePlayNowButton",
+      "nextEpisodeCancelButton",
+    ]) expect(html).toContain(`id="${id}"`);
+    expect(styles).toMatch(/\.next-episode-countdown \{[^}]*position: absolute[^}]*z-index: 6/s);
+    expect(styles).toContain('[data-controls-overlay="true"] .next-episode-countdown');
+    expect(renderer).toContain("playback?.nextEpisodeCountdown");
+    expect(renderer).toContain("window.jellyfin.playback.continueNextEpisode");
+    expect(renderer).toContain("window.jellyfin.playback.cancelNextEpisode");
+    expect(preload).toContain("IPC.playbackContinueNextEpisode");
+    expect(preload).toContain("IPC.playbackCancelNextEpisode");
+  });
+
+  it("offers a libmpv-only in-player season and episode browser", async () => {
+    const [html, styles, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    for (const id of [
+      "playerEpisodeBrowser",
+      "playerEpisodeBrowserButton",
+      "closePlayerEpisodeBrowserButton",
+      "playerEpisodeSeasonSelect",
+      "playerEpisodeBrowserStatus",
+      "playerEpisodeList",
+    ]) expect(html).toContain(`id="${id}"`);
+    expect(html).toMatch(/id="playerEpisodeBrowserButton"[^>]*aria-controls="playerEpisodeBrowser"/);
+    expect(styles).toContain('.player-view:not([data-active-adapter="libmpv"]) .player-episode-browser');
+    expect(styles).toMatch(/\.player-episode-browser \{[^}]*position: absolute[^}]*z-index: 7/s);
+    expect(styles).toContain('.player-episode-entry[aria-current="true"]');
+    expect(renderer).toContain("window.jellyfin.shows.getSeasons({ itemId: seriesId })");
+    expect(renderer).toContain("window.jellyfin.shows.getEpisodes({ seriesId, seasonId })");
+    expect(renderer).toContain('playerAdapterPreference?.active !== "libmpv"');
+    expect(renderer).toContain("void playItem(episode)");
+    expect(renderer).toContain("state.playerEpisodeBrowserRequestId += 1");
+  });
+
+  it("keeps episode UI hiccups bounded and makes player close silence-first", async () => {
+    const [renderer, bridge, player] = await Promise.all([
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/main/services/libMpvElectronBridge.ts", "utf8"),
+      readFile("src/main/services/mpvPlayer.ts", "utf8"),
+    ]);
+    const closePlayer = renderer.slice(
+      renderer.indexOf("async function closePlayer()"),
+      renderer.indexOf("window.jellyfin.playback.subscribe"),
+    );
+    expect(closePlayer.indexOf("window.jellyfin.playback.stop")).toBeLessThan(closePlayer.indexOf("syncPlayerViewport(false)"));
+    expect(renderer).toContain("focus({ preventScroll: true })");
+    expect(renderer).toContain("const scrollTop = playerCenter.scrollTop");
+    expect(bridge).toContain("const PRESENTATION_ACK_TIMEOUT_MS = 5_000");
+    expect(bridge).toContain('producer.command(["set", "pause", "yes"])');
+    expect(bridge).toContain('producer.command(["stop"])');
+    const nativeStop = player.slice(player.indexOf("async stop("), player.indexOf("async clear()"));
+    expect(nativeStop.indexOf('command(["quit"])')).toBeLessThan(nativeStop.indexOf('this.report("stop"'));
+    expect(nativeStop).toContain("this.libMpvHost?.stop()");
+  });
+
   it("bundles local fonts, responsive layouts, reduced motion, and visible focus", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
     expect(styles).toContain('./assets/fonts/InterVariable.woff2');
@@ -65,6 +149,26 @@ describe("Seeing Stone player shell", () => {
     expect(security).toContain('".ttf": "font/ttf"');
   });
 
+  it("offers sanitized clean-machine diagnostics with controlled copy and save actions", async () => {
+    const [html, renderer, preload] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/preload/index.ts", "utf8"),
+    ]);
+    for (const id of [
+      "loginCleanMachineDiagnosticsButton",
+      "cleanMachineDiagnosticsButton",
+      "cleanMachineDiagnosticsPanel",
+      "cleanMachineDiagnosticsChecks",
+      "copyCleanMachineDiagnosticsButton",
+      "saveCleanMachineDiagnosticsButton",
+    ]) expect(html).toContain(`id="${id}"`);
+    expect(renderer).toContain("window.jellyfin.diagnostics.getCleanMachine()");
+    expect(renderer).toContain("window.jellyfin.diagnostics.copyCleanMachine()");
+    expect(renderer).toContain("window.jellyfin.diagnostics.saveCleanMachine()");
+    expect(preload).not.toMatch(/filePath|driverName|gpuDevice|nativeHandle/);
+  });
+
   it("keeps controls visible whenever focus is inside them", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
     const renderer = await readFile("src/renderer/app.ts", "utf8");
@@ -74,9 +178,10 @@ describe("Seeing Stone player shell", () => {
   });
 
   it("provides a control-safe cinema fullscreen with idle restoration behavior", async () => {
-    const [styles, renderer] = await Promise.all([
+    const [styles, renderer, preload] = await Promise.all([
       readFile("src/renderer/styles.css", "utf8"),
       readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/preload/index.ts", "utf8"),
     ]);
     expect(styles).toContain('--cinema-control-band: 56px');
     expect(styles).toContain('--cinema-control-band: 3px');
@@ -84,12 +189,36 @@ describe("Seeing Stone player shell", () => {
     expect(styles).toContain('.player-view[data-fullscreen="true"] .session-panel');
     expect(styles).toContain('.player-view[data-fullscreen="true"] .player-metadata');
     expect(styles).toContain('grid-template-rows: minmax(0, 1fr) var(--cinema-control-band)');
+    expect(styles).toContain('[data-controls-overlay="true"]');
+    expect(styles).toContain('--cinema-control-band: 0px');
+    expect(styles).toContain('position: absolute');
+    expect(renderer).toContain('playerView.dataset.activeAdapter = preference.active');
+    expect(renderer).toContain('playerAdapterPreference?.active === "libmpv"');
+    expect(renderer).toContain('playerFrame.append(playerControls)');
+    expect(renderer).toContain('window.addEventListener("pointermove"');
+    expect(preload).toContain('libmpvSurface.style.zIndex = "1"');
+    expect(preload).toContain('libmpvBackSurface.style.zIndex = "2"');
+    expect(preload).not.toContain("libmpvSurfaceLayer");
+    expect(styles).toMatch(/\.player-viewport \{[^}]*isolation: isolate[^}]*z-index: 0/s);
     expect(styles).toContain('.player-view.is-controls-idle[data-fullscreen="true"]');
     expect(styles).toContain('cursor: none');
     expect(renderer).toContain('playback.phase === "playing" && playback.paused === false');
+    expect(renderer).toContain('playerViewport.addEventListener("click"');
     expect(renderer).toContain('playerViewport.addEventListener("dblclick"');
+    expect(renderer).toContain("if (!playbackForPlayer()?.fullscreen) return");
+    expect(renderer).toContain("if (playbackForPlayer()?.fullscreen) void togglePlayerPaused()");
+    expect(renderer).toContain("playerViewportClickTimer = null");
     expect(renderer).toContain('if (playbackForPlayer()?.fullscreen) togglePlayerFullscreen()');
     expect(renderer).toContain('requestAnimationFrame(() => requestAnimationFrame(schedulePlayerViewport))');
+  });
+
+  it("uses available windowed width while reserving enough height for controls", async () => {
+    const styles = await readFile("src/renderer/styles.css", "utf8");
+    expect(styles).toContain("--windowed-player-width: min(100%, max(420px, calc(177.78vh - 450px)))");
+    expect(styles).toMatch(/\.seeing-frame \{[^}]*max-width: none[^}]*width: var\(--windowed-player-width\)/s);
+    expect(styles).toMatch(/\.player-controls \{[^}]*max-width: none[^}]*width: var\(--windowed-player-width\)/s);
+    expect(styles).toMatch(/\.player-metadata \{[^}]*max-width: none[^}]*width: var\(--windowed-player-width\)/s);
+    expect(styles).not.toContain(".player-viewport { max-height: calc(100vh - 330px); }");
   });
 
   it("keeps compact playback options reachable through the real settings surface", async () => {
@@ -107,6 +236,20 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("playerSettingsSubtitleSelect.addEventListener");
     expect(renderer).toContain("window.jellyfin.playback.setAdapterPreference");
     expect(renderer).toContain("closePlayerSettings()");
+  });
+
+  it("keeps a readable fallback reason visible after libmpv initialization fails", async () => {
+    const [html, styles, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(html).toContain('id="playerFallbackNotice"');
+    expect(html).toContain('id="playerFallbackNoticeMessage"');
+    expect(styles).toContain(".player-fallback-notice");
+    expect(renderer).toContain('playerFallbackNotice.classList.remove("is-hidden")');
+    expect(renderer).toContain("await refreshPlayerAdapterPreference();");
+    expect(html).toContain("The saved Libmpv selection has not changed");
   });
 
   it("does not rebuild dynamic panel content for every position tick", async () => {
@@ -139,6 +282,16 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('}, "Play offline", false)');
     expect(renderer).toContain("if (loadArtwork)");
     expect(renderer).toContain('image.classList.add("is-hidden")');
+  });
+
+  it("revalidates open library views so newly added server items appear without restarting", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("await refreshLibrary(library, true)");
+    expect(renderer).toContain("state.libraryRequestIds.get(library.id) !== requestId");
+    expect(renderer).toContain("window.setInterval(() => { void refreshVisibleCatalog(); }, CATALOG_REFRESH_INTERVAL_MS)");
+    expect(renderer).toContain('window.addEventListener("focus", () => { void refreshVisibleCatalog(); })');
+    expect(renderer).toContain('document.addEventListener("visibilitychange"');
+    expect(renderer).toContain("if (!document.hidden) void refreshVisibleCatalog()");
   });
 
   it("keeps essential text and state colors at readable contrast", async () => {

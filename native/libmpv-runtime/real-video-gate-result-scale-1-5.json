@@ -1,0 +1,87 @@
+{
+  "result": "passed",
+  "pipeline": "libmpv-opengl-angle",
+  "forcedScale": 1.5,
+  "mechanism": "image-bitmap-renderer",
+  "capabilities": {
+    "mediaStreamTrackGenerator": true,
+    "videoFrame": true,
+    "webgl2": true,
+    "imageBitmapRenderer": true,
+    "webgpu": true,
+    "offscreenCanvas": true
+  },
+  "frames": {
+    "transferred": 168,
+    "presented": 162,
+    "released": 168,
+    "lastSequence": 168,
+    "maxOutstanding": 3,
+    "maxPresentationMilliseconds": 37.200000047683716
+  },
+  "geometry": {
+    "initial": {
+      "viewport": {
+        "width": 843.3333740234375,
+        "height": 474.375
+      },
+      "video": {
+        "width": 843.3333740234375,
+        "height": 474.375
+      },
+      "dpi": 1.5
+    },
+    "resized": {
+      "viewport": {
+        "width": 578.6666870117188,
+        "height": 325.5
+      },
+      "video": {
+        "width": 578.6666870117188,
+        "height": 325.5
+      },
+      "dpi": 1.5
+    },
+    "fullscreen": {
+      "viewport": {
+        "width": 1134.666748046875,
+        "height": 638.25
+      },
+      "video": {
+        "width": 1134.666748046875,
+        "height": 638.25
+      },
+      "dpi": 1.5
+    },
+    "reloaded": {
+      "viewport": {
+        "width": 578.6666870117188,
+        "height": 325.5
+      },
+      "video": {
+        "width": 578.6666870117188,
+        "height": 325.5
+      },
+      "dpi": 1.5
+    }
+  },
+  "native": {
+    "renderedFrames": 168,
+    "droppedFrames": 115,
+    "outstandingFrames": 0,
+    "poolSize": 3,
+    "unusable": false
+  },
+  "continuousCpuReadback": false,
+  "bitmapIpc": false,
+  "fixtureSha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6",
+  "librarySha256": "54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
+  "nativeAddonSha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
+  "realVideoRenderedThroughMpvRenderApi": true,
+  "hwdec": "no-conservative-gate",
+  "controllerSurface": {
+    "trackCount": 1,
+    "durationSeconds": 2.125,
+    "seekable": true
+  }
+}

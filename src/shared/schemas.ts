@@ -16,6 +16,7 @@ export const itemIdSchema = z.object({ itemId: z.string().min(1).max(128) });
 export const watchedStateSchema = itemIdSchema.extend({ watched: z.boolean() });
 
 export const libraryItemsSchema = z.object({
+  libraryId: z.string().min(1).max(128),
   type: z.enum(["Movie", "Series"]),
   limit: z.number().int().min(1).max(500),
 });
@@ -39,6 +40,45 @@ export const playbackStartSchema = z.object({
   itemId: z.string().min(1).max(128),
   resumeMode: z.enum(["resume", "start-over"]),
 });
+
+const liveTvId = z.string().trim().min(1).max(128).regex(/^[^/?#\\\0]+$/);
+const utcDate = z.string().datetime({ offset: true });
+const liveTvDay = z.enum(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
+export const liveTvGuideSchema = z.object({
+  startUtc: utcDate,
+  endUtc: utcDate,
+}).strict().superRefine((value, context) => {
+  const start = Date.parse(value.startUtc);
+  const end = Date.parse(value.endUtc);
+  if (end <= start) context.addIssue({ code: z.ZodIssueCode.custom, message: "Guide end must be after start.", path: ["endUtc"] });
+  if (end - start > 24 * 60 * 60 * 1000) context.addIssue({ code: z.ZodIssueCode.custom, message: "Guide windows cannot exceed 24 hours.", path: ["endUtc"] });
+});
+export const liveTvPageSchema = z.object({
+  startIndex: z.number().int().min(0).max(100_000).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+}).strict();
+export const liveTvScheduleOptionsSchema = z.object({
+  recordNewOnly: z.boolean().optional(),
+  recordAnyChannel: z.boolean().optional(),
+  recordAnyTime: z.boolean().optional(),
+  daysOfWeek: z.array(liveTvDay).max(7).optional(),
+  prePaddingSeconds: z.number().int().min(0).max(24 * 60 * 60).optional(),
+  postPaddingSeconds: z.number().int().min(0).max(24 * 60 * 60).optional(),
+  keepUpTo: z.number().int().min(0).max(10_000).nullable().optional(),
+}).strict();
+export const liveTvCreateRecordingSchema = z.object({
+  programId: liveTvId,
+  series: z.boolean(),
+  options: liveTvScheduleOptionsSchema.optional(),
+}).strict();
+export const liveTvUpdateScheduleSchema = z.object({
+  id: liveTvId,
+  series: z.boolean(),
+  options: liveTvScheduleOptionsSchema,
+}).strict();
+export const liveTvCancelScheduleSchema = z.object({ id: liveTvId, series: z.boolean() }).strict();
+export const liveTvDeleteRecordingSchema = z.object({ recordingId: liveTvId }).strict();
+export const liveTvPlaybackSchema = z.object({ channelId: liveTvId }).strict();
 
 export const playbackIdSchema = z.object({ playbackId: z.string().uuid() });
 
@@ -65,8 +105,9 @@ export const playbackViewportSchema = z.object({
   x: z.number().finite().min(-10000).max(10000), y: z.number().finite().min(-10000).max(10000),
   width: z.number().finite().min(0).max(10000), height: z.number().finite().min(0).max(10000), visible: z.boolean(),
   revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  deviceScaleFactor: z.number().finite().min(0.5).max(4).optional(),
 });
-export const playbackAdapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded"]) });
+export const playbackAdapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded", "libmpv"]) });
 
 export const downloadStartSchema = z.object({ itemId: z.string().min(1).max(128) });
 
@@ -100,7 +141,7 @@ const cachedNonnegativeInteger = z.number().int().nonnegative().max(Number.MAX_S
 export const cachedMediaItemSchema = z.object({
   id: cachedIdentity,
   name: z.string().trim().min(1).max(1024).refine((value) => !value.includes("\0")),
-  type: z.enum(["Movie", "Series", "Season", "Episode", "BoxSet", "Video"]),
+  type: z.enum(["Movie", "Series", "Season", "Episode", "BoxSet", "Video", "TvChannel", "Program"]),
   overview: z.string().max(32_768).refine((value) => !value.includes("\0")),
   productionYear: z.number().int().min(0).max(9999).nullable(),
   premiereYear: z.number().int().min(0).max(9999).nullable(),
@@ -143,8 +184,11 @@ export const cachedPlaybackDiagnosticsSchema = z.object({
   bitrate: cachedNonnegativeInteger.nullable(),
   videoRange: cachedOptionalText(64),
   transcodeReason: cachedOptionalText(1024),
-  videoOutput: z.enum(["d3d11", "opengl-software"]).nullable().optional(),
+  videoOutput: z.enum(["d3d11", "opengl-software", "libmpv-opengl-angle"]).nullable().optional(),
   videoOutputHealthy: z.boolean().nullable().optional(),
   hardwareDecoding: z.boolean().nullable().optional(),
+  directRendering: z.boolean().nullable().optional(),
+  frameQueueDepth: z.number().int().min(0).max(16).nullable().optional(),
+  droppedFrames: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   renderFallbackUsed: z.boolean().optional(),
 }).strict();

@@ -1,6 +1,6 @@
 # Seeing Stone
 
-Current application version: `0.4.3`.
+Current application version: `0.5.0`.
 
 Seeing Stone is a Windows-first, local-first Jellyfin client. This repository
 contains the Electron client built from the accepted `0.3.0` interface baseline.

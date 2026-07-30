@@ -32,11 +32,11 @@ const installRoot = join(acceptanceRoot, "install");
 const userDataRoot = join(acceptanceRoot, "user-data");
 const emptyCwd = join(acceptanceRoot, "empty-cwd");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-const installer = join(releaseRoot, `LocalFirst-Jellyfin-Setup-${packageJson.version}-x64.exe`);
+const installer = join(releaseRoot, `Seeing-Stone-Setup-${packageJson.version}-x64.exe`);
 const unpackedRoot = join(releaseRoot, "win-unpacked");
-const unpackedExecutable = join(unpackedRoot, "LocalFirst Jellyfin.exe");
-const installedExecutable = join(installRoot, "LocalFirst Jellyfin.exe");
-const expectedTitle = "LocalFirst Jellyfin";
+const unpackedExecutable = join(unpackedRoot, "Seeing Stone.exe");
+const installedExecutable = join(installRoot, "Seeing Stone.exe");
+const expectedTitle = "Seeing Stone";
 
 void main().catch((error) => {
   process.stderr.write(`${error?.stack || String(error)}\n`);
@@ -270,7 +270,7 @@ function uninstallArtifact() {
 
 function assertNoExistingInstallation() {
   const installations = queryInstallations();
-  assert.deepEqual(installations, [], `A LocalFirst Jellyfin installation already exists: ${JSON.stringify(installations)}`);
+  assert.deepEqual(installations, [], `A Seeing Stone installation already exists: ${JSON.stringify(installations)}`);
 }
 
 function queryInstallations() {
@@ -283,7 +283,7 @@ $paths = @(
 $found = @(
   foreach ($path in $paths) {
     Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -like 'LocalFirst Jellyfin*' } |
+      Where-Object { $_.DisplayName -like 'Seeing Stone*' } |
       Select-Object DisplayName, InstallLocation, UninstallString
   }
 )
@@ -298,7 +298,7 @@ ConvertTo-Json -Compress -InputObject @($found)
 function assertInstalledRegistryLocation() {
   const installations = queryInstallations();
   assert.equal(installations.length, 1, "Expected one per-user uninstall registry entry.");
-  const expectedUninstaller = join(installRoot, "Uninstall LocalFirst Jellyfin.exe");
+  const expectedUninstaller = join(installRoot, "Uninstall Seeing Stone.exe");
   assert.equal(
     String(installations[0].UninstallString || "").includes(expectedUninstaller),
     true,
@@ -308,8 +308,8 @@ function assertInstalledRegistryLocation() {
 
 function assertNoExistingShortcuts() {
   const script = String.raw`
-$desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LocalFirst Jellyfin.lnk'
-$start = Join-Path ([Environment]::GetFolderPath('Programs')) 'LocalFirst Jellyfin.lnk'
+$desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Seeing Stone.lnk'
+$start = Join-Path ([Environment]::GetFolderPath('Programs')) 'Seeing Stone.lnk'
 [pscustomobject]@{ Desktop = Test-Path -LiteralPath $desktop; StartMenu = Test-Path -LiteralPath $start } | ConvertTo-Json -Compress
 `;
   const state = JSON.parse(runPowerShell(script));

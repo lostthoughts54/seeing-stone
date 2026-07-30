@@ -9,73 +9,109 @@
   <body>
     <div class="app">
       <section id="loginView" class="login-view">
-        <div class="login-art" aria-hidden="true">
-          <div class="poster-grid">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
+        <aside class="login-rail" aria-label="Seeing Stone">
+          <div class="login-rail-brand">
+            <img src="./assets/seeing-stone-orb.svg" alt="" />
+            <span><strong>Seeing Stone</strong><small>A Jellyfin client</small></span>
           </div>
+          <div class="login-security-note">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            <span>Secure local sign-in</span>
+          </div>
+        </aside>
+
+        <div class="login-stage">
+          <div class="login-art" aria-hidden="true">
+            <div class="login-stone">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <form id="loginForm" class="login-card">
+            <div class="login-copy">
+              <p class="eyebrow">Welcome back</p>
+              <h1>Peer into the Seeing Stone</h1>
+              <p>Connect to your Jellyfin server and continue watching.</p>
+            </div>
+
+            <section class="login-discovery" aria-labelledby="networkServersHeading">
+              <div class="login-section-heading">
+                <p id="networkServersHeading" class="eyebrow">Servers on your network</p>
+                <button id="discoverButton" class="login-refresh-button" type="button" aria-label="Search network again" title="Search network again">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M4 17v-5h5"></path><path d="M6.1 9A7 7 0 0 1 18 6l2 1M17.9 15A7 7 0 0 1 6 18l-2-1"></path></svg>
+                </button>
+              </div>
+              <div id="serverDiscovery" class="server-discovery" role="status">
+                <div class="discovery-status">
+                  <span id="discoveryDot" class="discovery-dot"></span>
+                  <span id="discoveryMessage">Ready to search for Jellyfin.</span>
+                </div>
+                <div id="serverResults" class="server-results"></div>
+              </div>
+            </section>
+
+            <div class="login-divider"><span>or connect manually</span></div>
+
+            <div class="login-fields">
+              <label for="serverUrlInput">
+                <span>Server address</span>
+                <input id="serverUrlInput" type="url" placeholder="https://jellyfin.example.com" autocomplete="url" required />
+              </label>
+
+              <label for="usernameInput">
+                <span>Username</span>
+                <input id="usernameInput" type="text" autocomplete="username" required />
+              </label>
+
+              <label for="passwordInput">
+                <span>Password</span>
+                <input id="passwordInput" type="password" autocomplete="current-password" />
+              </label>
+            </div>
+
+            <button class="primary login-submit" type="submit">Sign In</button>
+            <p id="loginMessage" class="form-message" role="status"></p>
+            <p class="login-help">Your credentials are sent only to the server address above.</p>
+            <button id="loginCleanMachineDiagnosticsButton" class="login-diagnostics-button" type="button">Run player diagnostics</button>
+          </form>
         </div>
-
-        <form id="loginForm" class="login-card">
-          <div class="brand large">
-            <span class="brand-mark"><img src="./assets/seeing-stone-orb.svg" alt="" /></span>
-            <div>
-              <strong>Seeing Stone</strong>
-              <span>A Jellyfin client</span>
-            </div>
-          </div>
-
-          <div class="login-copy">
-            <h1>Connect to Jellyfin</h1>
-            <p>Choose a server found on your network, then sign in.</p>
-          </div>
-
-          <label for="serverUrlInput"><span>Server URL</span></label>
-          <div class="server-input-row">
-            <input id="serverUrlInput" type="url" placeholder="http://192.168.1.10:8096" autocomplete="url" required />
-            <button id="discoverButton" type="button">Search Network</button>
-          </div>
-
-          <div id="serverDiscovery" class="server-discovery" role="status">
-            <div class="discovery-status">
-              <span id="discoveryDot" class="discovery-dot"></span>
-              <span id="discoveryMessage">Ready to search for Jellyfin.</span>
-            </div>
-            <div id="serverResults" class="server-results"></div>
-          </div>
-
-          <label for="usernameInput">
-            <span>Username</span>
-            <input id="usernameInput" type="text" autocomplete="username" required />
-          </label>
-
-          <label for="passwordInput">
-            <span>Password</span>
-            <input id="passwordInput" type="password" autocomplete="current-password" />
-          </label>
-
-          <button class="primary" type="submit">Sign In</button>
-          <p id="loginMessage" class="form-message" role="status"></p>
-        </form>
       </section>
 
       <section id="mainView" class="main-view is-hidden">
-        <header class="app-header">
-          <button id="brandHomeButton" class="brand-button" type="button" aria-label="Home">
-            <span class="brand-mark"><img src="./assets/seeing-stone-orb.svg" alt="" /></span>
-            <strong>Seeing Stone</strong>
+        <aside class="app-rail" aria-label="Primary navigation">
+          <button id="brandHomeButton" class="app-rail-brand" type="button" aria-label="Seeing Stone home">
+            <img src="./assets/seeing-stone-orb.svg" alt="" />
+            <span><strong>Seeing Stone</strong><small>A Jellyfin client</small></span>
           </button>
-
-          <nav class="desktop-nav" aria-label="Primary navigation">
-            <button id="navHomeButton" class="is-active" type="button">Home</button>
-            <button id="navMoviesButton" type="button">Movies</button>
-            <button id="navShowsButton" type="button">Shows</button>
-            <button id="navWatchPartiesButton" type="button">Watch Parties</button>
+          <nav class="app-rail-nav">
+            <button type="button" disabled title="Start something from your library to open Now Playing">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg><span>Now Playing</span>
+            </button>
+            <button id="navHomeButton" class="is-active" type="button" aria-current="page" title="Home">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"></path><path d="M5 10.5V21h5v-6h4v6h5V10.5"></path></svg><span>Home</span>
+            </button>
+            <button type="button" disabled title="Collections are not available in this build">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span>Collections</span>
+            </button>
+            <button type="button" disabled title="Watchlist is not available in this build">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg><span>Watchlist</span>
+            </button>
+            <button id="navLiveTvButton" type="button" title="Live TV (Beta)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
+            </button>
+            <span class="app-rail-divider"></span>
+            <span id="mainLibraryNavigation" class="library-nav-items"></span>
+            <button id="navWatchPartiesButton" type="button" title="Watch Parties">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6m0 0c0-4 2-6 5-6s5 2 5 6"></path></svg><span>Watch Parties</span>
+            </button>
           </nav>
+          <button id="closeApplicationButton" class="app-rail-close" type="button" title="Exit Seeing Stone">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg><span>Exit</span>
+          </button>
+        </aside>
+
+        <div class="app-shell">
+        <header class="app-header">
 
           <div class="header-actions">
             <label class="header-search" for="searchInput">
@@ -98,10 +134,12 @@
               <select id="profileAdapterSelect" aria-label="Player engine">
                 <option value="embedded">Embedded (recommended)</option>
                 <option value="legacy">Legacy external</option>
+                <option value="libmpv">Libmpv (experimental)</option>
               </select>
             </label>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
             <button id="downloadsButton" type="button">Downloads</button>
+            <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
             <button id="refreshButton" type="button">Refresh Connection</button>
             <button id="logoutButton" type="button">Sign Out</button>
@@ -136,11 +174,7 @@
           <section id="libraryView" class="view library-view is-hidden">
             <header class="page-heading">
               <p class="eyebrow">Library</p>
-              <h1 id="libraryTitle">Movies</h1>
-              <div class="segmented-control" aria-label="Library type">
-                <button id="libraryMoviesButton" class="is-active" type="button">Movies</button>
-                <button id="libraryShowsButton" type="button">Shows</button>
-              </div>
+              <h1 id="libraryTitle">Library</h1>
               <div class="library-controls" aria-label="Library view options">
                 <label>
                   <span>Filter</span>
@@ -172,6 +206,20 @@
               <h1 id="searchTitle">Search</h1>
             </header>
             <div id="searchRows" class="home-rows" aria-live="polite"></div>
+          </section>
+
+          <section id="liveTvView" class="view live-tv-view is-hidden">
+            <header class="page-heading live-tv-heading">
+              <div><p class="eyebrow">Jellyfin Live TV <span class="beta-badge">Beta</span></p><h1>Live TV</h1></div>
+              <button id="refreshLiveTvButton" type="button">Refresh guide</button>
+            </header>
+            <nav class="live-tv-tabs" aria-label="Live TV sections">
+              <button id="liveTvGuideTab" class="is-active" type="button">Guide</button>
+              <button id="liveTvRecordingsTab" type="button">Recordings</button>
+              <button id="liveTvScheduledTab" type="button">Scheduled</button>
+            </nav>
+            <div id="liveTvStatus" class="live-tv-status" role="status"></div>
+            <div id="liveTvContent" class="live-tv-content" aria-live="polite"></div>
           </section>
 
           <section id="watchPartiesView" class="view watch-parties-view is-hidden">
@@ -268,11 +316,16 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5v5H4z"></path><path d="M15 5h5v5h-5z"></path><path d="M4 15h5v5H4z"></path><path d="M15 15h5v5h-5z"></path></svg>
             Library
           </button>
+          <button id="mobileLiveTvButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg>
+            Live
+          </button>
           <button id="mobileWatchPartiesButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6"></path><path d="M11 20c0-4 2-6 5-6s5 2 5 6"></path></svg>
             Parties
           </button>
         </nav>
+        </div>
       </section>
 
       <section id="playerView" class="player-view is-hidden" aria-label="Now Playing">
@@ -285,8 +338,8 @@
             <button class="is-active" type="button" aria-current="page" data-player-route="now-playing" title="Now Playing">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg><span>Now Playing</span>
             </button>
-            <button type="button" data-player-route="library" title="Library">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v14h-6z"></path></svg><span>Library</span>
+            <button type="button" data-player-route="home" title="Home">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"></path><path d="M5 10.5V21h5v-6h4v6h5V10.5"></path></svg><span>Home</span>
             </button>
             <button type="button" disabled title="Collections are not available in this build">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span>Collections</span>
@@ -294,16 +347,11 @@
             <button type="button" disabled title="Watchlist is not available in this build">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg><span>Watchlist</span>
             </button>
-            <button type="button" disabled title="Live TV is not available in this build">
+            <button type="button" data-player-route="live-tv" title="Live TV (Beta)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
             </button>
             <span class="player-rail-divider"></span>
-            <button type="button" data-player-route="movies" title="Movies">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M4 8h16M9 3v5m6-5v5"></path></svg><span>Movies</span>
-            </button>
-            <button type="button" data-player-route="shows" title="Shows">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 2h8"></path></svg><span>Shows</span>
-            </button>
+            <span id="playerLibraryNavigation" class="library-nav-items"></span>
             <button type="button" data-player-route="watch-parties" title="Watch Parties">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6m0 0c0-4 2-6 5-6s5 2 5 6"></path></svg><span>Watch Parties</span>
             </button>
@@ -333,9 +381,39 @@
 
           <div class="player-workspace">
             <main id="playerCenter" class="player-center">
-              <section class="seeing-frame" aria-labelledby="playerTitle">
+              <section id="playerFrame" class="seeing-frame" aria-labelledby="playerTitle">
                 <div class="seeing-frame-glow" aria-hidden="true"></div>
                 <div id="playerViewport" class="player-viewport" aria-label="Native video surface"></div>
+                <article id="nextEpisodeCountdown" class="next-episode-countdown is-hidden" role="status" aria-live="polite" aria-atomic="true">
+                  <p class="next-episode-countdown-kicker">Up next</p>
+                  <h2 id="nextEpisodeCountdownTitle">Next episode</h2>
+                  <p id="nextEpisodeCountdownMeta" class="next-episode-countdown-meta"></p>
+                  <div class="next-episode-countdown-timer">
+                    <span id="nextEpisodeCountdownLabel">Playing in 10 seconds</span>
+                    <progress id="nextEpisodeCountdownProgress" max="10" value="10" aria-label="Time until the next episode starts"></progress>
+                  </div>
+                  <div class="next-episode-countdown-actions">
+                    <button id="nextEpisodePlayNowButton" class="primary" type="button">Play now</button>
+                    <button id="nextEpisodeCancelButton" type="button">Cancel</button>
+                  </div>
+                </article>
+                <section id="playerEpisodeBrowser" class="player-episode-browser is-hidden" role="dialog" aria-labelledby="playerEpisodeBrowserTitle">
+                  <header>
+                    <div>
+                      <p>Episode browser</p>
+                      <h2 id="playerEpisodeBrowserTitle">Episodes</h2>
+                    </div>
+                    <button id="closePlayerEpisodeBrowserButton" class="icon-button" type="button" aria-label="Close episode browser" title="Close episode browser">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg>
+                    </button>
+                  </header>
+                  <label class="player-episode-season">
+                    <span>Season</span>
+                    <select id="playerEpisodeSeasonSelect" aria-label="Season" disabled><option>Loading…</option></select>
+                  </label>
+                  <p id="playerEpisodeBrowserStatus" class="player-episode-browser-status" role="status"></p>
+                  <div id="playerEpisodeList" class="player-episode-list"></div>
+                </section>
                 <div id="playerFrameStatus" class="player-frame-status" role="status" aria-live="polite">
                   <span class="frame-status-orb" aria-hidden="true"></span>
                   <span id="playerPhaseLabel">Preparing playback</span>
@@ -343,6 +421,13 @@
               </section>
 
               <section id="playerControls" class="player-controls" aria-label="Playback controls">
+                <div id="playerLiveControls" class="player-live-controls is-hidden">
+                  <button id="playerPreviousChannelButton" type="button" title="Previous channel">Previous channel</button>
+                  <button id="playerGoLiveButton" class="primary" type="button">Go Live</button>
+                  <button id="playerMiniGuideButton" type="button" aria-expanded="false">Mini guide</button>
+                  <button id="playerNextChannelButton" type="button" title="Next channel">Next channel</button>
+                </div>
+                <div id="playerMiniGuide" class="player-mini-guide is-hidden" aria-label="Live TV mini guide"></div>
                 <div class="player-timeline-row">
                   <span id="playerCurrentTime">0:00</span>
                   <input id="playerTimeline" type="range" min="0" max="1000" value="0" step="1" aria-label="Playback position" disabled />
@@ -373,6 +458,9 @@
                     <button id="playerSettingsButton" class="icon-button" type="button" aria-label="Open playback settings" aria-controls="playerSettingsMenu" aria-expanded="false" aria-haspopup="dialog" title="Playback settings">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2m4 0h10M14 5v4M8 15v4"></path></svg>
                     </button>
+                    <button id="playerEpisodeBrowserButton" class="icon-button is-hidden" type="button" aria-label="Browse episodes" aria-controls="playerEpisodeBrowser" aria-expanded="false" aria-haspopup="dialog" title="Browse episodes" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"></path><path d="m3 5 2 1-2 1zM3 11l2 1-2 1zM3 17l2 1-2 1z"></path></svg>
+                    </button>
                     <button id="playerNextButton" class="icon-button" type="button" aria-label="Play next item" title="Play next item" disabled>
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 5 10 7-10 7zM18 5v14"></path></svg>
                     </button>
@@ -395,7 +483,7 @@
                     <label><span>Playback speed</span><select id="playerSettingsRateSelect" aria-label="Playback speed in settings"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
                     <label><span>Audio track</span><select id="playerSettingsAudioSelect" aria-label="Audio track in settings" disabled><option>Default</option></select></label>
                     <label><span>Subtitle track</span><select id="playerSettingsSubtitleSelect" aria-label="Subtitle track in settings" disabled><option value="">Off</option></select></label>
-                    <label class="player-engine-setting"><span>Player engine</span><select id="playerAdapterSelect" aria-label="Player engine"><option value="embedded">Embedded (recommended)</option><option value="legacy">Legacy external</option></select></label>
+                    <label class="player-engine-setting"><span>Player engine</span><select id="playerAdapterSelect" aria-label="Player engine"><option value="embedded">Embedded (recommended)</option><option value="legacy">Legacy external</option><option value="libmpv">Libmpv (experimental)</option></select></label>
                   </div>
                   <p id="playerAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
                   <button id="playerSettingsDiagnosticsButton" class="player-settings-diagnostics" type="button">Open playback diagnostics</button>
@@ -474,6 +562,31 @@
         <div id="licensesList" class="licenses-list"></div>
       </section>
 
+      <div id="cleanMachineDiagnosticsScrim" class="clean-machine-diagnostics-scrim is-hidden"></div>
+      <section id="cleanMachineDiagnosticsPanel" class="clean-machine-diagnostics-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="cleanMachineDiagnosticsTitle">
+        <header class="clean-machine-diagnostics-header">
+          <div>
+            <p class="eyebrow">Experimental player</p>
+            <h2 id="cleanMachineDiagnosticsTitle">Clean-machine diagnostics</h2>
+          </div>
+          <button id="closeCleanMachineDiagnosticsButton" type="button" aria-label="Close diagnostics" title="Close diagnostics">Ã—</button>
+        </header>
+        <p class="clean-machine-diagnostics-intro">Checks the packaged runtime, native DLL loading, Electron GPU support, engine fallback, and real-video presentation without including private paths or account information.</p>
+        <div id="cleanMachineDiagnosticsSummary" class="clean-machine-diagnostics-summary" role="status">Running checks&hellip;</div>
+        <div id="cleanMachineDiagnosticsMetadata" class="clean-machine-diagnostics-metadata"></div>
+        <div id="cleanMachineDiagnosticsChecks" class="clean-machine-diagnostics-checks" aria-live="polite"></div>
+        <footer class="clean-machine-diagnostics-actions">
+          <button id="rerunCleanMachineDiagnosticsButton" type="button">Run again</button>
+          <button id="copyCleanMachineDiagnosticsButton" type="button">Copy report</button>
+          <button id="saveCleanMachineDiagnosticsButton" type="button">Save report</button>
+        </footer>
+      </section>
+
+      <aside id="playerFallbackNotice" class="player-fallback-notice is-hidden" role="alert" aria-live="assertive">
+        <strong>Libmpv could not start</strong>
+        <p id="playerFallbackNoticeMessage"></p>
+        <small>The saved Libmpv selection has not changed. It will be tried again after the next application restart.</small>
+      </aside>
       <div id="toast" class="toast is-hidden" role="status"></div>
     </div>
 

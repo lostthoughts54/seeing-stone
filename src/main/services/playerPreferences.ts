@@ -3,6 +3,13 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 const preferencesSchema = z.object({
+  schemaVersion: z.literal(4),
+  windowMaximized: z.boolean(),
+  adapterMode: z.enum(["legacy", "embedded", "libmpv"]),
+  adapterModeExplicit: z.boolean(),
+});
+
+const versionThreePreferencesSchema = z.object({
   schemaVersion: z.literal(3),
   windowMaximized: z.boolean(),
   adapterMode: z.enum(["legacy", "embedded"]),
@@ -16,7 +23,7 @@ const previousPreferencesSchema = z.object({
 });
 const legacyPreferencesSchema = z.object({ schemaVersion: z.literal(1), windowMaximized: z.boolean() });
 
-export type PlayerAdapterMode = "legacy" | "embedded";
+export type PlayerAdapterMode = "legacy" | "embedded" | "libmpv";
 
 export interface PlayerPreferences {
   windowMaximized: boolean;
@@ -92,6 +99,16 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
           adapterMode: parsed.data.adapterModeExplicit ? parsed.data.adapterMode : this.defaultAdapterMode,
         };
       } else {
+        const versionThree = versionThreePreferencesSchema.safeParse(raw);
+        if (versionThree.success) {
+          this.adapterModeExplicit = versionThree.data.adapterModeExplicit;
+          this.cached = {
+            windowMaximized: versionThree.data.windowMaximized,
+            adapterMode: versionThree.data.adapterModeExplicit ? versionThree.data.adapterMode : this.defaultAdapterMode,
+          };
+          await this.persist(this.cached, this.adapterModeExplicit);
+          return this.cached;
+        }
         const previous = previousPreferencesSchema.safeParse(raw);
         const windowMaximized = previous.success
           ? previous.data.windowMaximized
@@ -121,7 +138,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
 
   private async persist(preferences: PlayerPreferences, adapterModeExplicit: boolean): Promise<void> {
     const safe = preferencesSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       ...preferences,
       adapterMode: preferences.adapterMode ?? this.defaultAdapterMode,
       adapterModeExplicit,

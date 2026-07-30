@@ -2,6 +2,9 @@ node_modules/
 .pnpm-store/
 dist/
 .runtime/
+/native/libmpv-bridge/build/
+/artifacts/*.exe
+/artifacts/*.exe.sha256.txt
 coverage/
 *.log
 *.tsbuildinfo

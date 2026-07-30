@@ -196,6 +196,28 @@ describe("MpvPlayerService natural completion", () => {
     ]);
   });
 
+  it("silences playback before a deferred stop report can complete", async () => {
+    const h = harness();
+    let releaseReport!: () => void;
+    let reportStarted!: () => void;
+    const reportHasStarted = new Promise<void>((resolve) => { reportStarted = resolve; });
+    const reportCanFinish = new Promise<void>((resolve) => { releaseReport = resolve; });
+    h.internals.reporting = {
+      acceptAuthoritativeEvent: vi.fn(async () => {
+        reportStarted();
+        await reportCanFinish;
+      }),
+    };
+
+    const stopping = h.player.stop(h.current.playbackId);
+    await reportHasStarted;
+    expect(h.commands).toContainEqual(["quit"]);
+    expect(h.playback.stop).not.toHaveBeenCalled();
+    releaseReport();
+    await stopping;
+    expect(h.playback.stop).toHaveBeenCalledWith(h.current.playbackId);
+  });
+
   it("launches embedded mpv as an offscreen borderless overlay without --wid", () => {
     const args = embeddedVideoWindowArgs("Seeing Stone Video test-id");
     expect(args).toEqual([
@@ -627,6 +649,48 @@ describe("MpvPlayerService natural completion", () => {
       { actionKind: "completed", watched: true },
       { actionKind: "progress", watched: false },
     ]);
+  });
+
+  it("publishes the Next Episode countdown and lets Play Now resolve it immediately", async () => {
+    const h = harness({ nextId: "episode-2" });
+    h.internals.completion = new PlaybackCompletionCoordinator(10, 3, async () => new Promise<void>(() => undefined));
+
+    (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
+    await waitFor(() => h.player.getState().nextEpisodeCountdown?.remainingSeconds === 10);
+
+    expect(h.player.getState().nextEpisodeCountdown).toEqual({
+      nextItemId: "episode-2",
+      title: "episode-2",
+      seriesName: "Series",
+      seasonNumber: 2,
+      episodeNumber: 1,
+      remainingSeconds: 10,
+      totalSeconds: 10,
+    });
+
+    await h.player.continueNextEpisode("playback-1");
+    await waitFor(() => h.player.getState().itemId === "episode-2" && h.player.getState().phase === "playing");
+
+    expect(h.player.getState().nextEpisodeCountdown).toBeNull();
+    expect(h.commands.filter((command) => command[0] === "loadfile")).toHaveLength(1);
+    const loadIndex = h.commands.findIndex((command) => command[0] === "loadfile");
+    const resumeIndex = h.commands.findIndex((command) =>
+      command[0] === "set_property" && command[1] === "pause" && command[2] === false);
+    expect(resumeIndex).toBeGreaterThan(loadIndex);
+  });
+
+  it("cancels a pending Next Episode countdown without loading or double-reporting", async () => {
+    const h = harness({ nextId: "episode-2" });
+    h.internals.completion = new PlaybackCompletionCoordinator(10, 3, async () => new Promise<void>(() => undefined));
+
+    (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
+    await waitFor(() => h.player.getState().nextEpisodeCountdown?.remainingSeconds === 10);
+    await h.player.cancelNextEpisode("playback-1");
+    await waitFor(() => h.player.getState().phase === "ended" && h.player.getState().playbackId === null);
+
+    expect(h.player.getState().nextEpisodeCountdown).toBeNull();
+    expect(h.commands.some((command) => command[0] === "loadfile")).toBe(false);
+    expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
   });
 
   it("autoplay resolves a downloaded Next Up episode locally without opening the Jellyfin proxy", async () => {

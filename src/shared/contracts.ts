@@ -1,4 +1,4 @@
-export type ItemType = "Movie" | "Series" | "Season" | "Episode" | "BoxSet" | "Video";
+export type ItemType = "Movie" | "Series" | "Season" | "Episode" | "BoxSet" | "Video" | "TvChannel" | "Program";
 export type ImageKind = "Primary" | "Backdrop" | "Thumb";
 
 export interface SafeUserData {
@@ -126,9 +126,12 @@ export interface PlaybackDiagnostics {
   videoRange: string | null;
   transcodeReason: string | null;
   /** Sanitized embedded renderer profile; never contains device or driver names. */
-  videoOutput?: "d3d11" | "opengl-software" | null;
+  videoOutput?: "d3d11" | "opengl-software" | "libmpv-opengl-angle" | null;
   videoOutputHealthy?: boolean | null;
   hardwareDecoding?: boolean | null;
+  directRendering?: boolean | null;
+  frameQueueDepth?: number | null;
+  droppedFrames?: number | null;
   renderFallbackUsed?: boolean;
 }
 
@@ -147,6 +150,16 @@ export interface PlaybackTrack {
   external?: boolean;
 }
 
+export interface NextEpisodeCountdown {
+  nextItemId: string;
+  title: string;
+  seriesName: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  remainingSeconds: number;
+  totalSeconds: number;
+}
+
 export interface PlaybackState {
   playbackId: string | null;
   itemId: string | null;
@@ -163,8 +176,107 @@ export interface PlaybackState {
   fullscreen: boolean;
   audioTracks: PlaybackTrack[];
   subtitleTracks: PlaybackTrack[];
+  nextEpisodeCountdown?: NextEpisodeCountdown | null;
   error: string | null;
+  contentKind?: "on-demand" | "live-tv";
 }
+
+export type LiveTvAvailability = "available" | "not-configured" | "forbidden" | "offline";
+
+export interface LiveTvStatus {
+  availability: LiveTvAvailability;
+  hasGuide: boolean;
+  canManageRecordings: boolean;
+  message: string | null;
+}
+
+export interface LiveTvChannel {
+  id: string;
+  name: string;
+  number: string | null;
+  imageTag: string | null;
+  isFavorite: boolean;
+  currentProgramId: string | null;
+}
+
+export interface LiveTvProgram {
+  id: string;
+  channelId: string;
+  name: string;
+  overview: string;
+  startUtc: string;
+  endUtc: string;
+  episodeTitle: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  isLive: boolean;
+  isSeries: boolean;
+  isMovie: boolean;
+  isNews: boolean;
+  isKids: boolean;
+  isSports: boolean;
+  timerId: string | null;
+  seriesTimerId: string | null;
+}
+
+export interface LiveTvGuide {
+  status: LiveTvStatus;
+  channels: LiveTvChannel[];
+  programs: LiveTvProgram[];
+  windowStartUtc: string;
+  windowEndUtc: string;
+}
+
+export interface LiveTvTimer {
+  id: string;
+  programId: string | null;
+  channelId: string | null;
+  name: string;
+  startUtc: string;
+  endUtc: string;
+  status: string;
+  seriesTimerId: string | null;
+}
+
+export interface LiveTvSeriesTimer {
+  id: string;
+  programId: string | null;
+  name: string;
+  recordNewOnly: boolean;
+  recordAnyChannel: boolean;
+  recordAnyTime: boolean;
+  daysOfWeek: string[];
+  prePaddingSeconds: number;
+  postPaddingSeconds: number;
+  keepUpTo: number | null;
+}
+
+export interface LiveTvRecording {
+  id: string;
+  name: string;
+  channelName: string | null;
+  startUtc: string | null;
+  endUtc: string | null;
+  status: string;
+  item: MediaItem;
+}
+
+export interface LiveTvGuideInput { startUtc: string; endUtc: string }
+export interface LiveTvPageInput { startIndex?: number; limit?: number }
+export interface LiveTvScheduleOptions {
+  recordNewOnly?: boolean;
+  recordAnyChannel?: boolean;
+  recordAnyTime?: boolean;
+  daysOfWeek?: string[];
+  prePaddingSeconds?: number;
+  postPaddingSeconds?: number;
+  keepUpTo?: number | null;
+}
+export interface LiveTvCreateRecordingInput { programId: string; series: boolean; options?: LiveTvScheduleOptions }
+export interface LiveTvUpdateScheduleInput { id: string; series: boolean; options: LiveTvScheduleOptions }
+export interface LiveTvCancelScheduleInput { id: string; series: boolean }
+export interface LiveTvDeleteRecordingInput { recordingId: string }
+export interface LiveTvPlaybackInput { channelId: string }
 
 export type SessionPanelView = "solo" | "watchparty" | "chat";
 export type JellyfinConnectionState = "unknown" | "connected" | "offline" | "reconnecting";
@@ -247,7 +359,7 @@ export type RpcResult<T> =
 export interface ServerUrlInput { url: string }
 export interface LoginInput { connectionId: string; username: string; password: string; remember: boolean }
 export interface ItemIdInput { itemId: string }
-export interface LibraryItemsInput { type: "Movie" | "Series"; limit: number }
+export interface LibraryItemsInput { libraryId: string; type: "Movie" | "Series"; limit: number }
 export interface SearchInput { query: string }
 export interface EpisodesInput { seriesId: string; seasonId: string }
 export interface ArtworkInput { itemId: string; kind: ImageKind; tag?: string; width?: number; height?: number }
@@ -259,15 +371,70 @@ export interface PlaybackRateInput extends PlaybackIdInput { rate: number }
 export interface PlaybackVolumeInput extends PlaybackIdInput { volume: number }
 export interface PlaybackTrackInput extends PlaybackIdInput { trackId: number | null }
 export interface PlaybackFullscreenInput extends PlaybackIdInput { fullscreen: boolean }
-export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean; revision: number }
-export type PlayerAdapterMode = "legacy" | "embedded";
+export interface PlaybackViewportInput { x: number; y: number; width: number; height: number; visible: boolean; revision: number; deviceScaleFactor?: number }
+export type PlayerAdapterMode = "legacy" | "embedded" | "libmpv";
+export type PlayerAdapterFallbackReason =
+  | "manifest-invalid"
+  | "library-not-configured"
+  | "library-missing"
+  | "library-hash-mismatch"
+  | "companion-missing"
+  | "companion-hash-mismatch"
+  | "client-abi-incompatible"
+  | "required-symbol-missing"
+  | "native-addon-unavailable"
+  | "graphics-capability-unavailable"
+  | "render-gate-not-passed"
+  | "controller-integration-unavailable"
+  | "initialization-failed"
+  | "embedded-initialization-failed";
 export interface PlaybackAdapterPreference {
   active: PlayerAdapterMode;
   selected: PlayerAdapterMode;
+  launchSelection: PlayerAdapterMode;
   embeddedAvailable: boolean;
+  libmpvAvailable: boolean;
+  fallbackActive: boolean;
+  fallbackFrom: PlayerAdapterMode | null;
+  fallbackReason: PlayerAdapterFallbackReason | null;
   restartRequired: boolean;
 }
 export interface PlaybackAdapterPreferenceInput { mode: PlayerAdapterMode }
+export type CleanMachineDiagnosticStatus = "pass" | "warning" | "fail" | "not-run";
+export type CleanMachineDiagnosticCheckId =
+  | "windows-platform"
+  | "x64-architecture"
+  | "self-contained-package"
+  | "runtime-integrity"
+  | "native-runtime-load"
+  | "electron-shared-texture"
+  | "gpu-compositing"
+  | "hardware-video-decode"
+  | "engine-selection"
+  | "first-frame-presentation";
+export interface CleanMachineDiagnosticCheck {
+  id: CleanMachineDiagnosticCheckId;
+  label: string;
+  status: CleanMachineDiagnosticStatus;
+  detail: string;
+}
+export interface CleanMachineDiagnostics {
+  schemaVersion: 1;
+  generatedAtUtc: string;
+  overall: "ready" | "warning" | "blocked";
+  applicationVersion: string;
+  build: "internal-libmpv-test" | "packaged" | "development";
+  platform: "windows" | "other";
+  architecture: "x64" | "other";
+  electronVersion: string;
+  selectedEngine: PlayerAdapterMode;
+  activeEngine: PlayerAdapterMode;
+  fallbackReason: PlayerAdapterFallbackReason | null;
+  checks: CleanMachineDiagnosticCheck[];
+}
+export interface CleanMachineDiagnosticActionResult {
+  completed: boolean;
+}
 export interface DownloadStartInput { itemId: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
@@ -370,6 +537,9 @@ export interface WatchPartyGroupInput { groupId: string }
 export interface WatchPartyVisibilityInput { visible: boolean }
 
 export interface JellyfinBridge {
+  application: {
+    close(): Promise<void>;
+  };
   server: {
     discover(): Promise<DiscoveredServer[]>;
     connect(input: ServerUrlInput): Promise<ServerConnection>;
@@ -401,6 +571,17 @@ export interface JellyfinBridge {
   mediaSources: {
     getCapabilities(input: ItemIdInput): Promise<MediaSourceCapabilities>;
   };
+  liveTv: {
+    getStatus(): Promise<LiveTvStatus>;
+    getGuide(input: LiveTvGuideInput): Promise<LiveTvGuide>;
+    getRecordings(input?: LiveTvPageInput): Promise<LiveTvRecording[]>;
+    getTimers(): Promise<LiveTvTimer[]>;
+    getSeriesTimers(): Promise<LiveTvSeriesTimer[]>;
+    createRecording(input: LiveTvCreateRecordingInput): Promise<void>;
+    updateSchedule(input: LiveTvUpdateScheduleInput): Promise<void>;
+    cancelSchedule(input: LiveTvCancelScheduleInput): Promise<void>;
+    deleteRecording(input: LiveTvDeleteRecordingInput): Promise<void>;
+  };
   downloads: {
     list(): Promise<DownloadSummary[]>;
     listOfflinePlayable(): Promise<OfflinePlayableSummary[]>;
@@ -419,6 +600,7 @@ export interface JellyfinBridge {
   };
   playback: {
     start(input: PlaybackStartInput): Promise<PlaybackStartResult>;
+    startLive(input: LiveTvPlaybackInput): Promise<PlaybackStartResult>;
     setPaused(input: PlaybackPauseInput): Promise<PlaybackState>;
     seek(input: PlaybackSeekInput): Promise<PlaybackState>;
     setRate(input: PlaybackRateInput): Promise<PlaybackState>;
@@ -426,6 +608,8 @@ export interface JellyfinBridge {
     selectAudio(input: PlaybackTrackInput): Promise<PlaybackState>;
     selectSubtitle(input: PlaybackTrackInput): Promise<PlaybackState>;
     setFullscreen(input: PlaybackFullscreenInput): Promise<PlaybackState>;
+    continueNextEpisode(input: PlaybackIdInput): Promise<PlaybackState>;
+    cancelNextEpisode(input: PlaybackIdInput): Promise<PlaybackState>;
     stop(input: PlaybackIdInput): Promise<PlaybackState>;
     getState(): Promise<PlaybackState>;
     setViewport(input: PlaybackViewportInput): Promise<{ embedded: boolean }>;
@@ -439,6 +623,11 @@ export interface JellyfinBridge {
   };
   licenses: {
     list(): Promise<OpenSourceLicenseInventory>;
+  };
+  diagnostics: {
+    getCleanMachine(): Promise<CleanMachineDiagnostics>;
+    copyCleanMachine(): Promise<CleanMachineDiagnosticActionResult>;
+    saveCleanMachine(): Promise<CleanMachineDiagnosticActionResult>;
   };
   watchParties: {
     getState(): Promise<WatchPartyViewState>;
@@ -456,6 +645,7 @@ export interface JellyfinBridge {
 }
 
 export const IPC = {
+  applicationClose: "application:close",
   serverDiscover: "server:discover",
   serverConnect: "server:connect",
   sessionLogin: "session:login",
@@ -473,6 +663,15 @@ export const IPC = {
   showsGetEpisodes: "shows:get-episodes",
   artworkGetUrl: "artwork:get-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
+  liveTvGetStatus: "live-tv:get-status",
+  liveTvGetGuide: "live-tv:get-guide",
+  liveTvGetRecordings: "live-tv:get-recordings",
+  liveTvGetTimers: "live-tv:get-timers",
+  liveTvGetSeriesTimers: "live-tv:get-series-timers",
+  liveTvCreateRecording: "live-tv:create-recording",
+  liveTvUpdateSchedule: "live-tv:update-schedule",
+  liveTvCancelSchedule: "live-tv:cancel-schedule",
+  liveTvDeleteRecording: "live-tv:delete-recording",
   downloadsList: "downloads:list",
   downloadsListOfflinePlayable: "downloads:list-offline-playable",
   downloadsGetLocation: "downloads:get-location",
@@ -488,6 +687,7 @@ export const IPC = {
   downloadsSetKeep: "downloads:set-keep",
   downloadsChanged: "downloads:changed",
   playbackStart: "playback:start",
+  playbackStartLive: "playback:start-live",
   playbackSetPaused: "playback:set-paused",
   playbackSeek: "playback:seek",
   playbackSetRate: "playback:set-rate",
@@ -495,6 +695,8 @@ export const IPC = {
   playbackSelectAudio: "playback:select-audio",
   playbackSelectSubtitle: "playback:select-subtitle",
   playbackSetFullscreen: "playback:set-fullscreen",
+  playbackContinueNextEpisode: "playback:continue-next-episode",
+  playbackCancelNextEpisode: "playback:cancel-next-episode",
   playbackStop: "playback:stop",
     playbackGetState: "playback:get-state",
     playbackSetViewport: "playback:set-viewport",
@@ -504,6 +706,9 @@ export const IPC = {
   sessionPanelGetSolo: "session-panel:get-solo",
   sessionPanelSoloChanged: "session-panel:solo-changed",
   licensesList: "licenses:list",
+  diagnosticsGetCleanMachine: "diagnostics:get-clean-machine",
+  diagnosticsCopyCleanMachine: "diagnostics:copy-clean-machine",
+  diagnosticsSaveCleanMachine: "diagnostics:save-clean-machine",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",
   watchPartiesCreate: "watch-parties:create",

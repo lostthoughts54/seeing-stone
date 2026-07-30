@@ -14,6 +14,7 @@ function createHarness() {
   const window = {
     webContents,
     isDestroyed: () => false,
+    close: vi.fn(),
   };
   const ipcMain = {
     handle(channel: string, handler: RegisteredHandler) { handlers.set(channel, handler); },
@@ -35,10 +36,19 @@ function createHarness() {
     getSeasons: vi.fn(),
     getEpisodes: vi.fn(),
     getMediaSourceCapabilities: vi.fn(),
+    getLiveTvStatus: vi.fn(),
+    getLiveTvGuide: vi.fn(),
+    getLiveTvRecordings: vi.fn(),
+    getLiveTvTimers: vi.fn(),
+    getLiveTvSeriesTimers: vi.fn(),
+    createLiveTvRecording: vi.fn(),
+    updateLiveTvSchedule: vi.fn(),
+    cancelLiveTvSchedule: vi.fn(),
+    deleteLiveTvRecording: vi.fn(),
   };
   const artwork = { clear: vi.fn(), getUrl: vi.fn() };
   const playback = {
-    clear: vi.fn(), start: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), setRate: vi.fn(), setVolume: vi.fn(), selectAudio: vi.fn(),
+    clear: vi.fn(), start: vi.fn(), loadItem: vi.fn(), setPaused: vi.fn(), seek: vi.fn(), setRate: vi.fn(), setVolume: vi.fn(), selectAudio: vi.fn(),
     selectSubtitle: vi.fn(), setFullscreen: vi.fn(), stop: vi.fn(), getState: vi.fn(),
   };
   const downloads = {
@@ -87,6 +97,24 @@ function createHarness() {
     setViewVisible: vi.fn(async () => structuredClone(watchPartyState)),
     isJoined: vi.fn(() => false),
   };
+  const cleanMachineDiagnostics = {
+    getSnapshot: vi.fn(async () => ({
+      schemaVersion: 1,
+      generatedAtUtc: "2026-07-28T04:00:00.000Z",
+      overall: "ready",
+      applicationVersion: "0.4.3",
+      build: "internal-libmpv-test",
+      platform: "windows",
+      architecture: "x64",
+      electronVersion: "43.1.0",
+      selectedEngine: "libmpv",
+      activeEngine: "libmpv",
+      fallbackReason: null,
+      checks: [],
+    })),
+    copyReport: vi.fn(async () => ({ completed: true })),
+    saveReport: vi.fn(async () => ({ completed: false })),
+  };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -97,12 +125,50 @@ function createHarness() {
     synchronization as never,
     syncPlay as never,
     downloadLocation,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    cleanMachineDiagnostics as never,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
+  it("closes the application window only through the authorized main frame", async () => {
+    const { handlers, frame, validEvent, window } = createHarness();
+    await expect(handlers.get(IPC.applicationClose)?.(validEvent)).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    });
+    expect(window.close).toHaveBeenCalledOnce();
+
+    await expect(handlers.get(IPC.applicationClose)?.({
+      sender: { mainFrame: frame },
+      senderFrame: frame,
+    })).resolves.toMatchObject({ ok: false });
+    expect(window.close).toHaveBeenCalledOnce();
+  });
+
+  it("exposes only controlled clean-machine report actions", async () => {
+    const { handlers, validEvent, cleanMachineDiagnostics } = createHarness();
+    await expect(handlers.get(IPC.diagnosticsGetCleanMachine)?.(validEvent)).resolves.toMatchObject({
+      ok: true,
+      data: { overall: "ready", activeEngine: "libmpv" },
+    });
+    await expect(handlers.get(IPC.diagnosticsCopyCleanMachine)?.(validEvent)).resolves.toEqual({
+      ok: true,
+      data: { completed: true },
+    });
+    await expect(handlers.get(IPC.diagnosticsSaveCleanMachine)?.(validEvent, {
+      path: "C:\\Sensitive\\report.txt",
+      contents: "secret",
+    })).resolves.toMatchObject({ ok: false });
+    expect(cleanMachineDiagnostics.saveReport).not.toHaveBeenCalled();
+  });
+
   it("registers exactly the declared narrow channels and no reporting transport", () => {
     const { handlers } = createHarness();
     const invokeChannels = Object.values(IPC).filter((channel) => ![
@@ -241,6 +307,30 @@ describe("IPC authorization and allowlist", () => {
     await expect(handlers.get(IPC.playbackSetVolume)?.(validEvent, { playbackId, volume: 101 })).resolves.toMatchObject({ ok: false });
     expect(playback.setRate).toHaveBeenCalledTimes(1);
     expect(playback.setVolume).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Live TV credentials and raw timer fields outside the renderer mutation surface", async () => {
+    const { handlers, validEvent, api, playback } = createHarness();
+    await expect(handlers.get(IPC.liveTvCreateRecording)?.(validEvent, {
+      programId: "program-1",
+      series: true,
+      options: { recordNewOnly: true, prePaddingSeconds: 60 },
+    })).resolves.toMatchObject({ ok: true });
+    expect(api.createLiveTvRecording).toHaveBeenCalledWith("program-1", true, {
+      recordNewOnly: true,
+      prePaddingSeconds: 60,
+    });
+
+    await expect(handlers.get(IPC.liveTvCreateRecording)?.(validEvent, {
+      programId: "program-1",
+      series: false,
+      options: { openToken: "secret", liveStreamId: "private" },
+    })).resolves.toMatchObject({ ok: false });
+    expect(api.createLiveTvRecording).toHaveBeenCalledTimes(1);
+
+    playback.loadItem.mockResolvedValue({ playbackId: "playback-1" });
+    await expect(handlers.get(IPC.playbackStartLive)?.(validEvent, { channelId: "channel-1" })).resolves.toMatchObject({ ok: true });
+    expect(playback.loadItem).toHaveBeenCalledWith("channel-1", "start-over", { origin: "local-user" });
   });
 
   it("exposes only narrow Watchparty intents and rejects renderer-authored telemetry", async () => {

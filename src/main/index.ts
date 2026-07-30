@@ -1,10 +1,14 @@
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   app,
+  clipboard,
   dialog,
   type BrowserWindow,
   ipcMain,
+  sharedTexture,
   shell,
 } from "electron";
 import {
@@ -26,7 +30,7 @@ import { LocalPlaybackResolver } from "./services/localPlaybackResolver";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
 import { PlayerPreferencesService } from "./services/playerPreferences";
-import { EmbeddedMpvAdapter, LegacyExternalMpvAdapter } from "./services/mpvPlayer";
+import { EmbeddedMpvAdapter, LegacyExternalMpvAdapter, LibMpvAdapter } from "./services/mpvPlayer";
 import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
@@ -41,11 +45,27 @@ import type { PlayerController } from "./services/playerController";
 import { SoloSessionDiagnosticsService } from "./services/soloSessionDiagnostics";
 import { OpenSourceLicensesService } from "./services/openSourceLicenses";
 import { ApplicationPreferencesService } from "./services/applicationPreferences";
-import { requestedPlayerAdapterMode } from "./services/playerAdapterSelection";
+import { requestedPlayerAdapterMode, resolvePlayerAdapterLaunch } from "./services/playerAdapterSelection";
+import { detectLibMpvRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "./services/libMpvRuntime";
+import { LibMpvHost } from "./services/libMpvHost";
+import { ElectronLibMpvBridge } from "./services/libMpvElectronBridge";
+import { PlayerControllerRouter, type PlayerControllerRoute } from "./services/playerControllerRouter";
+import { persistPlayerEngineDiagnostics } from "./services/playerEngineDiagnostics";
+import {
+  CleanMachineDiagnosticsService,
+  formatCleanMachineDiagnostics,
+  probeControlledLibMpvRuntime,
+} from "./services/cleanMachineDiagnostics";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
-app.setAppUserModelId("app.seeingstone.client");
+const internalLibMpvAcceptanceBuild = app.isPackaged
+  && existsSync(join(process.resourcesPath, "libmpv", "INTERNAL_TESTING_ONLY.md"));
+app.setAppUserModelId(
+  internalLibMpvAcceptanceBuild
+    ? "app.seeingstone.client.libmpv-test"
+    : "app.seeingstone.client",
+);
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
@@ -112,7 +132,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const playerPreferences = new PlayerPreferencesService(
     app.getPath("userData"),
     applicationPreferences,
-    app.isPackaged ? "legacy" : "embedded",
+    internalLibMpvAcceptanceBuild ? "libmpv" : app.isPackaged ? "legacy" : "embedded",
   );
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
@@ -148,15 +168,129 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   });
   const storedPlayerPreferences = await playerPreferences.get();
   const requestedMode = requestedPlayerAdapterMode(process.env.SEEING_STONE_PLAYER, storedPlayerPreferences.adapterMode);
-  const embeddedRequested = requestedMode === "embedded";
-  const videoHost = embeddedRequested ? new EmbeddedVideoHost(mainWindow) : undefined;
-  const playback = videoHost
-    ? new EmbeddedMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, videoHost)
-    : new LegacyExternalMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime);
+  const libmpvCapability = await detectLibMpvRuntime({
+    manifestPath: libMpvManifestPath({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleDirectory: __dirname,
+    }),
+    runtimeDirectory: libMpvRuntimeDirectory({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleDirectory: __dirname,
+    }),
+  });
+  const adapterLaunch = resolvePlayerAdapterLaunch(requestedMode, libmpvCapability);
+  const createLegacyRoute = (): PlayerControllerRoute => {
+    activeVideoHost = null;
+    return {
+      mode: "legacy",
+      controller: new LegacyExternalMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime),
+    };
+  };
+  const createEmbeddedRoute = (): PlayerControllerRoute => {
+    const host = new EmbeddedVideoHost(mainWindow!);
+    activeVideoHost = host;
+    return {
+      mode: "embedded",
+      controller: new EmbeddedMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime, host),
+      updateViewport: (viewport) => host.updateViewport(viewport),
+      dispose: () => {
+        host.destroy();
+        if (activeVideoHost === host) activeVideoHost = null;
+      },
+    };
+  };
+  let initialRoute: PlayerControllerRoute;
+  if (adapterLaunch.active === "libmpv" && libmpvCapability.available && libmpvCapability.artifacts) {
+    try {
+      const bridge = new ElectronLibMpvBridge(
+        mainWindow,
+        ipcMain,
+        libmpvCapability.artifacts.libraryPath,
+        libmpvCapability.artifacts.nativeAddonPath,
+        libmpvCapability.clientApiVersion!,
+      );
+      const host = new LibMpvHost(libmpvCapability, bridge);
+      initialRoute = {
+        mode: "libmpv",
+        controller: new LibMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, host),
+        updateViewport: (viewport) => bridge.updateViewport({
+          width: viewport.width,
+          height: viewport.height,
+          visible: viewport.visible,
+          revision: viewport.revision,
+          deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+        }),
+        dispose: () => host.destroy(),
+      };
+    } catch {
+      adapterLaunch.active = "embedded";
+      adapterLaunch.libmpvAvailable = false;
+      adapterLaunch.fallbackActive = true;
+      adapterLaunch.fallbackFrom = "libmpv";
+      adapterLaunch.fallbackReason = "initialization-failed";
+      initialRoute = createEmbeddedRoute();
+    }
+  } else {
+    initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute();
+  }
+  const recordPlayerEngineStatus = (): void => {
+    void persistPlayerEngineDiagnostics(
+      app.getPath("userData"),
+      app.getVersion(),
+      internalLibMpvAcceptanceBuild,
+      adapterLaunch,
+    ).catch((error) => logger.warn("Could not persist sanitized player engine status.", error));
+  };
+  const playback = new PlayerControllerRouter(
+    initialRoute,
+    adapterLaunch,
+    createEmbeddedRoute,
+    createLegacyRoute,
+    recordPlayerEngineStatus,
+  );
+  recordPlayerEngineStatus();
   const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);
   const openSourceLicenses = new OpenSourceLicensesService();
+  const cleanMachineDiagnosticsService = new CleanMachineDiagnosticsService({
+    applicationVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    internalLibMpvTestBuild: internalLibMpvAcceptanceBuild,
+    platform: process.platform,
+    architecture: process.arch,
+    electronVersion: process.versions.electron ?? "unknown",
+    runtime: libmpvCapability,
+    adapterStatus: adapterLaunch,
+    sharedTextureAvailable: Boolean(sharedTexture),
+    getGpuFeatureStatus: () => app.getGPUFeatureStatus() as unknown as Record<string, string>,
+    probeNativeRuntime: () => probeControlledLibMpvRuntime(libmpvCapability),
+    getPlaybackState: () => playback.getState(),
+  });
+  const cleanMachineDiagnostics = {
+    getSnapshot: () => cleanMachineDiagnosticsService.getSnapshot(),
+    copyReport: async () => {
+      const report = formatCleanMachineDiagnostics(await cleanMachineDiagnosticsService.getSnapshot());
+      clipboard.writeText(report);
+      return { completed: true };
+    },
+    saveReport: async () => {
+      const snapshot = await cleanMachineDiagnosticsService.getSnapshot();
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: "Save Seeing Stone diagnostics",
+        buttonLabel: "Save Report",
+        defaultPath: `seeing-stone-diagnostics-${snapshot.generatedAtUtc.slice(0, 10)}.txt`,
+        filters: [{ name: "Text report", extensions: ["txt"] }],
+      });
+      if (result.canceled || !result.filePath) return { completed: false };
+      await writeFile(result.filePath, formatCleanMachineDiagnostics(snapshot), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      return { completed: true };
+    },
+  };
   activePlayback = playback;
-  activeVideoHost = videoHost ?? null;
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
   });
@@ -207,12 +341,18 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     offlineSynchronization,
     activeSyncPlay,
     downloadLocationController,
-    videoHost,
+    playback,
     playerPreferences,
+    adapterLaunch,
     soloSessionDiagnostics,
     openSourceLicenses,
+    cleanMachineDiagnostics,
   );
   await mainWindow.loadURL(APP_URL);
+  // Packaged Windows builds can occasionally miss ready-to-show while the
+  // sandboxed renderer is warming up. Loading has completed at this point, so
+  // make the primary window visible as a reliable fallback.
+  if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
 }).catch((error) => {
   logger.error("Application startup failed.", error);
   app.quit();

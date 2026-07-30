@@ -2,12 +2,15 @@ import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { BrowserWindow } from "electron";
 import type {
+  MediaItem,
   PlaybackStartResult,
   PlaybackState,
   PlaybackTrack,
 } from "../../shared/contracts";
 import { AppError } from "./errors";
-import { MpvIpcClient, type MpvMessage } from "./mpvIpc";
+import { MpvIpcClient, type MpvCommandClient, type MpvMessage } from "./mpvIpc";
+import { LibMpvCommandClient } from "./libMpvIpc";
+import type { LibMpvHost } from "./libMpvHost";
 import type { MpvRuntimePaths } from "./mpvRuntime";
 import { PlaybackCompletionCoordinator } from "./playbackCompletion";
 import { PlaybackProxy, type PlaybackTargets } from "./playbackProxy";
@@ -23,11 +26,12 @@ import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackS
 import type { MpvVideoHost } from "./embeddedVideoHost";
 
 const TICKS_PER_SECOND = 10_000_000;
+const NEXT_EPISODE_COUNTDOWN_SECONDS = 10;
 const VIDEO_OUTPUT_TIMEOUT_MS = 5000;
 
-type MpvRenderProfile = "legacy" | "d3d11" | "opengl-software";
+type MpvRenderProfile = "legacy" | "d3d11" | "opengl-software" | "libmpv-opengl-angle";
 
-export function embeddedRenderProfileArgs(profile: Exclude<MpvRenderProfile, "legacy">): string[] {
+export function embeddedRenderProfileArgs(profile: "d3d11" | "opengl-software"): string[] {
   return profile === "d3d11"
     ? ["--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0"]
     : ["--vo=gpu", "--gpu-api=opengl", "--gpu-context=win", "--hwdec=no", "--panscan=0"];
@@ -65,6 +69,12 @@ interface MutablePlaybackSnapshot {
   externalSubtitleStreamIndex: number | null;
 }
 
+interface PendingAutomaticTransition {
+  revision: number;
+  source: ResolvedPlaybackSource;
+  resolve(decision: "continue" | "cancel"): void;
+}
+
 function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
   return {
     playbackId: null,
@@ -87,6 +97,7 @@ function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     fullscreen: false,
     audioTracks: [],
     subtitleTracks: [],
+    nextEpisodeCountdown: null,
     error: null,
     ...overrides,
   };
@@ -123,7 +134,7 @@ export function parsePlaybackTracks(value: unknown): { audioTracks: PlaybackTrac
 export class MpvPlayerService implements PlayerController {
   private state = emptyState();
   private process: ChildProcess | null = null;
-  private ipc: MpvIpcClient | null = null;
+  private ipc: MpvCommandClient | null = null;
   private source: ResolvedPlaybackSource | null = null;
   private playbackTarget: PlaybackTargets | null = null;
   private proxy: PlaybackProxy;
@@ -138,10 +149,11 @@ export class MpvPlayerService implements PlayerController {
   private replacingFile = false;
   private eofArmed = false;
   private windowMaximized = true;
-  private readonly completion = new PlaybackCompletionCoordinator();
+  private readonly completion = new PlaybackCompletionCoordinator(NEXT_EPISODE_COUNTDOWN_SECONDS);
   private controllerRevision = 0;
   private playbackRate = 1;
   private automaticTransitionsEnabled = true;
+  private pendingAutomaticTransition: PendingAutomaticTransition | null = null;
   private pendingPause: { paused: boolean; expiresAt: number } | null = null;
   private pendingSeek: { positionTicks: number; expiresAt: number } | null = null;
   private pendingFullscreen: { fullscreen: boolean; expiresAt: number } | null = null;
@@ -158,6 +170,7 @@ export class MpvPlayerService implements PlayerController {
     private readonly preferences: PlayerPreferencesStore,
     private readonly runtime: MpvRuntimePaths,
     private readonly videoHost?: MpvVideoHost,
+    private readonly libMpvHost?: LibMpvHost,
   ) {
     this.proxy = new PlaybackProxy(playback);
   }
@@ -285,7 +298,7 @@ export class MpvPlayerService implements PlayerController {
     }
     try {
       if (!this.isCurrent(revision, source)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
-      if (!this.videoHost && !this.mainWindow.isDestroyed()) this.mainWindow.minimize();
+      if (!this.videoHost && !this.libMpvHost && !this.mainWindow.isDestroyed()) this.mainWindow.minimize();
       await this.report("start");
       if (!this.isCurrent(revision, source)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
       this.update({ ...this.state, phase: this.state.buffering ? "buffering" : this.state.paused ? "paused" : "playing" });
@@ -391,6 +404,7 @@ export class MpvPlayerService implements PlayerController {
     this.assertPlayback(playbackId);
     this.pendingFullscreen = { fullscreen, expiresAt: performance.now() + 3000 };
     if (this.videoHost) this.videoHost.setFullscreen(fullscreen);
+    else if (this.libMpvHost) this.mainWindow.setFullScreen(fullscreen);
     else await this.command(["set_property", "fullscreen", fullscreen]);
     this.update({ ...this.state, fullscreen }, "fullscreen", context);
     return this.getState();
@@ -401,6 +415,24 @@ export class MpvPlayerService implements PlayerController {
     const safeMessage = message.replace(/[\r\n]+/g, " ").slice(0, 160);
     const safeDuration = Math.max(500, Math.min(5000, Math.floor(durationMilliseconds)));
     await this.command(["show-text", safeMessage, safeDuration]);
+  }
+
+  async continueNextEpisode(
+    playbackId: string,
+    _context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
+    this.assertPlayback(playbackId);
+    this.resolveAutomaticTransition("continue");
+    return this.getState();
+  }
+
+  async cancelNextEpisode(
+    playbackId: string,
+    _context: PlayerCommandContext = { origin: "local-user" },
+  ): Promise<PlaybackState> {
+    this.assertPlayback(playbackId);
+    this.resolveAutomaticTransition("cancel");
+    return this.getState();
   }
 
   async setWindowScale(scale: number): Promise<{ width: number; height: number }> {
@@ -434,6 +466,7 @@ export class MpvPlayerService implements PlayerController {
   ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     if (this.stopping) return this.getState();
+    this.resolveAutomaticTransition("cancel");
     this.playbackRevision += 1;
     this.endHandlingRevision = null;
     this.replacingFile = false;
@@ -441,15 +474,19 @@ export class MpvPlayerService implements PlayerController {
     this.stopping = true;
     try {
       await this.persistWindowStateIfWindowed(this.ipc).catch(() => undefined);
-      await this.report("stop", undefined, context.origin === "local-user" ? "explicit" : "automatic");
       this.stopReportingTimer();
       const process = this.process;
       this.process = null;
       const ipc = this.ipc;
       this.ipc = null;
+      // Silence and tear down playback before network reporting. Reporting or
+      // shared-texture cleanup must never leave audio running after the user
+      // has closed the player.
       await ipc?.command(["quit"]).catch(() => undefined);
       ipc?.close();
       if (process && !process.killed) process.kill();
+      await this.libMpvHost?.stop().catch(() => undefined);
+      await this.report("stop", undefined, context.origin === "local-user" ? "explicit" : "automatic");
       await this.proxy.close();
       this.videoHost?.detachWindow();
       this.playbackTarget = null;
@@ -476,6 +513,7 @@ export class MpvPlayerService implements PlayerController {
   }
 
   async clear(): Promise<void> {
+    this.resolveAutomaticTransition("cancel");
     if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
     else {
       this.playbackRevision += 1;
@@ -486,6 +524,7 @@ export class MpvPlayerService implements PlayerController {
       this.demuxerCacheTimeSeconds = null;
       this.activeRenderProfile = "legacy";
       this.videoHost?.detachWindow();
+      await this.libMpvHost?.stop().catch(() => undefined);
       this.update(emptyState(), "stop", { origin: "system" });
     }
   }
@@ -493,6 +532,7 @@ export class MpvPlayerService implements PlayerController {
   private async handleUnexpectedProcessExit(): Promise<void> {
     const source = this.source;
     if (!source || this.stopping) return;
+    this.resolveAutomaticTransition("cancel");
     this.playbackRevision += 1;
     this.endHandlingRevision = null;
     this.replacingFile = false;
@@ -546,9 +586,10 @@ export class MpvPlayerService implements PlayerController {
       },
       positionTicks: source.resumePositionTicks,
       durationTicks: source.durationTicks,
-      seekable: source.usesServerTimelineOffset,
+      seekable: source.usesServerTimelineOffset && source.contentKind !== "live-tv",
       volume: retained.volume ?? 100,
       fullscreen: retained.fullscreen ?? false,
+      contentKind: source.contentKind ?? "on-demand",
     }), action, context);
   }
 
@@ -585,11 +626,15 @@ export class MpvPlayerService implements PlayerController {
     return spawn(executable, args, { windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
   }
 
-  private createIpcClient(): MpvIpcClient {
+  private createIpcClient(): MpvCommandClient {
     return new MpvIpcClient();
   }
 
   private async launchProcess(playbackTargets: PlaybackTargets, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
+    if (this.libMpvHost) {
+      await this.launchLibMpvAttempt(playbackTargets, positionTicks, paused);
+      return;
+    }
     if (!this.videoHost) {
       await this.launchProcessAttempt(playbackTargets, positionTicks, paused, windowMaximized, "legacy");
       return;
@@ -625,12 +670,75 @@ export class MpvPlayerService implements PlayerController {
     }
   }
 
+  private async launchLibMpvAttempt(
+    playbackTargets: PlaybackTargets,
+    positionTicks: number,
+    paused: boolean,
+  ): Promise<void> {
+    if (!this.libMpvHost) throw new AppError("LIBMPV_UNAVAILABLE", "The experimental player is unavailable.", 503);
+    this.eofArmed = false;
+    this.rawTimePositionSeconds = 0;
+    this.demuxerCacheTimeSeconds = null;
+    this.activeRenderProfile = "libmpv-opengl-angle";
+    const session = await this.libMpvHost.open({ location: playbackTargets.media }, positionTicks);
+    const ipc = new LibMpvCommandClient(session, (listener) => this.libMpvHost!.onEvent(listener));
+    this.ipc = ipc;
+    ipc.onMessage((message) => { if (this.ipc === ipc) this.handleMessage(message); });
+    try {
+      await Promise.all([
+        ipc.observe(1, "time-pos"),
+        ipc.observe(2, "duration"),
+        ipc.observe(3, "pause"),
+        ipc.observe(4, "paused-for-cache"),
+        ipc.observe(5, "track-list"),
+        ipc.observe(6, "seekable"),
+        ipc.observe(7, "fullscreen"),
+        ipc.observe(8, "window-maximized"),
+        ipc.observe(9, "eof-reached"),
+        ipc.observe(10, "demuxer-cache-duration"),
+        ipc.observe(11, "demuxer-cache-time"),
+        ipc.observe(12, "volume"),
+        ipc.observe(13, "current-vo"),
+        ipc.observe(14, "video-format"),
+        ipc.observe(15, "hwdec-current"),
+        ipc.observe(16, "vo-configured"),
+        ipc.observe(17, "seeing-stone-frame-stats"),
+      ]);
+      if (paused) await ipc.command(["set_property", "pause", true]);
+      const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
+      const readiness = await this.waitForEmbeddedVideoOutput(ipc);
+      await this.addExternalSubtitles(ipc, playbackTargets);
+      this.update({
+        ...this.state,
+        positionTicks: Math.max(0, this.timelineBaseTicks + Math.round(authoritativePosition * TICKS_PER_SECOND)),
+        paused,
+        seekable: this.source?.usesServerTimelineOffset ? true : this.state.seekable,
+        phase: "ready",
+        diagnostics: {
+          ...this.state.diagnostics!,
+          videoOutput: "libmpv-opengl-angle",
+          videoOutputHealthy: readiness.hasVideo ? true : null,
+          hardwareDecoding: readiness.hardwareDecoding,
+          directRendering: null,
+          frameQueueDepth: 0,
+          droppedFrames: 0,
+          renderFallbackUsed: false,
+        },
+      }, "ready", { origin: "system" });
+    } catch (error) {
+      ipc.close();
+      if (this.ipc === ipc) this.ipc = null;
+      await session.stop().catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async launchProcessAttempt(
     playbackTargets: PlaybackTargets,
     positionTicks: number,
     paused: boolean,
     windowMaximized: boolean,
-    profile: MpvRenderProfile,
+    profile: Exclude<MpvRenderProfile, "libmpv-opengl-angle">,
   ): Promise<void> {
     this.eofArmed = false;
     this.rawTimePositionSeconds = 0;
@@ -907,17 +1015,70 @@ export class MpvPlayerService implements PlayerController {
         return;
       }
 
-      const continuePlayback = await this.completion.countdown({
-        isCurrent: () => this.isCurrent(revision, completedSource),
-        show: (remaining) => this.command(["show-text", `Next episode in ${remaining} seconds\nEsc to exit`, 1100]),
-      });
-      if (!continuePlayback || !this.isCurrent(revision, completedSource)) return;
+      const decision = await this.waitForAutomaticTransition(revision, completedSource, nextEpisode);
+      if (decision === "cancel") {
+        if (this.isCurrent(revision, completedSource)) {
+          await this.stop(completedSource.playbackId, "ended", { origin: "system" });
+        }
+        return;
+      }
+      if (!this.isCurrent(revision, completedSource)) return;
       await this.transitionToNextEpisode(revision, completedSource, nextEpisode.id);
     } catch {
       if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended", { origin: "system" }).catch(() => undefined);
     } finally {
       if (this.endHandlingRevision === revision) this.endHandlingRevision = null;
     }
+  }
+
+  private async waitForAutomaticTransition(
+    revision: number,
+    completedSource: ResolvedPlaybackSource,
+    nextEpisode: MediaItem,
+  ): Promise<"continue" | "cancel"> {
+    let resolveDecision!: (decision: "continue" | "cancel") => void;
+    const manualDecision = new Promise<"continue" | "cancel">((resolve) => {
+      resolveDecision = resolve;
+    });
+    const pending: PendingAutomaticTransition = {
+      revision,
+      source: completedSource,
+      resolve: resolveDecision,
+    };
+    this.pendingAutomaticTransition = pending;
+    const timedDecision = this.completion.countdown({
+      isCurrent: () => this.isCurrent(revision, completedSource) && this.pendingAutomaticTransition === pending,
+      show: async (remainingSeconds) => {
+        this.update({
+          ...this.state,
+          nextEpisodeCountdown: {
+            nextItemId: nextEpisode.id,
+            title: nextEpisode.name,
+            seriesName: nextEpisode.seriesName,
+            seasonNumber: nextEpisode.parentIndexNumber,
+            episodeNumber: nextEpisode.indexNumber,
+            remainingSeconds,
+            totalSeconds: NEXT_EPISODE_COUNTDOWN_SECONDS,
+          },
+        });
+        await this.command(["show-text", `Next episode in ${remainingSeconds} seconds\nEsc to exit`, 1100]);
+      },
+    }).then((continuePlayback) => continuePlayback ? "continue" as const : "cancel" as const);
+
+    const decision = await Promise.race([manualDecision, timedDecision]);
+    if (this.pendingAutomaticTransition === pending) this.pendingAutomaticTransition = null;
+    if (this.isCurrent(revision, completedSource) && this.state.nextEpisodeCountdown) {
+      this.update({ ...this.state, nextEpisodeCountdown: null });
+    }
+    return decision;
+  }
+
+  private resolveAutomaticTransition(decision: "continue" | "cancel"): void {
+    const pending = this.pendingAutomaticTransition;
+    if (!pending) return;
+    this.pendingAutomaticTransition = null;
+    if (this.state.nextEpisodeCountdown) this.update({ ...this.state, nextEpisodeCountdown: null });
+    pending.resolve(decision);
   }
 
   private async transitionToNextEpisode(
@@ -986,6 +1147,11 @@ export class MpvPlayerService implements PlayerController {
     try {
       if (!this.isCurrent(revision, nextSource)) return;
       await this.addExternalSubtitles(ipc, playbackTargets);
+      // keep-open=yes leaves mpv paused at EOF. Replacing the file does not
+      // reliably clear that native pause state, so explicitly re-arm playback
+      // after the new source has been adopted and before reporting its start.
+      this.pendingPause = { paused: false, expiresAt: performance.now() + 3000 };
+      await ipc.command(["set_property", "pause", false]);
       const position = await this.waitForPropertyNumber(ipc, "time-pos");
       this.update({
         ...this.state,
@@ -1009,7 +1175,7 @@ export class MpvPlayerService implements PlayerController {
     return this.playbackRevision === revision && this.source === source && !this.stopping;
   }
 
-  private waitForEvent(ipc: MpvIpcClient, eventName: string, timeoutMilliseconds: number): Promise<void> {
+  private waitForEvent(ipc: MpvCommandClient, eventName: string, timeoutMilliseconds: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let unsubscribe: () => void = () => undefined;
       const timer = setTimeout(() => {
@@ -1025,7 +1191,7 @@ export class MpvPlayerService implements PlayerController {
     });
   }
 
-  private async addExternalSubtitles(ipc: MpvIpcClient, targets: PlaybackTargets): Promise<void> {
+  private async addExternalSubtitles(ipc: MpvCommandClient, targets: PlaybackTargets): Promise<void> {
     this.externalSubtitleStreamByTrackId.clear();
     for (const subtitle of targets.subtitles) {
       const beforeValue = await ipc.command(["get_property", "track-list"]).catch(() => null);
@@ -1085,8 +1251,8 @@ export class MpvPlayerService implements PlayerController {
     this.stalledTimer = null;
   }
 
-  private async persistWindowStateIfWindowed(ipc: MpvIpcClient | null): Promise<void> {
-    if (!ipc || this.videoHost) return;
+  private async persistWindowStateIfWindowed(ipc: MpvCommandClient | null): Promise<void> {
+    if (!ipc || this.videoHost || this.libMpvHost) return;
     const fullscreen = await ipc.command(["get_property", "fullscreen"]).catch(() => this.state.fullscreen);
     if (fullscreen === true) return;
     const maximized = await ipc.command(["get_property", "window-maximized"]).catch(() => this.windowMaximized);
@@ -1095,7 +1261,7 @@ export class MpvPlayerService implements PlayerController {
     await this.preferences.setWindowMaximized(maximized);
   }
 
-  private async waitForEmbeddedVideoOutput(ipc: MpvIpcClient): Promise<{ hasVideo: boolean; hardwareDecoding: boolean | null }> {
+  private async waitForEmbeddedVideoOutput(ipc: MpvCommandClient): Promise<{ hasVideo: boolean; hardwareDecoding: boolean | null }> {
     const deadline = Date.now() + VIDEO_OUTPUT_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const trackList = await ipc.command(["get_property", "track-list"]).catch(() => null);
@@ -1123,7 +1289,7 @@ export class MpvPlayerService implements PlayerController {
     throw new AppError("VIDEO_OUTPUT_UNAVAILABLE", "Embedded video output did not become ready.", 503);
   }
 
-  private async waitForPropertyNumber(ipc: MpvIpcClient, property: string): Promise<number> {
+  private async waitForPropertyNumber(ipc: MpvCommandClient, property: string): Promise<number> {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       const value = await ipc.command(["get_property", property]).catch(() => null);
@@ -1250,6 +1416,19 @@ export class MpvPlayerService implements PlayerController {
         hardwareDecoding: typeof message.data === "string" && message.data.length > 0 && message.data !== "no",
       };
     }
+    if (message.name === "seeing-stone-frame-stats" && message.data && typeof message.data === "object") {
+      const stats = message.data as Record<string, unknown>;
+      next.diagnostics = {
+        ...next.diagnostics!,
+        frameQueueDepth: typeof stats.outstandingFrames === "number"
+          ? stats.outstandingFrames
+          : next.diagnostics?.frameQueueDepth ?? null,
+        droppedFrames: typeof stats.droppedFrames === "number"
+          ? stats.droppedFrames
+          : next.diagnostics?.droppedFrames ?? null,
+        videoOutputHealthy: stats.unusable === true ? false : next.diagnostics?.videoOutputHealthy ?? null,
+      };
+    }
     if (message.name === "fullscreen" && typeof message.data === "boolean") {
       next.fullscreen = message.data;
       const pending = this.pendingFullscreen;
@@ -1317,6 +1496,8 @@ export class MpvPlayerService implements PlayerController {
       watched: resolvedActionKind === "completed" || resolvedActionKind === "mark_watched",
       conflictPolicy: conflictPolicy
         ?? (resolvedActionKind !== "progress" ? "explicit" : "automatic"),
+      contentKind: source.contentKind,
+      liveStreamId: source.liveStreamId,
     });
   }
 
@@ -1371,5 +1552,18 @@ export class EmbeddedMpvAdapter extends MpvPlayerService {
     videoHost: MpvVideoHost,
   ) {
     super(mainWindow, playback, reporting, preferences, runtime, videoHost);
+  }
+}
+
+export class LibMpvAdapter extends MpvPlayerService {
+  constructor(
+    mainWindow: BrowserWindow,
+    playback: PlaybackSessionService,
+    reporting: PlaybackReportingService,
+    preferences: PlayerPreferencesStore,
+    runtime: MpvRuntimePaths,
+    host: LibMpvHost,
+  ) {
+    super(mainWindow, playback, reporting, preferences, runtime, undefined, host);
   }
 }

@@ -1,8 +1,10 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, sharedTexture, type SharedTextureImported } from "electron";
 import {
   IPC,
   type ArtworkInput,
   type BufferingPolicyPreferenceInput,
+  type CleanMachineDiagnosticActionResult,
+  type CleanMachineDiagnostics,
   type DiscoveredServer,
   type DownloadIdInput,
   type DownloadKeepInput,
@@ -15,6 +17,18 @@ import {
   type JellyfinBridge,
   type LibraryItemsInput,
   type LibrarySummary,
+  type LiveTvCancelScheduleInput,
+  type LiveTvCreateRecordingInput,
+  type LiveTvDeleteRecordingInput,
+  type LiveTvGuide,
+  type LiveTvGuideInput,
+  type LiveTvPageInput,
+  type LiveTvPlaybackInput,
+  type LiveTvRecording,
+  type LiveTvSeriesTimer,
+  type LiveTvStatus,
+  type LiveTvTimer,
+  type LiveTvUpdateScheduleInput,
   type LoginInput,
   type MediaItem,
   type MediaSourceCapabilities,
@@ -63,6 +77,9 @@ async function invoke<T>(channel: string, input?: unknown): Promise<T> {
 }
 
 const bridge: JellyfinBridge = {
+  application: {
+    close: () => invoke<void>(IPC.applicationClose),
+  },
   server: {
     discover: () => invoke<DiscoveredServer[]>(IPC.serverDiscover),
     connect: (input: ServerUrlInput) => invoke<ServerConnection>(IPC.serverConnect, input),
@@ -92,6 +109,17 @@ const bridge: JellyfinBridge = {
   mediaSources: {
     getCapabilities: (input: ItemIdInput) => invoke<MediaSourceCapabilities>(IPC.mediaSourcesGetCapabilities, input),
   },
+  liveTv: {
+    getStatus: () => invoke<LiveTvStatus>(IPC.liveTvGetStatus),
+    getGuide: (input: LiveTvGuideInput) => invoke<LiveTvGuide>(IPC.liveTvGetGuide, input),
+    getRecordings: (input?: LiveTvPageInput) => invoke<LiveTvRecording[]>(IPC.liveTvGetRecordings, input ?? {}),
+    getTimers: () => invoke<LiveTvTimer[]>(IPC.liveTvGetTimers),
+    getSeriesTimers: () => invoke<LiveTvSeriesTimer[]>(IPC.liveTvGetSeriesTimers),
+    createRecording: (input: LiveTvCreateRecordingInput) => invoke<void>(IPC.liveTvCreateRecording, input),
+    updateSchedule: (input: LiveTvUpdateScheduleInput) => invoke<void>(IPC.liveTvUpdateSchedule, input),
+    cancelSchedule: (input: LiveTvCancelScheduleInput) => invoke<void>(IPC.liveTvCancelSchedule, input),
+    deleteRecording: (input: LiveTvDeleteRecordingInput) => invoke<void>(IPC.liveTvDeleteRecording, input),
+  },
   downloads: {
     list: () => invoke<DownloadSummary[]>(IPC.downloadsList),
     listOfflinePlayable: () => invoke<OfflinePlayableSummary[]>(IPC.downloadsListOfflinePlayable),
@@ -114,6 +142,7 @@ const bridge: JellyfinBridge = {
   },
   playback: {
     start: (input: PlaybackStartInput) => invoke<PlaybackStartResult>(IPC.playbackStart, input),
+    startLive: (input: LiveTvPlaybackInput) => invoke<PlaybackStartResult>(IPC.playbackStartLive, input),
     setPaused: (input: PlaybackPauseInput) => invoke<PlaybackState>(IPC.playbackSetPaused, input),
     seek: (input: PlaybackSeekInput) => invoke<PlaybackState>(IPC.playbackSeek, input),
     setRate: (input: PlaybackRateInput) => invoke<PlaybackState>(IPC.playbackSetRate, input),
@@ -121,6 +150,8 @@ const bridge: JellyfinBridge = {
     selectAudio: (input: PlaybackTrackInput) => invoke<PlaybackState>(IPC.playbackSelectAudio, input),
     selectSubtitle: (input: PlaybackTrackInput) => invoke<PlaybackState>(IPC.playbackSelectSubtitle, input),
     setFullscreen: (input: PlaybackFullscreenInput) => invoke<PlaybackState>(IPC.playbackSetFullscreen, input),
+    continueNextEpisode: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackContinueNextEpisode, input),
+    cancelNextEpisode: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackCancelNextEpisode, input),
     stop: (input: PlaybackIdInput) => invoke<PlaybackState>(IPC.playbackStop, input),
     getState: () => invoke<PlaybackState>(IPC.playbackGetState),
     setViewport: (input: PlaybackViewportInput) => invoke<{ embedded: boolean }>(IPC.playbackSetViewport, input),
@@ -142,6 +173,11 @@ const bridge: JellyfinBridge = {
   },
   licenses: {
     list: () => invoke<OpenSourceLicenseInventory>(IPC.licensesList),
+  },
+  diagnostics: {
+    getCleanMachine: () => invoke<CleanMachineDiagnostics>(IPC.diagnosticsGetCleanMachine),
+    copyCleanMachine: () => invoke<CleanMachineDiagnosticActionResult>(IPC.diagnosticsCopyCleanMachine),
+    saveCleanMachine: () => invoke<CleanMachineDiagnosticActionResult>(IPC.diagnosticsSaveCleanMachine),
   },
   watchParties: {
     getState: () => invoke<WatchPartyViewState>(IPC.watchPartiesGetState),
@@ -166,3 +202,149 @@ for (const value of Object.values(bridge)) Object.freeze(value);
 Object.freeze(bridge);
 
 contextBridge.exposeInMainWorld("jellyfin", bridge);
+
+// Private libmpv presentation transport. Nothing from this receiver is exposed
+// through contextBridge: native handles, frames, paths, and source details stay
+// inside Electron's isolated preload world.
+const libmpvPresenterIpc = Object.freeze({
+  listenerReady: "seeing-stone:libmpv-presenter-listener-ready",
+  start: "seeing-stone:libmpv-presenter-start",
+  ready: "seeing-stone:libmpv-presenter-ready",
+  stop: "seeing-stone:libmpv-presenter-stop",
+  presented: "seeing-stone:libmpv-presenter-presented",
+  error: "seeing-stone:libmpv-presenter-error",
+});
+
+let libmpvSurfaceGeneration = 0;
+let libmpvSurface: HTMLCanvasElement | null = null;
+let libmpvSurfaceContext: ImageBitmapRenderingContext | null = null;
+let libmpvBackSurface: HTMLCanvasElement | null = null;
+let libmpvBackSurfaceContext: ImageBitmapRenderingContext | null = null;
+let libmpvPresentedTexture: SharedTextureImported | null = null;
+let libmpvResizeObserver: ResizeObserver | null = null;
+let libmpvStopped = true;
+
+async function playerViewport(): Promise<HTMLElement> {
+  const existing = document.getElementById("playerViewport");
+  if (existing) return existing;
+  await new Promise<void>((resolve) => document.addEventListener("DOMContentLoaded", () => resolve(), { once: true }));
+  const viewport = document.getElementById("playerViewport");
+  if (!viewport) throw new Error("PLAYER_VIEWPORT_UNAVAILABLE");
+  return viewport;
+}
+
+function stopLibMpvPresenter(): void {
+  libmpvStopped = true;
+  libmpvResizeObserver?.disconnect();
+  libmpvResizeObserver = null;
+  libmpvPresentedTexture?.release();
+  libmpvPresentedTexture = null;
+  libmpvSurfaceContext = null;
+  libmpvBackSurfaceContext = null;
+  libmpvSurface?.remove();
+  libmpvBackSurface?.remove();
+  libmpvSurface = null;
+  libmpvBackSurface = null;
+}
+
+async function startLibMpvPresenter(input: unknown): Promise<void> {
+  stopLibMpvPresenter();
+  if (!input || typeof input !== "object") throw new Error("PRESENTER_INPUT_INVALID");
+  const generation = (input as Record<string, unknown>).surfaceGeneration;
+  if (!Number.isSafeInteger(generation) || Number(generation) <= 0) throw new Error("PRESENTER_GENERATION_INVALID");
+  const viewport = await playerViewport();
+  const createSurface = (id: string, zIndex: number): { surface: HTMLCanvasElement; context: ImageBitmapRenderingContext } => {
+    const surface = document.createElement("canvas");
+    surface.id = id;
+    surface.setAttribute("aria-hidden", "true");
+    Object.assign(surface.style, {
+      position: "absolute",
+      inset: "0",
+      zIndex: String(zIndex),
+      width: "100%",
+      height: "100%",
+      background: "#020207",
+      display: "block",
+      contain: "strict",
+      pointerEvents: "none",
+      transform: "scaleY(-1)",
+      transformOrigin: "center",
+      willChange: "transform",
+    });
+    const context = surface.getContext("bitmaprenderer");
+    if (!context) throw new Error("GPU_PRESENTER_UNAVAILABLE");
+    return { surface, context };
+  };
+  const front = createSurface("libmpvVideoSurface", 1);
+  const back = createSurface("libmpvVideoSurfaceBack", 0);
+  const resize = (): void => {
+    const bounds = viewport.getBoundingClientRect();
+    const scale = Math.max(0.5, Math.min(4, window.devicePixelRatio || 1));
+    const width = Math.max(1, Math.round(bounds.width * scale));
+    const height = Math.max(1, Math.round(bounds.height * scale));
+    // Assigning either canvas dimension clears the bitmap. ResizeObserver can
+    // report an unchanged box after insertion, so only resize when necessary.
+    for (const surface of [front.surface, back.surface]) {
+      if (surface.width !== width) surface.width = width;
+      if (surface.height !== height) surface.height = height;
+    }
+  };
+  libmpvResizeObserver = new ResizeObserver(resize);
+  libmpvResizeObserver.observe(viewport);
+  resize();
+  viewport.append(front.surface, back.surface);
+  libmpvSurfaceGeneration = Number(generation);
+  libmpvSurface = front.surface;
+  libmpvSurfaceContext = front.context;
+  libmpvBackSurface = back.surface;
+  libmpvBackSurfaceContext = back.context;
+  libmpvStopped = false;
+  ipcRenderer.send(libmpvPresenterIpc.ready, {
+    surfaceGeneration: libmpvSurfaceGeneration,
+    mechanism: "image-bitmap-renderer",
+    deviceScaleFactor: window.devicePixelRatio,
+  });
+}
+
+sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metadata: unknown) => {
+  let frame: VideoFrame | null = null;
+  let retainedForPresentation = false;
+  try {
+    const record = metadata && typeof metadata === "object" ? metadata as Record<string, unknown> : null;
+    if (libmpvStopped || !record || record.surfaceGeneration !== libmpvSurfaceGeneration
+      || !libmpvSurfaceContext || !libmpvSurface || !libmpvBackSurfaceContext || !libmpvBackSurface) return;
+    frame = importedSharedTexture.getVideoFrame();
+    const bitmap = await createImageBitmap(frame);
+    libmpvBackSurfaceContext.transferFromImageBitmap(bitmap);
+    // Keep both video buffers permanently below the renderer controls. The
+    // previous monotonically increasing layer eventually covered every HTML
+    // overlay after only a few frames.
+    libmpvSurface.style.zIndex = "1";
+    libmpvBackSurface.style.zIndex = "2";
+    [libmpvSurface, libmpvBackSurface] = [libmpvBackSurface, libmpvSurface];
+    [libmpvSurfaceContext, libmpvBackSurfaceContext] = [libmpvBackSurfaceContext, libmpvSurfaceContext];
+    const previousTexture = libmpvPresentedTexture;
+    libmpvPresentedTexture = importedSharedTexture;
+    retainedForPresentation = true;
+    ipcRenderer.send(libmpvPresenterIpc.presented, {
+      surfaceGeneration: libmpvSurfaceGeneration,
+      sequence: record.sequence,
+    });
+    previousTexture?.release();
+  } finally {
+    frame?.close();
+    if (!retainedForPresentation) importedSharedTexture.release();
+  }
+});
+
+ipcRenderer.on(libmpvPresenterIpc.start, (_event, input) => {
+  void startLibMpvPresenter(input).catch((error) => {
+    ipcRenderer.send(libmpvPresenterIpc.error, {
+      surfaceGeneration: input && typeof input === "object" ? (input as Record<string, unknown>).surfaceGeneration : null,
+      code: error instanceof Error && /^[A-Z0-9_]+$/.test(error.message) ? error.message : "PRESENTER_INITIALIZATION_FAILED",
+    });
+  });
+});
+ipcRenderer.on(libmpvPresenterIpc.stop, () => stopLibMpvPresenter());
+window.addEventListener("beforeunload", () => stopLibMpvPresenter(), { once: true });
+ipcRenderer.send(libmpvPresenterIpc.listenerReady);

@@ -4,3 +4,4 @@ allowBuilds:
   esbuild: true
   koffi: true
 nodeLinker: hoisted
+storeDir: '.pnpm-store/v11'

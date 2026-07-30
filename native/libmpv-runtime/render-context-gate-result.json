@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "electronVersion": "43.1.0",
+  "chromiumVersion": "150.0.7871.47",
+  "angleSourceRevision": "bbf3d8a4755268f016087be2f56099fa5a5f3f6e",
+  "angleSourceArchiveUrl": "https://chromium.googlesource.com/angle/angle/+archive/bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+  "angleSourceArchiveSha256": "1a22cbeed555ec0b7130c03967615c40dac46a0640d23d2539bb7bdb45c1376d",
+  "angleArtifacts": [
+    {
+      "filename": "libEGL.dll",
+      "sha256": "c459e2cf46578da98ba8955e94f29fde8001ba3f44197a3ec521a9c91b538e7c"
+    },
+    {
+      "filename": "libGLESv2.dll",
+      "sha256": "39955886b88e2c2978c8472225430c497abf90b1fad906d7b3b6fdf581ce9ddf"
+    },
+    {
+      "filename": "d3dcompiler_47.dll",
+      "sha256": "a05f99734f7c4822fefc12b367af21fd0976ed6608752fb1e1e80b6ece7ecbbb"
+    },
+    {
+      "filename": "dxcompiler.dll",
+      "sha256": "1085707889573af5b32e7644d47a7c5f0809ed0818217d75f6eaedee37a2a767"
+    },
+    {
+      "filename": "dxil.dll",
+      "sha256": "77e039c905030a641e53658a008b74e90635a5ea9b6b79eabd0f2003bdfca59a"
+    }
+  ],
+  "lifecycle": {
+    "clientApiVersion": "2.5",
+    "completedIterations": 10,
+    "secureAbsoluteLoad": true,
+    "requiredRenderSymbolsPresent": true
+  },
+  "renderContext": {
+    "clientApiVersion": "2.5",
+    "eglVersion": "1.5",
+    "completedIterations": 10,
+    "d3d11Device": true,
+    "shareableBgraTexture": true,
+    "angleTextureSurface": true,
+    "renderContextLifecycle": true
+  },
+  "realVideoRendered": false
+}

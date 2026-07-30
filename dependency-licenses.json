@@ -9,12 +9,61 @@
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
       "redistributionStatus": "source-only",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "build/icon.svg",
+          "sha256": "5e7afc457a7d9c443e6f305697c670605a19f8858c93fa53845f2f64eb596497"
+        },
+        {
+          "path": "src/renderer/assets/seeing-stone-orb.svg",
+          "sha256": "5e7afc457a7d9c443e6f305697c670605a19f8858c93fa53845f2f64eb596497"
+        },
+        {
+          "path": "assets/mpv/input.conf",
+          "sha256": "55e262a81edc829282a454dfaa1604f7364b5ef37cfaf68258306a98ff813d8f"
+        },
+        {
+          "path": "assets/mpv/NOTICE.md",
+          "sha256": "8072f601caede8f80faa086cac832f4fe0997ed8bf698c93e39ab9db178624b0"
+        },
+        {
+          "path": "native/libmpv-bridge/synthetic-gate-result.json",
+          "sha256": "4146f1c0e6644e88da0dd5efd87c731229f9182dc2b24847203f63867d018757"
+        },
+        {
+          "path": "native/libmpv-runtime/source-lock.json",
+          "sha256": "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f"
+        },
+        {
+          "path": "native/libmpv-runtime/build-result.json",
+          "sha256": "862aed26ba2f6daca6ac61f3625035c49415800172704d166543f11e2449715b"
+        },
+        {
+          "path": "native/libmpv-runtime/render-context-gate-result.json",
+          "sha256": "aeac3222946d931d9494977c16b236588d33a9a05396c3854d5add543b38c1c7"
+        },
+        {
+          "path": "native/libmpv-runtime/real-video-gate-result-scale-1.json",
+          "sha256": "b45bd7caad0355cd2a09f4ea8273960e5684b9be7cd2984c6e5dcccf3b8d8b54"
+        },
+        {
+          "path": "native/libmpv-runtime/real-video-gate-result-scale-1-5.json",
+          "sha256": "cc467668944f2b64ff4898939662273fd46e1f80d0817832418c33249d428ed9"
+        },
+        {
+          "path": "assets/fixtures/libmpv-h264-gate.mp4",
+          "sha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6"
+        },
+        {
+          "path": "assets/fixtures/libmpv-h264-gate.provenance.json",
+          "sha256": "2bcda65152cc71f760d0c1d8d114edacc83f6b7f29746c87d0c7a16145356fad"
+        }
+      ],
       "licenseFile": {
         "path": "LICENSE",
         "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
@@ -64,13 +113,92 @@
     },
     {
       "category": "native",
+      "name": "node-addon-api",
+      "version": "8.5.0",
+      "license": "MIT",
+      "projectUrl": "https://github.com/nodejs/node-addon-api",
+      "sourceRevision": "6babc960154752f686a7dca8e712991a976a754b",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/licenses/node-addon-api-MIT.txt",
+        "sha256": "96dcd3ff7661c68ae574f60fc001bad3bc717b506f412336e1e9840bbb73dd57"
+      }
+    },
+    {
+      "category": "native",
+      "name": "mpv libmpv source input",
+      "version": "0.41.0",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/mpv-player/mpv",
+      "sourceRevision": "41f6a645068483470267271e1d09966ca3b9f413",
+      "redistributionStatus": "source-only",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
+        "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+      }
+    },
+    {
+      "category": "native",
+      "name": "Seeing Stone libmpv bridge",
+      "version": "0.4.3 milestone-4",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
+      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "LICENSE",
+        "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
+      }
+    },
+    {
+      "category": "native",
+      "name": "ANGLE runtime from Electron",
+      "version": "Electron 43.1.0 / Chromium 150.0.7871.47",
+      "license": "BSD-3-Clause",
+      "projectUrl": "https://chromium.googlesource.com/angle/angle",
+      "sourceRevision": "bbf3d8a4755268f016087be2f56099fa5a5f3f6e",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/licenses/angle-BSD-3-Clause.txt",
+        "sha256": "e4984e61f294e0ca889defb54e2b7f31e44b0fe7a7cbad0a86444d757ed13709"
+      }
+    },
+    {
+      "category": "native",
+      "name": "FFmpeg libmpv source input",
+      "version": "8.1.2",
+      "license": "LGPL-2.1-or-later",
+      "projectUrl": "https://ffmpeg.org",
+      "sourceRevision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "redistributionStatus": "source-only",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
+        "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+      }
+    },
+    {
+      "category": "native",
       "name": "mpv",
       "version": "v0.41.0-dev-ge5486b96d",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "e5486b96d7d06dd148337899bfdc46bf25101663",
       "redistributionStatus": "internal-only-unverified-provenance",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "assets/mpv/licenses/mpv-Copyright.txt",
+          "sha256": "bfe9ee4cceabcb8ecbfadf208d04156f73d801e6a57369a5606bb8341e204a23"
+        },
+        {
+          "path": "assets/mpv/licenses/mpv-LGPL-2.1.txt",
+          "sha256": "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
+        }
+      ],
       "licenseFile": {
         "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
         "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
@@ -84,7 +212,16 @@
       "projectUrl": "https://github.com/FFmpeg/FFmpeg",
       "sourceRevision": "ff59522",
       "redistributionStatus": "internal-only-unverified-provenance",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "assets/mpv/licenses/ffmpeg-LICENSE.md",
+          "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+        },
+        {
+          "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
+          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+        }
+      ],
       "licenseFile": {
         "path": "assets/mpv/licenses/ffmpeg-GPL-2.0.txt",
         "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
@@ -198,156 +335,6 @@
       "repository": "git+https://github.com/electron/windows-sign.git"
     },
     {
-      "name": "@esbuild/aix-ppc64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/android-arm",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/android-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/android-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/darwin-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/darwin-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/freebsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/freebsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-arm",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-ia32",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-loong64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-mips64el",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-ppc64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-riscv64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-s390x",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/linux-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/netbsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/netbsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/openbsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/openbsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/openharmony-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/sunos-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/win32-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
-      "name": "@esbuild/win32-ia32",
-      "version": "0.28.1",
-      "license": "MIT",
-      "repository": "git+https://github.com/evanw/esbuild.git"
-    },
-    {
       "name": "@esbuild/win32-x64",
       "version": "0.28.1",
       "license": "MIT",
@@ -364,90 +351,6 @@
       "version": "1.5.5",
       "license": "MIT",
       "repository": "git+https://github.com/jridgewell/sourcemaps.git"
-    },
-    {
-      "name": "@koromix/koffi-darwin-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-darwin-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-freebsd-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-freebsd-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-freebsd-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-linux-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-linux-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-linux-loong64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-linux-riscv64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-linux-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-openbsd-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-openbsd-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-win32-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
-    },
-    {
-      "name": "@koromix/koffi-win32-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "repository": "https://github.com/Koromix/koffi"
     },
     {
       "name": "@koromix/koffi-win32-x64",
@@ -496,144 +399,6 @@
       "version": "1.7.1",
       "license": "MIT",
       "repository": "https://github.com/PeculiarVentures/webcrypto"
-    },
-    {
-      "name": "@rollup/rollup-android-arm-eabi",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-android-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-darwin-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-darwin-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-freebsd-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-freebsd-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-arm-gnueabihf",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-arm-musleabihf",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-arm64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-arm64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-loong64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-loong64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-ppc64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-ppc64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-riscv64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-riscv64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-s390x-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-x64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-linux-x64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-openbsd-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-openharmony-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-win32-arm64-msvc",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
-    },
-    {
-      "name": "@rollup/rollup-win32-ia32-msvc",
-      "version": "4.62.2",
-      "license": "MIT",
-      "repository": "git+https://github.com/rollup/rollup.git"
     },
     {
       "name": "@rollup/rollup-win32-x64-gnu",
@@ -1296,12 +1061,6 @@
       "repository": "git+https://github.com/isaacs/fs.realpath.git"
     },
     {
-      "name": "fsevents",
-      "version": "2.3.3",
-      "license": "MIT",
-      "repository": "https://github.com/fsevents/fsevents.git"
-    },
-    {
       "name": "function-bind",
       "version": "1.1.2",
       "license": "MIT",
@@ -1648,6 +1407,12 @@
       "version": "4.33.0",
       "license": "MIT",
       "repository": "git+https://github.com/electron/node-abi.git"
+    },
+    {
+      "name": "node-addon-api",
+      "version": "8.5.0",
+      "license": "MIT",
+      "repository": "git://github.com/nodejs/node-addon-api.git"
     },
     {
       "name": "node-api-version",

@@ -120,6 +120,7 @@ describe("JellyfinApi main-side boundary", () => {
           ? [{ ...unsafeItem, Id: "episode-2", Name: "Episode 2", Type: "Episode", SeriesId: "series-1", SeasonId: "season-2" }]
           : [],
       });
+      if (url.pathname === "/Items/Latest") return Response.json([unsafeItem]);
       if (url.pathname === "/Users/user-1/Items/movie-1") return Response.json(unsafeItem);
       if (url.pathname === "/Shows/series-1/Seasons") return Response.json({ Items: [{ ...unsafeItem, Id: "season-1", Name: "Season 1", Type: "Season" }] });
       if (url.pathname === "/Shows/series-1/Episodes") return Response.json({ Items: [{ ...unsafeItem, Id: "episode-1", Name: "Episode 1", Type: "Episode", SeriesId: "series-1", SeasonId: "season-1" }] });
@@ -156,7 +157,7 @@ describe("JellyfinApi main-side boundary", () => {
     const safeSession = await api.login(connection.connectionId, "Viewer", "password", true);
     const home = await api.getHome();
     const libraries = await api.getLibraries();
-    const libraryItems = await api.getLibraryItems("Movie", 100);
+    const libraryItems = await api.getLibraryItems("library-1", "Movie", 100);
     const searchItems = await api.search("movie");
     const details = await api.getDetails("movie-1");
     const seasons = await api.getSeasons("series-1");
@@ -397,6 +398,92 @@ describe("JellyfinApi main-side boundary", () => {
     await expect(pendingSearch).rejects.toMatchObject({ code: "SESSION_CHANGED" });
   });
 
+  it("preserves Jellyfin's private Live TV service when creating a sanitized timer", async () => {
+    let timerBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") {
+        return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      }
+      if (url.pathname === "/Users/AuthenticateByName") {
+        return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      }
+      if (url.pathname === "/LiveTv/Timers/Defaults") {
+        return Response.json({
+          ProgramId: "server-program",
+          ChannelId: "channel-101",
+          Name: "Test Program",
+          StartDate: "2026-07-29T15:00:00.000Z",
+          EndDate: "2026-07-29T15:30:00.000Z",
+          ServiceName: "Emby",
+          OpenToken: "PRIVATE_OPEN_TOKEN",
+          ProviderUrl: "https://provider.example/private",
+        });
+      }
+      if (url.pathname === "/LiveTv/Timers" && init?.method === "POST") {
+        timerBody = JSON.parse(String(init.body));
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-live-tv-timer-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    await api.createLiveTvRecording("program-1", false, { prePaddingSeconds: 60 });
+
+    expect(timerBody).toMatchObject({
+      ProgramId: "program-1",
+      ChannelId: "channel-101",
+      ServiceName: "Emby",
+      PrePaddingSeconds: 60,
+    });
+    expect(timerBody).not.toHaveProperty("OpenToken");
+    expect(timerBody).not.toHaveProperty("ProviderUrl");
+  });
+
+  it("uses Jellyfin's completed-recording timestamp when StartDate is absent", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") {
+        return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      }
+      if (url.pathname === "/Users/AuthenticateByName") {
+        return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      }
+      if (url.pathname === "/LiveTv/Recordings") {
+        expect(url.searchParams.get("Fields")).toContain("DateCreated");
+        return Response.json({
+          Items: [{
+            Id: "recording-1",
+            Name: "Test Program 74",
+            Type: "Video",
+            ChannelName: "Seeing Stone Color Bars",
+            DateCreated: "2026-07-29T18:50:00.2306631-07:00",
+            PremiereDate: "2026-07-29T00:00:00.000Z",
+            RunTimeTicks: 3_000_000_000,
+            Path: "D:\\Private\\recording.ts",
+          }],
+        });
+      }
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-live-tv-recordings-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+
+    await expect(api.getLiveTvRecordings()).resolves.toEqual([expect.objectContaining({
+      id: "recording-1",
+      name: "Test Program 74",
+      channelName: "Seeing Stone Color Bars",
+      startUtc: "2026-07-30T01:50:00.230Z",
+      status: "Completed",
+    })]);
+  });
+
   it("serializes logout behind an in-flight login so logout remains authoritative", async () => {
     let releaseLogin: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
@@ -446,5 +533,48 @@ describe("JellyfinApi main-side boundary", () => {
     await expect(pendingLogout).resolves.toMatchObject({ authenticated: false, persistence: "none" });
     expect(api.getSafeSession().authenticated).toBe(false);
     await expect(stat(join(directory, "session.safe"))).rejects.toMatchObject({ code: "ENOENT" });
+    });
   });
-});
+
+  it("generates a custom Anime library and scopes its series request by library ID", async () => {
+    const observedRequests: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      observedRequests.push(url);
+      if (url.pathname === "/System/Info/Public") return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      if (url.pathname === "/Users/user-1/Views") {
+        return Response.json({ Items: [{ Id: "anime-library", Name: "Anime", CollectionType: "tvshows" }] });
+      }
+      if (url.pathname === "/Users/user-1/Items/Resume" || url.pathname === "/Shows/NextUp") return Response.json({ Items: [] });
+      if (url.pathname === "/Items/Latest") {
+        return Response.json([{ ...unsafeItem, Id: "anime-1", Name: "Frieren", Type: "Series" }]);
+      }
+      if (url.pathname === "/Users/user-1/Items") {
+        return Response.json({ Items: [{ ...unsafeItem, Id: "anime-1", Name: "Frieren", Type: "Series" }] });
+      }
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-anime-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+
+    const home = await api.getHome();
+    const items = await api.getLibraryItems("anime-library", "Series", 100);
+
+    expect(home.libraries).toContainEqual({ id: "anime-library", name: "Anime", collectionType: "tvshows" });
+    expect(home.latestRows[0]?.library.name).toBe("Anime");
+    expect(home.latestRows[0]?.items[0]).toMatchObject({ id: "anime-1", type: "Series" });
+    expect(items[0]).toMatchObject({ id: "anime-1", type: "Series" });
+    const latestRequest = observedRequests.find((url) => url.pathname === "/Items/Latest");
+    expect(latestRequest?.searchParams.get("UserId")).toBe("user-1");
+    expect(latestRequest?.searchParams.get("ParentId")).toBe("anime-library");
+    expect(latestRequest?.searchParams.get("GroupItems")).toBe("true");
+    expect(latestRequest?.searchParams.has("IncludeItemTypes")).toBe(false);
+    expect(latestRequest?.searchParams.has("SortBy")).toBe(false);
+    const libraryRequests = observedRequests.filter((url) => url.pathname === "/Users/user-1/Items");
+    expect(libraryRequests.at(-1)?.searchParams.get("ParentId")).toBe("anime-library");
+    expect(libraryRequests.at(-1)?.searchParams.get("IncludeItemTypes")).toBe("Series");
+  });

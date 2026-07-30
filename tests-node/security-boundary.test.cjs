@@ -122,6 +122,7 @@ test("authenticated networking stays main-side and returns allowlisted payloads"
     if (url.pathname.endsWith("/Views")) return Response.json({ Items: [{ Id: "library-1", Name: "Movies", CollectionType: "movies" }] });
     if (url.pathname.endsWith("/Items/Resume")) return Response.json({ Items: [unsafeItem] });
     if (url.pathname === "/Shows/NextUp") return Response.json({ Items: [] });
+    if (url.pathname === "/Items/Latest") return Response.json([unsafeItem]);
     if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId")) return Response.json({ Items: [unsafeItem] });
     if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({ MediaSources: unsafeItem.MediaSources });
     throw new Error(`Unexpected endpoint: ${url.pathname}`);

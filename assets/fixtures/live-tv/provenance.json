@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Deterministic synthetic Live TV and DVR validation",
+  "generatedAtUtc": "2026-07-29T08:45:00.000Z",
+  "generator": "Jellyfin bundled FFmpeg",
+  "generatorPathAtBuildTime": "D:\\Program Files\\Jellyfin\\Server\\ffmpeg.exe",
+  "inputs": ["lavfi testsrc2", "lavfi smptebars", "lavfi mandelbrot", "lavfi sine"],
+  "video": "H.264, 640x360, 30fps, yuv420p",
+  "audio": "AAC, 48000Hz",
+  "container": "MPEG-TS",
+  "durationSecondsPerLoop": 30,
+  "artifacts": [
+    { "file": "channel-101.ts", "sha256": "9B4008B88889D18DE05E2A734E14491FD584CC251A9FF9F7B02BE2B5E02AC2BB" },
+    { "file": "channel-102.ts", "sha256": "C2B217061D1CF0FCF857206ABCDAFFA27AEF4AE5D37488FA3F150F1973211F68" },
+    { "file": "channel-103.ts", "sha256": "23A60A9181FAFC2C79B5408D17FA24F6DB9E12CC689DEB4596B544EED6610700" }
+  ],
+  "license": "GPL-2.0-or-later"
+}

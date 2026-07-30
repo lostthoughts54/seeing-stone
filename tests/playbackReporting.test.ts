@@ -130,4 +130,38 @@ describe("PlaybackReportingService durable main-side boundary", () => {
       { kind: "progress" },
     );
   });
+
+  it("reports Live TV directly with its private tuner identifier and never persists a playback head", async () => {
+    const reportAuthoritativePlayback = vi.fn(async () => undefined);
+    const capture = vi.fn();
+    const service = new PlaybackReportingService(
+      { reportAuthoritativePlayback } as never,
+      { capture, setActive: vi.fn(), flushCapture: vi.fn() },
+      { info() {}, warn: vi.fn(), error() {} },
+    );
+    await service.acceptAuthoritativeEvent({
+      kind: "progress",
+      itemId: "channel-1",
+      mediaSourceId: "source-live",
+      playMethod: "DirectStream",
+      playSessionId: "play-session-live",
+      positionTicks: 99_000_000,
+      paused: false,
+      canSeek: true,
+      audioStreamIndex: 1,
+      subtitleStreamIndex: null,
+      actionKind: "progress",
+      watched: false,
+      conflictPolicy: "automatic",
+      contentKind: "live-tv",
+      liveStreamId: "private-live-stream-1",
+    });
+    expect(capture).not.toHaveBeenCalled();
+    expect(reportAuthoritativePlayback).toHaveBeenCalledWith(expect.objectContaining({
+      itemId: "channel-1",
+      positionTicks: 0,
+      canSeek: false,
+      liveStreamId: "private-live-stream-1",
+    }));
+  });
 });

@@ -8,6 +8,8 @@ export interface AuthoritativePlaybackEvent extends DurablePlaybackReport {
   positionTicks: number;
   actionKind: PlaybackActionKind;
   watched: boolean;
+  contentKind?: "on-demand" | "live-tv";
+  liveStreamId?: string | null;
 }
 
 /**
@@ -22,6 +24,26 @@ export class PlaybackReportingService {
   ) {}
 
   async acceptAuthoritativeEvent(event: AuthoritativePlaybackEvent): Promise<void> {
+    if (event.contentKind === "live-tv") {
+      try {
+        await this.api.reportAuthoritativePlayback({
+          kind: event.kind,
+          itemId: event.itemId,
+          mediaSourceId: event.mediaSourceId,
+          playMethod: event.playMethod,
+          playSessionId: event.playSessionId,
+          positionTicks: 0,
+          paused: event.paused,
+          canSeek: false,
+          audioStreamIndex: event.audioStreamIndex,
+          subtitleStreamIndex: event.subtitleStreamIndex,
+          liveStreamId: event.liveStreamId,
+        });
+      } catch (error) {
+        this.logger.warn("Live TV playback reporting was deferred.", { kind: event.kind, error });
+      }
+      return;
+    }
     let revision: PlaybackRevisionRecord | null = null;
     try {
       revision = await this.synchronization.capture({

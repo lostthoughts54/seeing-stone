@@ -68,6 +68,8 @@ export interface PlaybackAdapter {
   selectAudio(playbackId: string, trackId: number | null): Promise<PlaybackState>;
   selectSubtitle(playbackId: string, trackId: number | null): Promise<PlaybackState>;
   setFullscreen(playbackId: string, fullscreen: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;
+  continueNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState>;
+  cancelNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState>;
   showMessage(playbackId: string, message: string, durationMilliseconds?: number): Promise<void>;
   stop(playbackId: string, phase?: "stopped" | "ended", context?: PlayerCommandContext): Promise<PlaybackState>;
   clear(): Promise<void>;

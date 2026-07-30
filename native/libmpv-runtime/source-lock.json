@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "status": "source-build-configured",
+  "target": "x86_64-pc-windows-gnu-ucrt",
+  "sources": [
+    {
+      "name": "mpv",
+      "version": "0.41.0",
+      "commit": "41f6a645068483470267271e1d09966ca3b9f413",
+      "immutableUrl": "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz",
+      "archiveFilename": "mpv-v0.41.0.tar.gz",
+      "archiveSha256": "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209",
+      "archiveSha512": "d8806ef04455aeb65d45c5956b4589d7a9728f869b74b9bcd8c9ab08475c28538334399ddc7fc2aee6a31fd178fe4b87ec755cd99ffa6e29ab4b6b61757b9320",
+      "extractedDirectory": "mpv-0.41.0",
+      "license": "GPL-2.0-or-later",
+      "redistributionStatus": "source-build-input"
+    },
+    {
+      "name": "FFmpeg",
+      "version": "8.1.2",
+      "commit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "immutableUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "archiveFilename": "ffmpeg-8.1.2.tar.xz",
+      "archiveSha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+      "archiveSha512": "b3adc16fe426217bb607da01c4137cee0a9788fc08e077874336db185d2b7287746a7dc94cf0181ea92cd8afcdb06094ee9456e2986112354f84538cb9a5ed0b",
+      "extractedDirectory": "ffmpeg-8.1.2",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-build-input"
+    }
+  ],
+  "referenceSources": [
+    {
+      "name": "ANGLE from Electron 43.1.0 / Chromium 150.0.7871.47",
+      "version": "Electron 43.1.0 snapshot",
+      "commit": "bbf3d8a4755268f016087be2f56099fa5a5f3f6e",
+      "immutableUrl": "https://chromium.googlesource.com/angle/angle/+archive/bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+      "archiveFilename": "angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+      "archiveSha256": "1a22cbeed555ec0b7130c03967615c40dac46a0640d23d2539bb7bdb45c1376d",
+      "archiveSha512": "719b95e3a53e07ef309fe2f6deb672e518b78e2e7af84e2620332bcdf4159e15d4b08fd03d9e802eb75d0b0270112b1faffbf01390a9043f3a1f25d174395da5",
+      "extract": false,
+      "license": "BSD-3-Clause",
+      "redistributionStatus": "corresponding-source-reference"
+    }
+  ],
+  "toolchain": {
+    "msys2Environment": "UCRT64",
+    "packages": [
+      "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+      "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+      "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+      "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+      "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+      "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+      "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+      "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+      "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+      "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+      "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+      "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+    ],
+    "packageMetadataBaseUrl": "https://packages.msys2.org/package/"
+  },
+  "buildScripts": [
+    "scripts/check-libmpv-runtime-toolchain.ps1",
+    "scripts/setup-libmpv-sources.ps1",
+    "scripts/build-libmpv-runtime.ps1",
+    "scripts/build-libmpv-runtime.sh"
+  ],
+  "buildPathPolicy": "A temporary S: subst mapping removes workspace whitespace from native build paths and is deleted on exit.",
+  "buildConfigurationId": "seeing-stone-libmpv-0.41.0-ffmpeg-8.1.2-v2",
+  "buildConfiguration": {
+    "ffmpeg": [
+      "--arch=x86_64",
+      "--target-os=mingw32",
+      "--enable-shared",
+      "--disable-static",
+      "--disable-programs",
+      "--disable-doc",
+      "--disable-debug",
+      "--disable-autodetect",
+      "--enable-network",
+      "--enable-schannel",
+      "--enable-zlib",
+      "--enable-d3d11va",
+      "--enable-dxva2",
+      "--enable-hwaccels",
+      "--extra-cflags=-O2",
+      "--extra-ldflags=-Wl,--dynamicbase,--nxcompat"
+    ],
+    "mpv": [
+      "--buildtype=release",
+      "--default-library=shared",
+      "-Db_lto=true",
+      "-Db_ndebug=true",
+      "-Dbuild-date=false",
+      "-Dtests=true",
+      "-Dlibmpv=true",
+      "-Dcplayer=true",
+      "-Djavascript=disabled",
+      "-Dlua=disabled",
+      "-Dlibavdevice=enabled",
+      "-Dplain-gl=enabled",
+      "-Dgl=enabled",
+      "-Dgl-win32=enabled",
+      "-Degl=disabled",
+      "-Degl-angle=enabled",
+      "-Degl-angle-lib=disabled",
+      "-Degl-angle-win32=disabled",
+      "-Dd3d11=enabled",
+      "-Dd3d-hwaccel=enabled",
+      "-Dd3d9-hwaccel=enabled",
+      "-Dvulkan=disabled",
+      "-Dc_args=-O2"
+    ]
+  },
+  "patches": [],
+  "correspondingSource": ".runtime/libmpv-build/archives until the public-release source archive is produced",
+  "applicationRelease": "0.4.3"
+}

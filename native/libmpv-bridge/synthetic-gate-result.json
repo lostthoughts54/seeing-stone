@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "gate": "synthetic-electron-shared-texture",
+  "result": "passed",
+  "date": "2026-07-21",
+  "platform": "win32-x64",
+  "toolchain": {
+    "visualStudio": "18.8.0 Community",
+    "windowsSdk": "10.0.28000.0",
+    "node": "22.23.1",
+    "electron": "43.1.0",
+    "nodeAddonApi": "8.5.0",
+    "python": "3.12.x"
+  },
+  "nativeArtifact": {
+    "filename": "seeing_stone_libmpv_bridge.node",
+    "sha256": "1a36cb67bbb2cb51a694531d27cb1f9fa66d11e07cd9085317b260af27192968",
+    "bytes": 272896,
+    "distributionStatus": "development-gate-only-not-bundled"
+  },
+  "producer": {
+    "api": "D3D11",
+    "format": "DXGI_FORMAT_B8G8R8A8_UNORM",
+    "sharing": ["D3D11_RESOURCE_MISC_SHARED", "D3D11_RESOURCE_MISC_SHARED_NTHANDLE"],
+    "synchronization": "bounded D3D11_QUERY_EVENT completion wait before transfer",
+    "poolSize": 3,
+    "reuseCondition": "Electron allReferencesReleased callback"
+  },
+  "presenterEvaluation": {
+    "mediaStreamTrackGenerator": {
+      "result": "rejected",
+      "reason": "first writer.write remained pending and abort did not release the imported reference reliably"
+    },
+    "imageBitmapRenderingContext": {
+      "result": "selected",
+      "copyBehavior": "VideoFrame to ImageBitmap GPU/compositor transfer; no pixel mapping, getImageData, bitmap IPC, or native readback",
+      "backpressure": "bounded by the three-texture producer pool"
+    }
+  },
+  "acceptance": [
+    {
+      "forcedDeviceScaleFactor": null,
+      "presentedFrames": 150,
+      "releasedFrames": 150,
+      "maxOutstandingFrames": 3,
+      "outstandingAtShutdown": 0,
+      "quarantinedPools": 0
+    },
+    {
+      "forcedDeviceScaleFactor": 1.5,
+      "presentedFrames": 150,
+      "releasedFrames": 150,
+      "droppedFrames": 29,
+      "maxOutstandingFrames": 3,
+      "maxPresentationMilliseconds": 3.81,
+      "outstandingAtShutdown": 0,
+      "quarantinedPools": 0
+    }
+  ],
+  "behaviorsPassed": [
+    "advancing GPU-generated frames",
+    "existing player viewport geometry",
+    "window resize",
+    "fullscreen enter and exit",
+    "100% and forced 150% DPI",
+    "production suspended while minimized and resumed after restore",
+    "renderer reload with surface-generation rejection",
+    "bounded queue and pool",
+    "deterministic shutdown",
+    "no continuous CPU readback",
+    "no per-frame bitmap IPC"
+  ]
+}

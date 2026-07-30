@@ -138,6 +138,34 @@ describe("PlaybackSessionService", () => {
     expect(getMediaSourceCapabilities).toHaveBeenCalledOnce();
   });
 
+  it("keeps the private live stream identifier main-only and closes it exactly once", async () => {
+    const closeLiveStream = vi.fn(async () => undefined);
+    const channel: MediaItem = { ...item, id: "channel-1", name: "News", type: "TvChannel", runTimeTicks: 0, playable: true };
+    const service = new PlaybackSessionService({
+      getDetails: vi.fn(async () => channel),
+      getMediaSourceCapabilities: vi.fn(),
+      getPlaybackSourceInfo: vi.fn(async () => ({
+        capabilities: {
+          itemId: channel.id,
+          sources: [{ id: "source-live", container: "ts", size: null, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }],
+        },
+        playSessionId: "play-session-live",
+        liveStreamId: "private-live-stream-1",
+      })),
+      fetchStaticStream: vi.fn(async () => new Response("video")),
+      fetchTranscodedStream: vi.fn(async () => new Response("video")),
+      fetchExternalSubtitle: vi.fn(async () => new Response("subtitle")),
+      closeLiveStream,
+    });
+    const started = await service.start(channel.id, "start-over");
+    expect(started.liveStreamId).toBe("private-live-stream-1");
+    expect(service.getState().contentKind).toBe("live-tv");
+    service.stop(started.playbackId);
+    await Promise.resolve();
+    expect(closeLiveStream).toHaveBeenCalledOnce();
+    expect(closeLiveStream).toHaveBeenCalledWith("private-live-stream-1");
+  });
+
   it("keeps the authenticated source main-only and resolves an opaque internal stream", async () => {
     const fetchStaticStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const fetchTranscodedStream = vi.fn();

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "artifact": "assets/fixtures/libmpv-h264-gate.mp4",
+  "sha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6",
+  "bytes": 16508,
+  "content": "Seeing Stone-generated moving bar and frame counter; no third-party visual or audio material",
+  "codec": "H.264 / AVC, yuv420p, 160x90, 2 seconds",
+  "container": "MP4",
+  "generator": "scripts/generate-libmpv-h264-fixture.cjs",
+  "generatorSha256": "e855864d24f3ec79e6b764bf8c26ddf5d93aad221d44f86a85ca4062d63367e5",
+  "toolchain": {
+    "electron": "43.1.0",
+    "chromium": "150.0.7871.47",
+    "electronFfmpegDllSha256": "8b7cbc841fd42443cfa4011badb5cf6b9fb41a7a2c277ccbf8e0c321ae44af37",
+    "mediaRecorderMimeType": "video/mp4;codecs=avc1.42001E"
+  },
+  "license": "GPL-2.0-or-later",
+  "redistributionStatus": "source-and-binary",
+  "applicationRelease": "0.4.3",
+  "reproducibility": "The checked-in generator recreates a functionally equivalent fixture; MP4 metadata and encoder output are not required to be bit-identical."
+}

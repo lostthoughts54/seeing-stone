@@ -140,8 +140,9 @@ describe("renderer and preload security boundary", () => {
     expect(host).toContain("readBigUInt64LE(0)");
     expect(host).toContain("GWLP_HWNDPARENT");
     expect(host).toContain("WS_EX_TRANSPARENT");
-    expect(main).toContain('process.env.SEEING_STONE_PLAYER === "embedded"');
-    expect(main).toContain("!app.isPackaged");
+    expect(main).toContain("requestedPlayerAdapterMode(process.env.SEEING_STONE_PLAYER");
+    expect(main).toContain('initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute()');
+    expect(main).toContain("new LibMpvAdapter(");
     expect(input).toContain("Ctrl+r script-message jellyfin-resync");
   });
 

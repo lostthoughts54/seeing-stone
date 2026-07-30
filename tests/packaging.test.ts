@@ -39,7 +39,7 @@ describe("Windows release packaging boundary", () => {
 
     expect(main).toContain("await resolveVerifiedPersistenceWorkerPath(process.resourcesPath, __dirname)");
     expect(main).toContain('app.isPackaged ? "legacy" : "embedded"');
-    expect(main).toContain('const embeddedRequested = !app.isPackaged && requestedMode === "embedded"');
+    expect(main).toContain('initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute()');
     expect(persistence).toContain("new Worker(this.workerPath");
     expect(workerIntegrity).toContain('"persistence-worker-integrity.json"');
     expect(workerIntegrity).toContain('createHash("sha256")');
@@ -58,6 +58,53 @@ describe("Windows release packaging boundary", () => {
     ]) {
       expect(hook).toContain(`FuseV1Options.${fuse}`);
     }
+  });
+
+  it("keeps libmpv out of stable packaging until its separate public-release gate passes", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const config = await readFile("electron-builder.yml", "utf8");
+    const releaseGate = await readFile("scripts/validate-libmpv-release.mjs", "utf8");
+
+    expect(config).not.toContain(".runtime/libmpv");
+    expect(packageJson.scripts["validate:libmpv-release"]).toBe("node scripts/validate-libmpv-release.mjs");
+    expect(releaseGate).toContain("LIBMPV_PUBLIC_RELEASE_NO_GO");
+    expect(releaseGate).toContain("dependency-provenance.json");
+    expect(releaseGate).toContain("public-release-acceptance.json");
+    expect(releaseGate).toContain("release-sources/libmpv");
+  });
+
+  it("keeps synthetic Live TV channels out of every installer", async () => {
+    const stableConfig = await readFile("electron-builder.yml", "utf8");
+    const internalConfig = await readFile("electron-builder.libmpv-test.yml", "utf8");
+    const provenanceGate = await readFile("scripts/validate-package-provenance.mjs", "utf8");
+
+    expect(stableConfig).not.toContain("assets/fixtures/live-tv");
+    expect(internalConfig).not.toContain("assets/fixtures/live-tv");
+    expect(provenanceGate).toContain('"assets/fixtures/live-tv/"');
+  });
+
+  it("provides a separate self-contained internal libmpv acceptance package", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const config = await readFile("electron-builder.libmpv-test.yml", "utf8");
+    const acceptance = await readFile("scripts/libmpv-package-acceptance.cjs", "utf8");
+
+    expect(packageJson.scripts["package:windows:libmpv-test"]).toContain("stage:libmpv-runtime");
+    expect(packageJson.scripts["package:windows:libmpv-test"]).toContain("validate:libmpv-test-package");
+    expect(packageJson.scripts["package:windows:libmpv-test"]).not.toContain("build:libmpv-native");
+    expect(config).toContain("app.seeingstone.client.libmpv-test");
+    expect(config).toContain("Seeing Stone Libmpv Test");
+    expect(config).toContain("from: .runtime/libmpv");
+    expect(config).toContain('      - "*.dll"');
+    expect(config).toContain('      - "*.node"');
+    expect(acceptance).toContain("player-engine-status.json");
+    expect(acceptance).toContain("--resources=");
+    expect(acceptance).toContain('assert.equal(diagnostics.active, "libmpv")');
+    expect(acceptance).toContain("libmpv-test-acceptance.json");
+    expect(acceptance).toContain(".sha256.txt");
   });
 
   it("recreates verified mpv inputs only inside the workspace", async () => {

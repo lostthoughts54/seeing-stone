@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "status": "built-not-render-approved",
+  "target": "x86_64-pc-windows-gnu-ucrt",
+  "sourceLockSha256": "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f",
+  "libraryFilename": "libmpv-2.dll",
+  "clientApiVersion": "2.5",
+  "requiredSymbols": [
+    "mpv_client_api_version",
+    "mpv_create",
+    "mpv_initialize",
+    "mpv_terminate_destroy",
+    "mpv_command",
+    "mpv_get_property",
+    "mpv_free_node_contents",
+    "mpv_render_context_create",
+    "mpv_render_context_render",
+    "mpv_render_context_free",
+    "mpv_render_context_update",
+    "mpv_render_context_set_update_callback"
+  ],
+  "renderBackends": [
+    "opengl"
+  ],
+  "tests": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0
+  },
+  "artifacts": [
+    {
+      "filename": "avcodec-62.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "bdc0abb8de26982f61f678748b3d00a3eaa0ce79c509c680f78bb2236431f25b",
+      "bytes": 18744832,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "avdevice-62.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "374f4f34884bc51896f123ba5ffba6567f3f95e9de28c4157442a0536659eaa5",
+      "bytes": 153088,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "avfilter-11.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "0ae13588a723df2a9322d22ec1090bcdf2c5dacff723ffabede0a928942eb218",
+      "bytes": 5775872,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "avformat-62.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "ac1c3c5c5d94bee86f924b81aa86956197b8cbb9656662983c59136165e09ddf",
+      "bytes": 2834944,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "avutil-60.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "c31af31be6d9d513db5f4858e00863a41772b02c6a9a1ba835e89541447371a6",
+      "bytes": 1071104,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "libass-9.dll",
+      "role": "runtime-companion",
+      "sha256": "cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b",
+      "bytes": 345174,
+      "owner": "mingw-w64-ucrt-x86_64-libass 0.17.5-1"
+    },
+    {
+      "filename": "libbrotlicommon.dll",
+      "role": "runtime-companion",
+      "sha256": "c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c",
+      "bytes": 144565,
+      "owner": "mingw-w64-ucrt-x86_64-brotli 1.2.0-1"
+    },
+    {
+      "filename": "libbrotlidec.dll",
+      "role": "runtime-companion",
+      "sha256": "e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896",
+      "bytes": 62619,
+      "owner": "mingw-w64-ucrt-x86_64-brotli 1.2.0-1"
+    },
+    {
+      "filename": "libbz2-1.dll",
+      "role": "runtime-companion",
+      "sha256": "669a4bf9266d5f020e843aa5fd75b93ce8ebde27014d5ac466a8b3cf39d8aba7",
+      "bytes": 78774,
+      "owner": "mingw-w64-ucrt-x86_64-bzip2 1.0.8-3"
+    },
+    {
+      "filename": "libdovi.dll",
+      "role": "runtime-companion",
+      "sha256": "75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb",
+      "bytes": 1370861,
+      "owner": "mingw-w64-ucrt-x86_64-libdovi 3.4.0-1"
+    },
+    {
+      "filename": "libexpat-1.dll",
+      "role": "runtime-companion",
+      "sha256": "f13a04c298b0290e722f2c1936ea076de769f8f32fa235bb17c02984e6e45fc1",
+      "bytes": 237300,
+      "owner": "mingw-w64-ucrt-x86_64-expat 2.8.2-1"
+    },
+    {
+      "filename": "libfontconfig-1.dll",
+      "role": "runtime-companion",
+      "sha256": "292fe24f957d961d6d9ac11dc79cfc0922f2925b1107e5d37a0ab17bea2adee5",
+      "bytes": 500237,
+      "owner": "mingw-w64-ucrt-x86_64-fontconfig 2.18.2-1"
+    },
+    {
+      "filename": "libfreetype-6.dll",
+      "role": "runtime-companion",
+      "sha256": "a3271784f8366b3c6412e0c35474884fa12899c392bacb08bc8eac00f4be7e64",
+      "bytes": 791593,
+      "owner": "mingw-w64-ucrt-x86_64-freetype 2.14.3-1"
+    },
+    {
+      "filename": "libfribidi-0.dll",
+      "role": "runtime-companion",
+      "sha256": "73a712fd51fa0085e8660084743a821ae7388de138069cd6cd8c171d4487da84",
+      "bytes": 155504,
+      "owner": "mingw-w64-ucrt-x86_64-fribidi 1.0.16-1"
+    },
+    {
+      "filename": "libgcc_s_seh-1.dll",
+      "role": "runtime-companion",
+      "sha256": "ff139cfe956709283f7b70a06af8bc8bb9d1c3bef60ec1bc8d363c91351cfeb2",
+      "bytes": 153412,
+      "owner": "mingw-w64-ucrt-x86_64-gcc-libs 16.1.0-5"
+    },
+    {
+      "filename": "libglib-2.0-0.dll",
+      "role": "runtime-companion",
+      "sha256": "f606ad14f15d822a21a2e15f9f22a37318a269afab5d4c6020677acfae720b7f",
+      "bytes": 1564508,
+      "owner": "mingw-w64-ucrt-x86_64-glib2 2.88.2-1"
+    },
+    {
+      "filename": "libgraphite2.dll",
+      "role": "runtime-companion",
+      "sha256": "93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18",
+      "bytes": 167857,
+      "owner": "mingw-w64-ucrt-x86_64-graphite2 1.3.15-1"
+    },
+    {
+      "filename": "libharfbuzz-0.dll",
+      "role": "runtime-companion",
+      "sha256": "2e1523eddd3a7c5be5fb8ad9a8e8eee819664356752d18c56f7c8f5896126ddb",
+      "bytes": 1540489,
+      "owner": "mingw-w64-ucrt-x86_64-harfbuzz 14.2.1-1"
+    },
+    {
+      "filename": "libiconv-2.dll",
+      "role": "runtime-companion",
+      "sha256": "94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a",
+      "bytes": 1141951,
+      "owner": "mingw-w64-ucrt-x86_64-libiconv 1.19-1"
+    },
+    {
+      "filename": "libintl-8.dll",
+      "role": "runtime-companion",
+      "sha256": "0e5a178731e6be6d115442a6ade3df7f03265cd1fc4338f8b6f86a8001cbf582",
+      "bytes": 298164,
+      "owner": "mingw-w64-ucrt-x86_64-gettext-runtime 1.0-1"
+    },
+    {
+      "filename": "liblcms2-2.dll",
+      "role": "runtime-companion",
+      "sha256": "03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65",
+      "bytes": 448202,
+      "owner": "mingw-w64-ucrt-x86_64-lcms2 2.19.1-1"
+    },
+    {
+      "filename": "libmpv-2.dll",
+      "role": "library",
+      "sha256": "54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
+      "bytes": 2807509,
+      "owner": "mpv 0.41.0"
+    },
+    {
+      "filename": "libpcre2-8-0.dll",
+      "role": "runtime-companion",
+      "sha256": "52ccc7e4ec5ad0aecf307c0328826340f5d504aa59f7c4143b9a1b9fff16ccda",
+      "bytes": 718625,
+      "owner": "mingw-w64-ucrt-x86_64-pcre2 10.47-1"
+    },
+    {
+      "filename": "libplacebo-360.dll",
+      "role": "runtime-companion",
+      "sha256": "8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8",
+      "bytes": 1235613,
+      "owner": "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2"
+    },
+    {
+      "filename": "libpng16-16.dll",
+      "role": "runtime-companion",
+      "sha256": "5c1dd5410af563f4a3c4aee10d1f749aa71e0d7fb3b4fac240eb9e96cadebd26",
+      "bytes": 258972,
+      "owner": "mingw-w64-ucrt-x86_64-libpng 1.6.58-1"
+    },
+    {
+      "filename": "libshaderc_shared.dll",
+      "role": "runtime-companion",
+      "sha256": "887d422382f18be097c447ed3922db04397d50ddf7e34f3cc18d2e2abde740b0",
+      "bytes": 10440625,
+      "owner": "mingw-w64-ucrt-x86_64-shaderc 2026.2-1"
+    },
+    {
+      "filename": "libspirv-cross-c-shared.dll",
+      "role": "runtime-companion",
+      "sha256": "99cb3de4832bbafe8a353e55dfe399e038ec9e3f6eed3e4723ab9796f824bf1f",
+      "bytes": 3393880,
+      "owner": "mingw-w64-ucrt-x86_64-spirv-cross 1~1.4.350.1-1"
+    },
+    {
+      "filename": "libstdc++-6.dll",
+      "role": "runtime-companion",
+      "sha256": "d9a58184f6bb27936ef03c3a3286950e4aa61c66a9f74dfa94a532b1433b368d",
+      "bytes": 2667044,
+      "owner": "mingw-w64-ucrt-x86_64-gcc-libs 16.1.0-5"
+    },
+    {
+      "filename": "libunibreak-7.dll",
+      "role": "runtime-companion",
+      "sha256": "f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283",
+      "bytes": 141442,
+      "owner": "mingw-w64-ucrt-x86_64-libunibreak 7.0-1"
+    },
+    {
+      "filename": "libwinpthread-1.dll",
+      "role": "runtime-companion",
+      "sha256": "c7844629395e7813508fc9bb58c068ca9240a04d6d8529db0a75b6efc53590e7",
+      "bytes": 64703,
+      "owner": "mingw-w64-ucrt-x86_64-libwinpthread 14.0.0.r190.g96fb1bff7-1"
+    },
+    {
+      "filename": "mpv.com",
+      "role": "console-launcher",
+      "sha256": "62aad672063580cf4ef9da668be4d0f7204774be4e6ee309595129541849c66c",
+      "bytes": 15965,
+      "owner": "mpv 0.41.0"
+    },
+    {
+      "filename": "mpv.exe",
+      "role": "player",
+      "sha256": "3b9ebe4afde274a5551b51e0eeb3d77e10bcfcbf08b9e8723f7ac9f7be855930",
+      "bytes": 2847963,
+      "owner": "mpv 0.41.0"
+    },
+    {
+      "filename": "seeing_stone_libmpv_bridge.node",
+      "role": "native-addon",
+      "sha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
+      "bytes": 337408,
+      "owner": "Seeing Stone 0.4.3"
+    },
+    {
+      "filename": "swresample-6.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
+      "bytes": 178176,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "swscale-9.dll",
+      "role": "ffmpeg-companion",
+      "sha256": "8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96",
+      "bytes": 2012672,
+      "owner": "FFmpeg 8.1.2"
+    },
+    {
+      "filename": "vulkan-1.dll",
+      "role": "runtime-companion",
+      "sha256": "ff17ce3db007aed762838de913e0a52a4bbce6eb43cc8a5e706650a5ad3d949f",
+      "bytes": 687964,
+      "owner": "mingw-w64-ucrt-x86_64-vulkan-loader 1~1.4.350.1-1"
+    },
+    {
+      "filename": "zlib1.dll",
+      "role": "runtime-companion",
+      "sha256": "11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d",
+      "bytes": 127291,
+      "owner": "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+    }
+  ]
+}

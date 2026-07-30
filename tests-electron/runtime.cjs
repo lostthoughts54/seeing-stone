@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 21;
+const EXPECTED_TESTS = 24;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -33,7 +33,12 @@ function runNodeParent() {
 
   let result;
   try {
-    result = spawnSync(electronExecutable, [__filename, CHILD_FLAG], {
+    result = spawnSync(electronExecutable, [
+      "--disable-error-dialogs",
+      "--disable-gpu",
+      __filename,
+      CHILD_FLAG,
+    ], {
       cwd: resolve(__dirname, ".."),
       env,
       stdio: "inherit",
@@ -234,8 +239,10 @@ async function runElectronChild() {
       },
       async restore() { return safeSession; },
       getSafeSession() { return safeSession; },
-      async getLibraries() { return []; },
-      async getLibraryItems(type) {
+      async getLibraries() {
+        return [{ id: "runtime-library", name: "Runtime library", collectionType: "movies" }];
+      },
+      async getLibraryItems(_libraryId, type) {
         return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
       },
       async search() { return [runtimeOtherMovie]; },
@@ -244,7 +251,7 @@ async function runElectronChild() {
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
         if (homeUnavailable) throw new AppError("SERVER_UNAVAILABLE", "Jellyfin is unavailable.", 503);
         return {
-          libraries: [],
+          libraries: [{ id: "runtime-library", name: "Runtime library", collectionType: "movies" }],
           resumeItems: [],
           nextUpItems: [],
           latestRows: [{
@@ -512,18 +519,22 @@ async function runElectronChild() {
     });
 
     mainWindow = security.createWindow({ showWhenReady: false, devTools: false });
+    const updatePlaybackState = (patch) => {
+      playback.state = { ...playback.getState(), ...patch };
+      return playback.getState();
+    };
     const playerController = {
       loadItem: (itemId, resumeMode) => playback.start(itemId, resumeMode),
       getState: () => playback.getState(),
       stop: (playbackId) => playback.stop(playbackId),
       clear: () => playback.clear(),
-      setPaused: async () => { throw new Error("not used"); },
+      setPaused: async (_playbackId, paused) => updatePlaybackState({ paused, phase: paused ? "paused" : "playing" }),
       seek: async () => { throw new Error("not used"); },
       setPlaybackRate: async () => { throw new Error("not used"); },
       setVolume: async () => { throw new Error("not used"); },
       selectAudio: async () => { throw new Error("not used"); },
       selectSubtitle: async () => { throw new Error("not used"); },
-      setFullscreen: async () => { throw new Error("not used"); },
+      setFullscreen: async (_playbackId, fullscreen) => updatePlaybackState({ fullscreen }),
     };
     let watchPartyState = {
       availability: "available",
@@ -586,13 +597,36 @@ async function runElectronChild() {
     const soloSessionDiagnostics = {
       async getSnapshot() {
         const current = playback.getState();
+        const item = current.itemId === runtimeItem.id
+          ? runtimeItem
+          : current.itemId === runtimeEpisode.id
+            ? runtimeEpisode
+            : current.itemId === runtimeEpisodeTwo.id ? runtimeEpisodeTwo : null;
         return {
           playback: current,
           connection: { state: "connected", serverName: "Runtime server", serverVersion: "10.11.11", requestLatencyMs: null, measuredAt: null },
-          item: current.itemId === runtimeItem.id ? runtimeItem : null,
+          item,
           nextUp: null,
         };
       },
+    };
+    const playerPreferences = {
+      async get() { return { adapterMode: "libmpv" }; },
+      async setAdapterMode() {},
+    };
+    const playerAdapterStatus = {
+      selected: "libmpv",
+      launchSelection: "libmpv",
+      active: "libmpv",
+      embeddedAvailable: true,
+      libmpvAvailable: true,
+      fallbackActive: false,
+      fallbackFrom: null,
+      fallbackReason: null,
+    };
+    const viewportUpdates = [];
+    const videoHost = {
+      updateViewport(viewport) { viewportUpdates.push(structuredClone(viewport)); },
     };
     const openSourceLicenses = {
       list() {
@@ -607,6 +641,28 @@ async function runElectronChild() {
         };
       },
     };
+    const cleanMachineDiagnostics = {
+      async getSnapshot() {
+        return {
+          schemaVersion: 1,
+          generatedAtUtc: "2026-07-28T04:00:00.000Z",
+          overall: "ready",
+          applicationVersion: "0.4.3",
+          build: "internal-libmpv-test",
+          platform: "windows",
+          architecture: "x64",
+          electronVersion: "43.1.0",
+          selectedEngine: "libmpv",
+          activeEngine: "libmpv",
+          fallbackReason: null,
+          checks: [
+            { id: "runtime-integrity", label: "Runtime files and hashes", status: "pass", detail: "All controlled files passed." },
+          ],
+        };
+      },
+      async copyReport() { return { completed: true }; },
+      async saveReport() { return { completed: false }; },
+    };
     registerIpcHandlers(
       ipcMain,
       mainWindow,
@@ -617,10 +673,12 @@ async function runElectronChild() {
       synchronization,
       syncPlay,
       downloadLocation,
-      undefined,
-      undefined,
+      videoHost,
+      playerPreferences,
+      playerAdapterStatus,
       soloSessionDiagnostics,
       openSourceLicenses,
+      cleanMachineDiagnostics,
     );
     let rendererExit = null;
     let failedLoad = null;
@@ -719,6 +777,7 @@ async function runElectronChild() {
       })()`);
 
       const expectedNestedKeys = {
+        application: ["close"],
         server: ["connect", "discover"],
         session: ["getState", "login", "logout", "restore"],
         home: ["get"],
@@ -728,10 +787,12 @@ async function runElectronChild() {
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         mediaSources: ["getCapabilities"],
+        liveTv: ["cancelSchedule", "createRecording", "deleteRecording", "getGuide", "getRecordings", "getSeriesTimers", "getStatus", "getTimers", "updateSchedule"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "listOfflinePlayable", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
-        playback: ["getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "stop", "subscribe"],
+        playback: ["cancelNextEpisode", "continueNextEpisode", "getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "startLive", "stop", "subscribe"],
         sessionPanel: ["getSolo", "subscribeSolo"],
         licenses: ["list"],
+        diagnostics: ["copyCleanMachine", "getCleanMachine", "saveCleanMachine"],
         watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setVisible", "subscribe", "wait"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
@@ -774,6 +835,33 @@ async function runElectronChild() {
       assert.equal(result.visible, true);
       assert.equal(result.title, "Open Source Licenses");
       assert.deepEqual(result.entries, ["Seeing Stone", "Inter"]);
+      assert.equal(result.containsSensitiveText, false);
+    });
+
+    await test("renderer runs and copies sanitized clean-machine diagnostics", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("profileButton").click();
+        document.getElementById("cleanMachineDiagnosticsButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelectorAll(".clean-machine-diagnostic-check").length === 1) break;
+          await delay(20);
+        }
+        document.getElementById("copyCleanMachineDiagnosticsButton").click();
+        await delay(20);
+        const panel = document.getElementById("cleanMachineDiagnosticsPanel");
+        const value = {
+          visible: !panel.classList.contains("is-hidden"),
+          summary: document.getElementById("cleanMachineDiagnosticsSummary").textContent,
+          checks: [...document.querySelectorAll(".clean-machine-diagnostic-check strong")].map((entry) => entry.textContent),
+          containsSensitiveText: /(?:access.?token|authorization|api[_-]?key|file:\\/|runtime-server\\.invalid)/i.test(panel.textContent),
+        };
+        document.getElementById("closeCleanMachineDiagnosticsButton").click();
+        return value;
+      })()`);
+      assert.equal(result.visible, true);
+      assert.match(result.summary, /Ready/);
+      assert.deepEqual(result.checks, ["Runtime files and hashes"]);
       assert.equal(result.containsSensitiveText, false);
     });
 
@@ -1107,7 +1195,7 @@ async function runElectronChild() {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         const titles = () => [...document.querySelectorAll("#libraryGrid .media-card strong")]
           .map((entry) => entry.textContent.trim());
-        document.getElementById("navMoviesButton").click();
+        document.querySelector('[data-library-id="runtime-library"]')?.click();
         for (let attempt = 0; attempt < 100; attempt += 1) {
           if (document.querySelectorAll("#libraryGrid .media-card").length === 3) break;
           await delay(20);
@@ -1195,9 +1283,10 @@ async function runElectronChild() {
         const play = buttons.find((button) => button.textContent === "Play");
         play?.click();
         let livePlayback = null;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
+        for (let attempt = 0; attempt < 150; attempt += 1) {
           livePlayback = await window.jellyfin.playback.getState();
-          if (livePlayback.itemId === "runtime-offline-episode-id") break;
+          if (livePlayback.itemId === "runtime-offline-episode-id"
+            && document.getElementById("playerSourceBadge").textContent === "Direct Play") break;
           await delay(20);
         }
         return {
@@ -1219,6 +1308,128 @@ async function runElectronChild() {
       assert.equal(playbackState.itemId, downloadedItem.itemId);
       assert.equal(playbackState.source, "server");
       playback.stop(playbackState.playbackId);
+    });
+
+    await test("libmpv episode browser changes seasons and starts the selected episode", async () => {
+      const seasonRequestsBefore = seasonRequests.length;
+      const episodeRequestsBefore = episodeRequests.length;
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('#homeRows [data-quick-play-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          const state = await window.jellyfin.playback.getState();
+          const button = document.getElementById("playerEpisodeBrowserButton");
+          if (state.itemId === "runtime-episode-id" && button && !button.classList.contains("is-hidden") && !button.disabled) break;
+          await delay(20);
+        }
+
+        const browserButton = document.getElementById("playerEpisodeBrowserButton");
+        const playerCenter = document.getElementById("playerCenter");
+        const scrollBeforeOpen = { left: playerCenter.scrollLeft, top: playerCenter.scrollTop };
+        browserButton?.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (document.querySelectorAll("#playerEpisodeList .player-episode-entry").length === 2) break;
+          await delay(20);
+        }
+        const entries = [...document.querySelectorAll("#playerEpisodeList .player-episode-entry")];
+        const current = entries.find((entry) => entry.getAttribute("aria-current") === "true");
+        const next = entries.find((entry) => entry.textContent.includes("Runtime episode two"));
+        const scrollAfterOpen = { left: playerCenter.scrollLeft, top: playerCenter.scrollTop };
+        next?.click();
+        let livePlayback = null;
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          livePlayback = await window.jellyfin.playback.getState();
+          if (livePlayback.itemId === "runtime-episode-two-id") break;
+          await delay(20);
+        }
+        const selectedItemId = livePlayback?.itemId ?? null;
+        document.getElementById("closePlayerButton").click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          livePlayback = await window.jellyfin.playback.getState();
+          if (livePlayback.playbackId === null) break;
+          await delay(20);
+        }
+        return {
+          activeAdapter: document.getElementById("playerView").dataset.activeAdapter,
+          browserButtonVisible: Boolean(browserButton) && !browserButton.classList.contains("is-hidden"),
+          seasonOptions: [...document.getElementById("playerEpisodeSeasonSelect").options].map((option) => option.textContent),
+          entryCount: entries.length,
+          currentText: current?.textContent ?? null,
+          nextDisabled: next?.disabled ?? null,
+          browserClosed: document.getElementById("playerEpisodeBrowser").classList.contains("is-hidden"),
+          scrollBeforeOpen,
+          scrollAfterOpen,
+          selectedItemId,
+          playerClosed: document.getElementById("playerView").classList.contains("is-hidden"),
+          playbackId: livePlayback?.playbackId ?? null,
+        };
+      })()`);
+
+      assert.equal(result.activeAdapter, "libmpv");
+      assert.equal(result.browserButtonVisible, true);
+      assert.deepEqual(result.seasonOptions, ["Season 1", "Season 2"]);
+      assert.equal(result.entryCount, 2);
+      assert.match(result.currentText, /Runtime episode.*Now playing/);
+      assert.equal(result.nextDisabled, false);
+      assert.equal(result.browserClosed, true);
+      assert.deepEqual(result.scrollAfterOpen, result.scrollBeforeOpen);
+      assert.equal(result.selectedItemId, runtimeEpisodeTwo.id);
+      assert.equal(result.playerClosed, true);
+      assert.equal(result.playbackId, null);
+      assert.deepEqual(seasonRequests.slice(seasonRequestsBefore), [runtimeSeries.id]);
+      assert.deepEqual(episodeRequests.slice(episodeRequestsBefore), [{ seriesId: runtimeSeries.id, seasonId: runtimeSeasonTwo.id }]);
+      assert.equal(viewportUpdates.at(-1)?.visible, false);
+    });
+
+    await test("fullscreen video click toggles pause while double-click only exits fullscreen", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('#homeRows [data-quick-play-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if ((await window.jellyfin.playback.getState()).itemId === "runtime-episode-id") break;
+          await delay(20);
+        }
+        document.getElementById("playerFullscreenButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const fullscreen = (await window.jellyfin.playback.getState()).fullscreen;
+          const rendererFullscreen = document.getElementById("playerView").dataset.fullscreen === "true";
+          if (fullscreen && rendererFullscreen) break;
+          await delay(20);
+        }
+
+        const viewport = document.getElementById("playerViewport");
+        viewport.click();
+        await delay(350);
+        const afterFirstClick = await window.jellyfin.playback.getState();
+        viewport.click();
+        await delay(350);
+        const afterSecondClick = await window.jellyfin.playback.getState();
+        viewport.click();
+        viewport.click();
+        viewport.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+        await delay(350);
+        const afterDoubleClick = await window.jellyfin.playback.getState();
+        document.getElementById("closePlayerButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if ((await window.jellyfin.playback.getState()).playbackId === null) break;
+          await delay(20);
+        }
+        return {
+          firstPaused: afterFirstClick.paused,
+          firstFullscreen: afterFirstClick.fullscreen,
+          secondPaused: afterSecondClick.paused,
+          secondFullscreen: afterSecondClick.fullscreen,
+          doublePaused: afterDoubleClick.paused,
+          doubleFullscreen: afterDoubleClick.fullscreen,
+        };
+      })()`);
+
+      assert.equal(result.firstPaused, true);
+      assert.equal(result.firstFullscreen, true);
+      assert.equal(result.secondPaused, false);
+      assert.equal(result.secondFullscreen, true);
+      assert.equal(result.doublePaused, false);
+      assert.equal(result.doubleFullscreen, false);
     });
 
     await test("rendered media cards use fixed cover geometry", async () => {

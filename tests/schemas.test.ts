@@ -5,6 +5,9 @@ import {
   downloadIdSchema,
   downloadStartSchema,
   loginSchema,
+  liveTvCreateRecordingSchema,
+  liveTvGuideSchema,
+  liveTvPlaybackSchema,
   playbackRateSchema,
   playbackStartSchema,
   playbackVolumeSchema,
@@ -38,6 +41,25 @@ describe("IPC input schemas", () => {
     expect(() => downloadStartSchema.strict().parse({ itemId: "item", url: "http://server/media", path: "D:\\Sensitive" })).toThrow();
     expect(() => watchedStateSchema.strict().parse({ itemId: "item", watched: true, positionTicks: 50 })).toThrow();
     expect(() => downloadIdSchema.strict().parse({ downloadId: "not-an-opaque-id" })).toThrow();
+  });
+
+  it("strictly bounds Live TV guide, playback, and recording mutations", () => {
+    const startUtc = "2026-07-29T12:00:00.000Z";
+    const endUtc = "2026-07-29T18:00:00.000Z";
+    expect(liveTvGuideSchema.parse({ startUtc, endUtc })).toEqual({ startUtc, endUtc });
+    expect(() => liveTvGuideSchema.parse({ startUtc, endUtc: "2026-07-31T18:00:00.000Z" })).toThrow();
+    expect(() => liveTvGuideSchema.parse({ startUtc: endUtc, endUtc: startUtc })).toThrow();
+    expect(() => liveTvPlaybackSchema.parse({ channelId: "../token" })).toThrow();
+    expect(() => liveTvCreateRecordingSchema.parse({
+      programId: "program-1",
+      series: true,
+      options: { prePaddingSeconds: 120, providerUrl: "https://secret.example/list.m3u" },
+    })).toThrow();
+    expect(liveTvCreateRecordingSchema.parse({
+      programId: "program-1",
+      series: false,
+      options: { prePaddingSeconds: 120, postPaddingSeconds: 300 },
+    }).options).toEqual({ prePaddingSeconds: 120, postPaddingSeconds: 300 });
   });
 });
 

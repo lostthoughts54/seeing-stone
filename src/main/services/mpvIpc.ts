@@ -11,7 +11,15 @@ export interface MpvMessage {
   error?: string;
 }
 
-export class MpvIpcClient {
+export interface MpvCommandClient {
+  connect(pipePath: string, timeoutMilliseconds?: number): Promise<void>;
+  onMessage(listener: (message: MpvMessage) => void): () => void;
+  command(command: unknown[]): Promise<unknown>;
+  observe(id: number, property: string): Promise<void>;
+  close(): void;
+}
+
+export class MpvIpcClient implements MpvCommandClient {
   private socket: Socket | null = null;
   private buffer = "";
   private requestId = 0;

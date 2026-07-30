@@ -7,6 +7,13 @@ import type {
   MediaItem,
   MediaSourceCapabilities,
   JellyfinConnectionDiagnostics,
+  LiveTvGuide,
+  LiveTvProgram,
+  LiveTvRecording,
+  LiveTvScheduleOptions,
+  LiveTvSeriesTimer,
+  LiveTvStatus,
+  LiveTvTimer,
   PublicServerInfo,
   SafeSession,
   ServerConnection,
@@ -31,6 +38,7 @@ const ITEM_FIELDS = [
   "IndexNumber",
   "ParentIndexNumber",
   "RunTimeTicks",
+  "DateCreated",
   "ProductionYear",
   "PremiereDate",
   "OfficialRating",
@@ -156,6 +164,8 @@ function mediaSourceCapabilities(itemId: string, value: unknown): MediaSourceCap
 export interface PlaybackSourceInfo {
   capabilities: MediaSourceCapabilities;
   playSessionId: string | null;
+  /** Main-process-only. Never include this value in a renderer contract. */
+  liveStreamId: string | null;
 }
 
 function externalSubtitleFormat(value: unknown): ExternalSubtitleFormat {
@@ -219,7 +229,7 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
   return {
     id: asString(item.Id),
     name: asString(item.Name, "Untitled"),
-    type: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].includes(type) ? type : "Video",
+    type: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video", "TvChannel", "Program"].includes(type) ? type : "Video",
     overview: asString(item.Overview),
     productionYear: nullableNumber(item.ProductionYear),
     premiereYear: premiereYear(item.PremiereDate),
@@ -250,7 +260,78 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
       const url = asString(asRecord(entry).Url);
       try { return ["http:", "https:"].includes(new URL(url).protocol); } catch { return false; }
     }),
-    playable: type === "Movie" || type === "Episode" || type === "Video",
+    playable: type === "Movie" || type === "Episode" || type === "Video" || type === "TvChannel",
+  };
+}
+
+function isoDate(value: unknown): string {
+  const parsed = Date.parse(asString(value));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date(0).toISOString();
+}
+
+function firstValidIsoDate(...values: unknown[]): string | null {
+  for (const value of values) {
+    const parsed = Date.parse(asString(value));
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return null;
+}
+
+function safeLiveTvText(value: unknown, fallback: string, maximum: number): string {
+  const text = asString(value).replace(/\0/g, "").trim().slice(0, maximum);
+  return text && !SENSITIVE_DIAGNOSTIC.test(text) ? text : fallback;
+}
+
+function sanitizeLiveTvProgram(value: unknown): LiveTvProgram {
+  const item = asRecord(value);
+  return {
+    id: safeOpaqueIdentifier(item.Id) ?? "",
+    channelId: safeOpaqueIdentifier(item.ChannelId) ?? "",
+    name: safeLiveTvText(item.Name, "Untitled", 1024),
+    overview: safeLiveTvText(item.Overview, "", 32_768),
+    startUtc: isoDate(item.StartDate),
+    endUtc: isoDate(item.EndDate),
+    episodeTitle: boundedNullableString(item.EpisodeTitle, 1024),
+    seasonNumber: nullableNumber(item.ParentIndexNumber),
+    episodeNumber: nullableNumber(item.IndexNumber),
+    isLive: item.IsLive === true,
+    isSeries: item.IsSeries === true || Boolean(item.SeriesId),
+    isMovie: item.IsMovie === true,
+    isNews: item.IsNews === true,
+    isKids: item.IsKids === true,
+    isSports: item.IsSports === true,
+    timerId: safeOpaqueIdentifier(item.TimerId),
+    seriesTimerId: safeOpaqueIdentifier(item.SeriesTimerId),
+  };
+}
+
+function sanitizeLiveTvTimer(value: unknown): LiveTvTimer {
+  const timer = asRecord(value);
+  return {
+    id: safeOpaqueIdentifier(timer.Id) ?? "",
+    programId: safeOpaqueIdentifier(timer.ProgramId),
+    channelId: safeOpaqueIdentifier(timer.ChannelId),
+    name: safeLiveTvText(timer.Name, "Scheduled recording", 1024),
+    startUtc: isoDate(timer.StartDate),
+    endUtc: isoDate(timer.EndDate),
+    status: safeDiagnosticPhrase(timer.Status, 64) ?? "New",
+    seriesTimerId: safeOpaqueIdentifier(timer.SeriesTimerId),
+  };
+}
+
+function sanitizeLiveTvSeriesTimer(value: unknown): LiveTvSeriesTimer {
+  const timer = asRecord(value);
+  return {
+    id: safeOpaqueIdentifier(timer.Id) ?? "",
+    programId: safeOpaqueIdentifier(timer.ProgramId),
+    name: safeLiveTvText(timer.Name, "Series recording", 1024),
+    recordNewOnly: timer.RecordNewOnly === true,
+    recordAnyChannel: timer.RecordAnyChannel === true,
+    recordAnyTime: timer.RecordAnyTime === true,
+    daysOfWeek: (Array.isArray(timer.Days) ? timer.Days : []).filter((day): day is string => typeof day === "string").slice(0, 7),
+    prePaddingSeconds: Math.max(0, asNumber(timer.PrePaddingSeconds)),
+    postPaddingSeconds: Math.max(0, asNumber(timer.PostPaddingSeconds)),
+    keepUpTo: nullableNumber(timer.KeepUpTo),
   };
 }
 
@@ -529,7 +610,8 @@ export class JellyfinApi {
   async getLibraries(): Promise<LibrarySummary[]> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Views`));
-    return this.items(result).map(sanitizeLibrary).filter((library) => library.id);
+    const libraries = this.items(result).map(sanitizeLibrary).filter((library) => library.id);
+    return [...new Map(libraries.map((library) => [library.id, library])).values()];
   }
 
   async getHome(): Promise<HomePayload> {
@@ -540,25 +622,38 @@ export class JellyfinApi {
       this.request("/Shows/NextUp", { UserId: session.userId, Limit: "20", Fields: ITEM_FIELDS }),
       ...libraries
         .filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows")
-        .map((library) => this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+        .map((library) => this.request("/Items/Latest", {
+          UserId: session.userId,
           ParentId: library.id,
-          SortBy: "DateCreated",
-          SortOrder: "Descending",
-          Recursive: "true",
-          IncludeItemTypes: library.collectionType === "movies" ? "Movie" : "Series",
+          GroupItems: "true",
           Fields: ITEM_FIELDS,
           Limit: "20",
         })),
     ]);
     const rowLibraries = libraries.filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows");
+    const latestRows = rowLibraries.map((library, index) => ({
+      library,
+      items: (Array.isArray(latestResults[index]) ? latestResults[index] : []).map(sanitizeMediaItem),
+    }));
+    const duplicateLibraryIds = new Set<string>();
+    const rowsByName = new Map<string, typeof latestRows[number]>();
+    for (const row of latestRows) {
+      const normalizedName = row.library.name.trim().toLocaleLowerCase();
+      const previous = rowsByName.get(normalizedName);
+      const itemIds = [...new Set(row.items.map((item) => item.id))].sort();
+      const previousItemIds = previous ? [...new Set(previous.items.map((item) => item.id))].sort() : [];
+      if (previous && itemIds.length > 0 && itemIds.length === previousItemIds.length
+        && itemIds.every((id, index) => id === previousItemIds[index])) {
+        duplicateLibraryIds.add(row.library.id);
+      } else if (!previous) {
+        rowsByName.set(normalizedName, row);
+      }
+    }
     return {
-      libraries,
+      libraries: libraries.filter((library) => !duplicateLibraryIds.has(library.id)),
       resumeItems: this.items(asRecord(resumeResult)).map(sanitizeMediaItem),
       nextUpItems: this.items(asRecord(nextUpResult)).map(sanitizeMediaItem),
-      latestRows: rowLibraries.map((library, index) => ({
-        library,
-        items: this.items(asRecord(latestResults[index])).map(sanitizeMediaItem),
-      })),
+      latestRows: latestRows.filter((row) => !duplicateLibraryIds.has(row.library.id)),
     };
   }
 
@@ -576,9 +671,10 @@ export class JellyfinApi {
     return item ?? null;
   }
 
-  async getLibraryItems(type: "Movie" | "Series", limit: number): Promise<MediaItem[]> {
+  async getLibraryItems(libraryId: string, type: "Movie" | "Series", limit: number): Promise<MediaItem[]> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+      ParentId: libraryId,
       Recursive: "true",
       IncludeItemTypes: type,
       SortBy: "SortName",
@@ -622,6 +718,137 @@ export class JellyfinApi {
     return this.items(result).map(sanitizeMediaItem);
   }
 
+  async getLiveTvStatus(): Promise<LiveTvStatus> {
+    try {
+      const session = this.requireSession();
+      const [info, channels] = await Promise.all([
+        this.request("/LiveTv/Info"),
+        this.request("/LiveTv/Channels", { UserId: session.userId, Limit: "1", EnableTotalRecordCount: "false" }),
+      ]);
+      const channelCount = this.items(asRecord(channels)).length;
+      const raw = asRecord(info);
+      return {
+        availability: channelCount > 0 ? "available" : "not-configured",
+        hasGuide: channelCount > 0,
+        canManageRecordings: raw.IsEnabled !== false,
+        message: channelCount > 0 ? null : "Configure a supported tuner and guide in Jellyfin to start watching Live TV.",
+      };
+    } catch (error) {
+      if (error instanceof AppError && (error.status === 401 || error.status === 403)) {
+        return { availability: "forbidden", hasGuide: false, canManageRecordings: false, message: "This Jellyfin user does not have Live TV permission." };
+      }
+      return { availability: "offline", hasGuide: false, canManageRecordings: false, message: "Live TV could not be reached on the Jellyfin server." };
+    }
+  }
+
+  async getLiveTvGuide(startUtc: string, endUtc: string): Promise<LiveTvGuide> {
+    const session = this.requireSession();
+    const status = await this.getLiveTvStatus();
+    if (status.availability !== "available") return { status, channels: [], programs: [], windowStartUtc: startUtc, windowEndUtc: endUtc };
+    const [channelResult, programResult] = await Promise.all([
+      this.request("/LiveTv/Channels", {
+        UserId: session.userId, StartIndex: "0", Limit: "500", AddCurrentProgram: "true",
+        Fields: "ChannelInfo,PrimaryImageAspectRatio", EnableTotalRecordCount: "false",
+      }),
+      this.request("/LiveTv/Programs", {
+        UserId: session.userId, MinStartDate: startUtc, MaxStartDate: endUtc,
+        StartIndex: "0", Limit: "10000", Fields: "Overview", EnableTotalRecordCount: "false",
+      }),
+    ]);
+    const channels = this.items(asRecord(channelResult)).map((value) => {
+      const channel = asRecord(value);
+      const imageTags = asRecord(channel.ImageTags);
+      const userData = asRecord(channel.UserData);
+      const current = asRecord(channel.CurrentProgram);
+      return {
+        id: safeOpaqueIdentifier(channel.Id) ?? "",
+        name: safeLiveTvText(channel.Name, "Channel", 1024),
+        number: boundedNullableString(channel.Number, 32),
+        imageTag: boundedNullableString(imageTags.Primary, 256),
+        isFavorite: userData.IsFavorite === true,
+        currentProgramId: safeOpaqueIdentifier(current.Id),
+      };
+    }).filter((channel) => channel.id);
+    const programs = this.items(asRecord(programResult)).map(sanitizeLiveTvProgram)
+      .filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
+    return { status, channels, programs, windowStartUtc: startUtc, windowEndUtc: endUtc };
+  }
+
+  async getLiveTvRecordings(startIndex = 0, limit = 200): Promise<LiveTvRecording[]> {
+    const session = this.requireSession();
+    const result = asRecord(await this.request("/LiveTv/Recordings", {
+      UserId: session.userId, StartIndex: String(startIndex), Limit: String(limit), Fields: ITEM_FIELDS,
+    }));
+    return this.items(result).map((raw) => {
+      const value = asRecord(raw);
+      const item = sanitizeMediaItem(raw);
+      const safeName = safeLiveTvText(value.Name, "Recording", 1024);
+      return {
+        id: item.id,
+        name: safeName,
+        channelName: safeLiveTvText(value.ChannelName, "", 1024) || null,
+        // Completed recordings are BaseItemDto objects. Unlike guide programs
+        // and timers, Jellyfin commonly omits StartDate and supplies the
+        // recording timestamp as DateCreated.
+        startUtc: firstValidIsoDate(value.StartDate, value.DateCreated, value.PremiereDate),
+        endUtc: firstValidIsoDate(value.EndDate),
+        status: safeDiagnosticPhrase(value.Status, 64) ?? "Completed",
+        item: { ...item, name: safeName },
+      };
+    }).filter((recording) => recording.id);
+  }
+
+  async getLiveTvTimers(): Promise<LiveTvTimer[]> {
+    return this.items(asRecord(await this.request("/LiveTv/Timers"))).map(sanitizeLiveTvTimer).filter((timer) => timer.id);
+  }
+
+  async getLiveTvSeriesTimers(): Promise<LiveTvSeriesTimer[]> {
+    return this.items(asRecord(await this.request("/LiveTv/SeriesTimers"))).map(sanitizeLiveTvSeriesTimer).filter((timer) => timer.id);
+  }
+
+  private mergeTimerOptions(base: JsonRecord, options: LiveTvScheduleOptions): JsonRecord {
+    const body: JsonRecord = {};
+    const allowedDefaults = ["ProgramId", "ChannelId", "Name", "StartDate", "EndDate", "SeriesId", "IsMovie", "IsSeries"];
+    for (const key of allowedDefaults) if (base[key] !== undefined) body[key] = base[key];
+    // Jellyfin routes timer creation through the internal Live TV service named
+    // by its own defaults. Keep that private routing value main-side, while
+    // validating it and excluding all other raw provider fields.
+    const serviceName = safeDiagnosticPhrase(base.ServiceName, 128);
+    if (serviceName) body.ServiceName = serviceName;
+    if (options.recordNewOnly !== undefined) body.RecordNewOnly = options.recordNewOnly;
+    if (options.recordAnyChannel !== undefined) body.RecordAnyChannel = options.recordAnyChannel;
+    if (options.recordAnyTime !== undefined) body.RecordAnyTime = options.recordAnyTime;
+    if (options.daysOfWeek !== undefined) body.Days = [...options.daysOfWeek];
+    if (options.prePaddingSeconds !== undefined) body.PrePaddingSeconds = options.prePaddingSeconds;
+    if (options.postPaddingSeconds !== undefined) body.PostPaddingSeconds = options.postPaddingSeconds;
+    if (options.keepUpTo !== undefined) body.KeepUpTo = options.keepUpTo;
+    return body;
+  }
+
+  async createLiveTvRecording(programId: string, series: boolean, options: LiveTvScheduleOptions = {}): Promise<void> {
+    const endpoint = series ? "/LiveTv/SeriesTimers" : "/LiveTv/Timers";
+    const defaults = asRecord(await this.request(`${endpoint}/Defaults`, { ProgramId: programId }));
+    const body = this.mergeTimerOptions({ ...defaults, ProgramId: programId }, options);
+    await this.request(endpoint, {}, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async updateLiveTvSchedule(id: string, series: boolean, options: LiveTvScheduleOptions): Promise<void> {
+    const endpoint = series ? "/LiveTv/SeriesTimers" : "/LiveTv/Timers";
+    const current = asRecord(await this.request(`${endpoint}/${encodeURIComponent(id)}`));
+    await this.request(`${endpoint}/${encodeURIComponent(id)}`, {}, {
+      method: "POST", body: JSON.stringify({ Id: id, ...this.mergeTimerOptions(current, options) }),
+    });
+  }
+
+  async cancelLiveTvSchedule(id: string, series: boolean): Promise<void> {
+    const endpoint = series ? "/LiveTv/SeriesTimers" : "/LiveTv/Timers";
+    await this.request(`${endpoint}/${encodeURIComponent(id)}`, {}, { method: "DELETE" });
+  }
+
+  async deleteLiveTvRecording(recordingId: string): Promise<void> {
+    await this.request(`/Items/${encodeURIComponent(recordingId)}`, {}, { method: "DELETE" });
+  }
+
   async getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<MediaSourceCapabilities> {
     return mediaSourceCapabilities(itemId, await this.requestPlaybackInfo(itemId, signal));
   }
@@ -631,6 +858,7 @@ export class JellyfinApi {
     return {
       capabilities: mediaSourceCapabilities(itemId, result),
       playSessionId: safeOpaqueIdentifier(result.PlaySessionId),
+      liveStreamId: safeOpaqueIdentifier(asRecord((Array.isArray(result.MediaSources) ? result.MediaSources : [])[0]).LiveStreamId),
     };
   }
 
@@ -649,6 +877,7 @@ export class JellyfinApi {
         AllowVideoStreamCopy: true,
         AllowAudioStreamCopy: true,
         MaxAudioChannels: 8,
+        AutoOpenLiveStream: true,
       }),
       signal,
     }));
@@ -692,7 +921,7 @@ export class JellyfinApi {
     }
   }
 
-  async fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response> {
+  async fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal, liveStreamId?: string | null): Promise<Response> {
     const headers: Record<string, string> = {};
     if (range) headers.Range = range;
     const headersController = new AbortController();
@@ -704,6 +933,7 @@ export class JellyfinApi {
       return await this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
         static: "true",
         mediaSourceId,
+        ...(liveStreamId ? { liveStreamId } : {}),
       }, { headers, signal: requestSignal });
     } finally {
       clearTimeout(timeout);
@@ -716,6 +946,7 @@ export class JellyfinApi {
     playSessionId: string,
     startTimeTicks: number,
     signal?: AbortSignal,
+    liveStreamId?: string | null,
   ): Promise<Response> {
     return this.fetchAuthenticated(`/Videos/${encodeURIComponent(itemId)}/stream`, {
       static: "false",
@@ -729,6 +960,7 @@ export class JellyfinApi {
       allowVideoStreamCopy: "true",
       allowAudioStreamCopy: "true",
       context: "Streaming",
+      ...(liveStreamId ? { liveStreamId } : {}),
     }, { signal });
   }
 
@@ -758,6 +990,7 @@ export class JellyfinApi {
     playSessionId: string,
     startTimeTicks: number,
     signal?: AbortSignal,
+    liveStreamId?: string | null,
   ): Promise<Response> {
     const headersController = new AbortController();
     const requestSignal = signal
@@ -788,10 +1021,16 @@ export class JellyfinApi {
         allowAudioStreamCopy: "true",
         context: "Streaming",
         transcodeReasons: "ContainerNotSupported",
+        ...(liveStreamId ? { liveStreamId } : {}),
       }, { signal: requestSignal });
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async closeLiveStream(liveStreamId: string): Promise<void> {
+    if (!safeOpaqueIdentifier(liveStreamId)) return;
+    await this.request("/LiveStreams/Close", { liveStreamId }, { method: "POST" });
   }
 
   async reportAuthoritativePlayback(event: {
@@ -805,6 +1044,7 @@ export class JellyfinApi {
     canSeek: boolean;
     audioStreamIndex: number | null;
     subtitleStreamIndex: number | null;
+    liveStreamId?: string | null;
   }): Promise<void> {
     const endpoint = event.kind === "start"
       ? "/Sessions/Playing"
@@ -818,6 +1058,7 @@ export class JellyfinApi {
         MediaSourceId: event.mediaSourceId,
         PlaySessionId: event.playSessionId,
         PositionTicks: Math.max(0, Math.floor(event.positionTicks)),
+        ...(event.liveStreamId && safeOpaqueIdentifier(event.liveStreamId) ? { LiveStreamId: event.liveStreamId } : {}),
         ...(event.kind === "stop" ? {} : {
           IsPaused: event.paused,
           PlayMethod: event.playMethod,

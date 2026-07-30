@@ -9,7 +9,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "redistributionStatus": "source-only"
@@ -88,206 +88,6 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
-      "name": "@esbuild/aix-ppc64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/android-arm",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/android-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/android-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/darwin-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/darwin-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/freebsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/freebsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-arm",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-ia32",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-loong64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-mips64el",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-ppc64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-riscv64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-s390x",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/linux-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/netbsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/netbsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/openbsd-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/openbsd-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/openharmony-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/sunos-x64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/win32-arm64",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@esbuild/win32-ia32",
-      "version": "0.28.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/evanw/esbuild",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
       "name": "@esbuild/win32-x64",
       "version": "0.28.1",
       "license": "MIT",
@@ -308,118 +108,6 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "1.5.5",
       "license": "MIT",
       "projectUrl": "https://github.com/jridgewell/sourcemaps",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-darwin-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-darwin-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-freebsd-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-freebsd-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-freebsd-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-linux-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-linux-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-linux-loong64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-linux-riscv64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-linux-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-openbsd-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-openbsd-x64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-win32-arm64",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@koromix/koffi-win32-ia32",
-      "version": "3.1.1",
-      "license": "MIT",
-      "projectUrl": "https://github.com/Koromix/koffi",
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -484,190 +172,6 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "1.7.1",
       "license": "MIT",
       "projectUrl": "https://github.com/PeculiarVentures/webcrypto",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-android-arm-eabi",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-android-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-darwin-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-darwin-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-freebsd-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-freebsd-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-arm-gnueabihf",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-arm-musleabihf",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-arm64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-arm64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-loong64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-loong64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-ppc64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-ppc64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-riscv64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-riscv64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-s390x-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-x64-gnu",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-linux-x64-musl",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-openbsd-x64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-openharmony-arm64",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-win32-arm64-msvc",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
-      "name": "@rollup/rollup-win32-ia32-msvc",
-      "version": "4.62.2",
-      "license": "MIT",
-      "projectUrl": "https://github.com/rollup/rollup",
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -1552,14 +1056,6 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
-      "name": "fsevents",
-      "version": "2.3.3",
-      "license": "MIT",
-      "projectUrl": "https://github.com/fsevents/fsevents",
-      "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "dependency",
       "name": "function-bind",
       "version": "1.1.2",
       "license": "MIT",
@@ -2020,6 +1516,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "4.33.0",
       "license": "MIT",
       "projectUrl": "https://github.com/electron/node-abi",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "node-addon-api",
+      "version": "8.5.0",
+      "license": "MIT",
+      "projectUrl": null,
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -2864,6 +2368,22 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "native",
+      "name": "ANGLE runtime from Electron",
+      "version": "Electron 43.1.0 / Chromium 150.0.7871.47",
+      "license": "BSD-3-Clause",
+      "projectUrl": "https://chromium.googlesource.com/angle/angle",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "native",
+      "name": "FFmpeg libmpv source input",
+      "version": "8.1.2",
+      "license": "LGPL-2.1-or-later",
+      "projectUrl": "https://ffmpeg.org",
+      "redistributionStatus": "source-only"
+    },
+    {
+      "category": "native",
       "name": "FFmpeg",
       "version": "ff59522",
       "license": "GPL-2.0-or-later",
@@ -2872,11 +2392,35 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "native",
+      "name": "mpv libmpv source input",
+      "version": "0.41.0",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/mpv-player/mpv",
+      "redistributionStatus": "source-only"
+    },
+    {
+      "category": "native",
       "name": "mpv",
       "version": "v0.41.0-dev-ge5486b96d",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "redistributionStatus": "internal-only-unverified-provenance"
+    },
+    {
+      "category": "native",
+      "name": "node-addon-api",
+      "version": "8.5.0",
+      "license": "MIT",
+      "projectUrl": "https://github.com/nodejs/node-addon-api",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "native",
+      "name": "Seeing Stone libmpv bridge",
+      "version": "0.4.3 milestone-4",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
+      "redistributionStatus": "source-and-binary"
     },
     {
       "category": "native",

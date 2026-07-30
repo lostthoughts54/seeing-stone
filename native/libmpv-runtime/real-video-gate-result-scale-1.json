@@ -1,0 +1,87 @@
+{
+  "result": "passed",
+  "pipeline": "libmpv-opengl-angle",
+  "forcedScale": 1,
+  "mechanism": "image-bitmap-renderer",
+  "capabilities": {
+    "mediaStreamTrackGenerator": true,
+    "videoFrame": true,
+    "webgl2": true,
+    "imageBitmapRenderer": true,
+    "webgpu": true,
+    "offscreenCanvas": true
+  },
+  "frames": {
+    "transferred": 167,
+    "presented": 161,
+    "released": 167,
+    "lastSequence": 167,
+    "maxOutstanding": 3,
+    "maxPresentationMilliseconds": 1.7000000476837158
+  },
+  "geometry": {
+    "initial": {
+      "viewport": {
+        "width": 837,
+        "height": 470.8125
+      },
+      "video": {
+        "width": 837,
+        "height": 470.8125
+      },
+      "dpi": 1
+    },
+    "resized": {
+      "viewport": {
+        "width": 572,
+        "height": 321.75
+      },
+      "video": {
+        "width": 572,
+        "height": 321.75
+      },
+      "dpi": 1
+    },
+    "fullscreen": {
+      "viewport": {
+        "width": 1987,
+        "height": 1117.6875
+      },
+      "video": {
+        "width": 1987,
+        "height": 1117.6875
+      },
+      "dpi": 1
+    },
+    "reloaded": {
+      "viewport": {
+        "width": 572,
+        "height": 321.75
+      },
+      "video": {
+        "width": 572,
+        "height": 321.75
+      },
+      "dpi": 1
+    }
+  },
+  "native": {
+    "renderedFrames": 167,
+    "droppedFrames": 76,
+    "outstandingFrames": 0,
+    "poolSize": 3,
+    "unusable": false
+  },
+  "continuousCpuReadback": false,
+  "bitmapIpc": false,
+  "fixtureSha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6",
+  "librarySha256": "54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
+  "nativeAddonSha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
+  "realVideoRenderedThroughMpvRenderApi": true,
+  "hwdec": "no-conservative-gate",
+  "controllerSurface": {
+    "trackCount": 1,
+    "durationSeconds": 2.125,
+    "seekable": true
+  }
+}

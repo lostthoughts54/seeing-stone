@@ -4,12 +4,61 @@
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
       "redistributionStatus": "source-only",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "build/icon.svg",
+          "sha256": "5e7afc457a7d9c443e6f305697c670605a19f8858c93fa53845f2f64eb596497"
+        },
+        {
+          "path": "src/renderer/assets/seeing-stone-orb.svg",
+          "sha256": "5e7afc457a7d9c443e6f305697c670605a19f8858c93fa53845f2f64eb596497"
+        },
+        {
+          "path": "assets/mpv/input.conf",
+          "sha256": "55e262a81edc829282a454dfaa1604f7364b5ef37cfaf68258306a98ff813d8f"
+        },
+        {
+          "path": "assets/mpv/NOTICE.md",
+          "sha256": "8072f601caede8f80faa086cac832f4fe0997ed8bf698c93e39ab9db178624b0"
+        },
+        {
+          "path": "native/libmpv-bridge/synthetic-gate-result.json",
+          "sha256": "4146f1c0e6644e88da0dd5efd87c731229f9182dc2b24847203f63867d018757"
+        },
+        {
+          "path": "native/libmpv-runtime/source-lock.json",
+          "sha256": "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f"
+        },
+        {
+          "path": "native/libmpv-runtime/build-result.json",
+          "sha256": "862aed26ba2f6daca6ac61f3625035c49415800172704d166543f11e2449715b"
+        },
+        {
+          "path": "native/libmpv-runtime/render-context-gate-result.json",
+          "sha256": "aeac3222946d931d9494977c16b236588d33a9a05396c3854d5add543b38c1c7"
+        },
+        {
+          "path": "native/libmpv-runtime/real-video-gate-result-scale-1.json",
+          "sha256": "b45bd7caad0355cd2a09f4ea8273960e5684b9be7cd2984c6e5dcccf3b8d8b54"
+        },
+        {
+          "path": "native/libmpv-runtime/real-video-gate-result-scale-1-5.json",
+          "sha256": "cc467668944f2b64ff4898939662273fd46e1f80d0817832418c33249d428ed9"
+        },
+        {
+          "path": "assets/fixtures/libmpv-h264-gate.mp4",
+          "sha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6"
+        },
+        {
+          "path": "assets/fixtures/libmpv-h264-gate.provenance.json",
+          "sha256": "2bcda65152cc71f760d0c1d8d114edacc83f6b7f29746c87d0c7a16145356fad"
+        }
+      ],
       "licenseFile": {
         "path": "LICENSE",
         "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
@@ -59,13 +108,175 @@
     },
     {
       "category": "native",
+      "name": "node-addon-api",
+      "version": "8.5.0",
+      "license": "MIT",
+      "projectUrl": "https://github.com/nodejs/node-addon-api",
+      "sourceRevision": "6babc960154752f686a7dca8e712991a976a754b",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/licenses/node-addon-api-MIT.txt",
+        "sha256": "96dcd3ff7661c68ae574f60fc001bad3bc717b506f412336e1e9840bbb73dd57"
+      },
+      "provenance": {
+        "immutableSourceUrl": "https://github.com/nodejs/node-addon-api/archive/6babc960154752f686a7dca8e712991a976a754b.tar.gz",
+        "sourceArchive": "node-addon-api-8.5.0.tgz",
+        "sourceArchiveSha512": "sha512-/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==",
+        "binaryHashes": [],
+        "buildFlags": ["NAPI_CPP_EXCEPTIONS=0"],
+        "toolchain": ["node-gyp 12.4.0 (locked dependency)", "Visual Studio Community 18.8.0 MSVC x64", "Windows SDK 10.0.28000.0", "Python 3.12.x"],
+        "requiredRuntimeDlls": [
+          "The exact 33-file companion closure and owning package versions are recorded in native/libmpv-runtime/build-result.json"
+        ],
+        "patches": [],
+        "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1"],
+        "correspondingSource": "pnpm-lock.yaml plus the immutable source URL",
+        "applicationRelease": "0.5.0"
+      }
+    },
+    {
+      "category": "native",
+      "name": "mpv libmpv source input",
+      "version": "0.41.0",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/mpv-player/mpv",
+      "sourceRevision": "41f6a645068483470267271e1d09966ca3b9f413",
+      "redistributionStatus": "source-only",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
+        "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+      },
+      "provenance": {
+        "immutableSourceUrl": "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz",
+        "sourceArchive": "mpv-v0.41.0.tar.gz",
+        "sourceArchiveSha512": "sha512-d8806ef04455aeb65d45c5956b4589d7a9728f869b74b9bcd8c9ab08475c28538334399ddc7fc2aee6a31fd178fe4b87ec755cd99ffa6e29ab4b6b61757b9320",
+        "binaryHashes": [
+          "avcodec-62.dll sha256:bdc0abb8de26982f61f678748b3d00a3eaa0ce79c509c680f78bb2236431f25b",
+          "avdevice-62.dll sha256:374f4f34884bc51896f123ba5ffba6567f3f95e9de28c4157442a0536659eaa5",
+          "avfilter-11.dll sha256:0ae13588a723df2a9322d22ec1090bcdf2c5dacff723ffabede0a928942eb218",
+          "avformat-62.dll sha256:ac1c3c5c5d94bee86f924b81aa86956197b8cbb9656662983c59136165e09ddf",
+          "avutil-60.dll sha256:c31af31be6d9d513db5f4858e00863a41772b02c6a9a1ba835e89541447371a6",
+          "swresample-6.dll sha256:47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
+          "swscale-9.dll sha256:8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96"
+        ],
+        "buildFlags": ["native/libmpv-runtime/source-lock.json"],
+        "toolchain": ["MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"],
+        "requiredRuntimeDlls": [],
+        "patches": [],
+        "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
+        "correspondingSource": ".runtime/libmpv-build/archives until the release source archive is produced",
+        "applicationRelease": "0.5.0"
+      }
+    },
+    {
+      "category": "native",
+      "name": "Seeing Stone libmpv bridge",
+      "version": "0.4.3 milestone-4",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
+      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "LICENSE",
+        "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
+      },
+      "provenance": {
+        "immutableSourceUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
+        "sourceArchive": "Seeing-Stone-0.4.3 corresponding source (release gate pending)",
+        "sourceArchiveSha512": "sha512-pending-public-release-source-archive",
+        "binaryHashes": [
+          "seeing_stone_libmpv_bridge.node sha256:cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c"
+        ],
+        "buildFlags": ["NAPI_DISABLE_CPP_EXCEPTIONS", "C++20", "x64", "Release"],
+        "toolchain": ["Visual Studio Community 18.8.0 MSVC x64", "Windows SDK 10.0.28000.0", "node-gyp 12.4.0", "Node-API via node-addon-api 8.5.0"],
+        "requiredRuntimeDlls": ["Windows D3D11/DXGI system libraries", "Manifest-controlled libmpv runtime closure for the lifecycle probe"],
+        "patches": [],
+        "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1", "scripts/stage-libmpv-runtime.ps1"],
+        "correspondingSource": "native/libmpv-bridge and the checked-in build scripts",
+        "applicationRelease": "0.5.0"
+      }
+    },
+    {
+      "category": "native",
+      "name": "ANGLE runtime from Electron",
+      "version": "Electron 43.1.0 / Chromium 150.0.7871.47",
+      "license": "BSD-3-Clause",
+      "projectUrl": "https://chromium.googlesource.com/angle/angle",
+      "sourceRevision": "bbf3d8a4755268f016087be2f56099fa5a5f3f6e",
+      "redistributionStatus": "source-and-binary",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/licenses/angle-BSD-3-Clause.txt",
+        "sha256": "e4984e61f294e0ca889defb54e2b7f31e44b0fe7a7cbad0a86444d757ed13709"
+      },
+      "provenance": {
+        "immutableSourceUrl": "https://chromium.googlesource.com/angle/angle/+archive/bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+        "sourceArchive": "angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+        "sourceArchiveSha512": "sha512-719b95e3a53e07ef309fe2f6deb672e518b78e2e7af84e2620332bcdf4159e15d4b08fd03d9e802eb75d0b0270112b1faffbf01390a9043f3a1f25d174395da5",
+        "binaryHashes": [
+          "libEGL.dll sha256:c459e2cf46578da98ba8955e94f29fde8001ba3f44197a3ec521a9c91b538e7c",
+          "libGLESv2.dll sha256:39955886b88e2c2978c8472225430c497abf90b1fad906d7b3b6fdf581ce9ddf",
+          "d3dcompiler_47.dll sha256:a05f99734f7c4822fefc12b367af21fd0976ed6608752fb1e1e80b6ece7ecbbb",
+          "dxcompiler.dll sha256:1085707889573af5b32e7644d47a7c5f0809ed0818217d75f6eaedee37a2a767",
+          "dxil.dll sha256:77e039c905030a641e53658a008b74e90635a5ea9b6b79eabd0f2003bdfca59a"
+        ],
+        "buildFlags": ["Electron official Windows x64 release build; exact GN flags remain part of Electron/Chromium corresponding source"],
+        "toolchain": ["Electron 43.1.0", "Chromium 150.0.7871.47"],
+        "requiredRuntimeDlls": ["libEGL.dll", "libGLESv2.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll"],
+        "patches": [],
+        "buildScripts": ["package.json", "pnpm-lock.yaml", "scripts/libmpv-render-context-smoke.cjs"],
+        "correspondingSource": ".runtime/libmpv-build/archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz until the release source archive is produced",
+        "applicationRelease": "0.5.0"
+      }
+    },
+    {
+      "category": "native",
+      "name": "FFmpeg libmpv source input",
+      "version": "8.1.2",
+      "license": "LGPL-2.1-or-later",
+      "projectUrl": "https://ffmpeg.org",
+      "sourceRevision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "redistributionStatus": "source-only",
+      "artifacts": [],
+      "licenseFile": {
+        "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
+        "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+      },
+      "provenance": {
+        "immutableSourceUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+        "sourceArchive": "ffmpeg-8.1.2.tar.xz",
+        "sourceArchiveSha512": "sha512-b3adc16fe426217bb607da01c4137cee0a9788fc08e077874336db185d2b7287746a7dc94cf0181ea92cd8afcdb06094ee9456e2986112354f84538cb9a5ed0b",
+        "binaryHashes": [],
+        "buildFlags": ["native/libmpv-runtime/source-lock.json"],
+        "toolchain": ["MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"],
+        "requiredRuntimeDlls": [],
+        "patches": [],
+        "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
+        "correspondingSource": ".runtime/libmpv-build/archives until the release source archive is produced",
+        "applicationRelease": "0.5.0"
+      }
+    },
+    {
+      "category": "native",
       "name": "mpv",
       "version": "v0.41.0-dev-ge5486b96d",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "e5486b96d7d06dd148337899bfdc46bf25101663",
       "redistributionStatus": "internal-only-unverified-provenance",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "assets/mpv/licenses/mpv-Copyright.txt",
+          "sha256": "bfe9ee4cceabcb8ecbfadf208d04156f73d801e6a57369a5606bb8341e204a23"
+        },
+        {
+          "path": "assets/mpv/licenses/mpv-LGPL-2.1.txt",
+          "sha256": "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
+        }
+      ],
       "licenseFile": {
         "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
         "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
@@ -79,7 +290,16 @@
       "projectUrl": "https://github.com/FFmpeg/FFmpeg",
       "sourceRevision": "ff59522",
       "redistributionStatus": "internal-only-unverified-provenance",
-      "artifacts": [],
+      "artifacts": [
+        {
+          "path": "assets/mpv/licenses/ffmpeg-LICENSE.md",
+          "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+        },
+        {
+          "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
+          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+        }
+      ],
       "licenseFile": {
         "path": "assets/mpv/licenses/ffmpeg-GPL-2.0.txt",
         "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"

@@ -1,0 +1,74 @@
+appId: app.seeingstone.client.libmpv-test
+productName: Seeing Stone Libmpv Test
+executableName: Seeing Stone Libmpv Test
+asar: true
+
+directories:
+  output: .runtime/libmpv-test-release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  - "!dist/**/*.map"
+
+asarUnpack:
+  - dist/main/services/persistenceWorker.js
+  - dist/main/services/persistenceTypes.js
+
+extraResources:
+  - from: LICENSE
+    to: legal/LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: legal/THIRD_PARTY_NOTICES.md
+  - from: dependency-licenses.json
+    to: legal/dependency-licenses.json
+  - from: src/renderer/assets/fonts/Inter-OFL.txt
+    to: legal/fonts/Inter-OFL.txt
+  - from: src/renderer/assets/fonts/Spectral-OFL.txt
+    to: legal/fonts/Spectral-OFL.txt
+  - from: .runtime/mpv
+    to: mpv
+    filter:
+      - mpv.exe
+      - mpv.com
+      - vulkan-1.dll
+  - from: assets/mpv/input.conf
+    to: mpv/input.conf
+  - from: assets/mpv/NOTICE.md
+    to: mpv/NOTICE.md
+  - from: assets/mpv/licenses
+    to: mpv/licenses
+    filter:
+      - "**/*"
+  - from: mpv-runtime.json
+    to: mpv/mpv-runtime.json
+  - from: .runtime/libmpv
+    to: libmpv
+    filter:
+      - "*.dll"
+      - "*.node"
+  - from: INTERNAL_LIBMPV_TESTING.md
+    to: libmpv/INTERNAL_TESTING_ONLY.md
+
+afterPack: ./scripts/after-pack.cjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.svg
+  artifactName: Seeing-Stone-Libmpv-Test-Setup-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  selectPerMachineByDefault: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Seeing Stone Libmpv Test
+  buildUniversalInstaller: false

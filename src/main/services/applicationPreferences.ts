@@ -3,7 +3,7 @@ import type { BufferingPolicyMode, PlaybackDiagnostics } from "../../shared/cont
 import type { SqlitePersistenceService } from "./persistence";
 import type { PlayerAdapterMode } from "./playerPreferences";
 
-const adapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded"]) }).strict();
+const adapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded", "libmpv"]) }).strict();
 const bufferingPolicySchema = z.object({ mode: z.enum(["wait-for-all", "continue"]) }).strict();
 const cachedDiagnosticsSchema = z.object({
   itemId: z.string().min(1).max(256),

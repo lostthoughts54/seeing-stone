@@ -16,11 +16,13 @@ interface PlaybackApi {
   getPlaybackSourceInfo?(itemId: string, signal?: AbortSignal): Promise<{
     capabilities: import("../../shared/contracts").MediaSourceCapabilities;
     playSessionId: string | null;
+    liveStreamId: string | null;
   }>;
-  fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal): Promise<Response>;
-  fetchDirectStream?(itemId: string, mediaSourceId: string, playSessionId: string, startTimeTicks: number, signal?: AbortSignal): Promise<Response>;
-  fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, startTimeTicks: number, signal?: AbortSignal): Promise<Response>;
+  fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal, liveStreamId?: string | null): Promise<Response>;
+  fetchDirectStream?(itemId: string, mediaSourceId: string, playSessionId: string, startTimeTicks: number, signal?: AbortSignal, liveStreamId?: string | null): Promise<Response>;
+  fetchTranscodedStream(itemId: string, mediaSourceId: string, playSessionId: string, startTimeTicks: number, signal?: AbortSignal, liveStreamId?: string | null): Promise<Response>;
   fetchExternalSubtitle(itemId: string, mediaSourceId: string, streamIndex: number, format: ExternalSubtitleFormat, signal?: AbortSignal): Promise<Response>;
+  closeLiveStream?(liveStreamId: string): Promise<void>;
 }
 
 interface PlaybackRecord {
@@ -34,6 +36,7 @@ interface PlaybackRecord {
   localVersionId: string | null;
   externalSubtitles: ExternalSubtitleTrack[];
   requests: Set<AbortController>;
+  liveStreamId: string | null;
 }
 
 export interface ResolvedPlaybackSource extends PlaybackStartResult {
@@ -50,6 +53,9 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   diagnostics?: import("../../shared/contracts").PlaybackDiagnostics;
   externalSubtitles: ExternalSubtitleTrack[];
   initialAction: "progress" | "start_over" | "replay";
+  contentKind?: "on-demand" | "live-tv";
+  /** Main-process-only live tuner session identifier. */
+  liveStreamId?: string | null;
 }
 
 export interface LocalSourceResolver {
@@ -172,6 +178,7 @@ export class PlaybackSessionService {
         localVersionId: resolvedLocal.localVersionId ?? null,
         externalSubtitles: resolvedLocal.externalSubtitles,
         requests: new Set(),
+        liveStreamId: null,
       };
       this.state = state({
         playbackId: resolvedLocal.playbackId,
@@ -187,6 +194,7 @@ export class PlaybackSessionService {
     let sourceInfo: {
       capabilities: Awaited<ReturnType<PlaybackApi["getMediaSourceCapabilities"]>>;
       playSessionId: string | null;
+      liveStreamId: string | null;
     };
     const identity = this.persistence ? this.api.getAuthenticatedContext?.() : undefined;
     if (this.persistence && !identity) throw new AppError("PLAYBACK_IDENTITY_UNAVAILABLE", "Playback identity is unavailable.", 409);
@@ -198,7 +206,7 @@ export class PlaybackSessionService {
         this.api.getDetails(itemId),
         this.api.getPlaybackSourceInfo
           ? this.api.getPlaybackSourceInfo(itemId)
-          : this.api.getMediaSourceCapabilities(itemId).then((capabilities) => ({ capabilities, playSessionId: null })),
+          : this.api.getMediaSourceCapabilities(itemId).then((capabilities) => ({ capabilities, playSessionId: null, liveStreamId: null })),
       ]);
     } catch (error) {
       if (revision === this.revision) {
@@ -245,7 +253,8 @@ export class PlaybackSessionService {
       videoRange: source.videoRange ?? null,
       transcodeReason: sourceKind === "transcode" ? source.transcodeReason ?? null : null,
     };
-    if (this.persistence) {
+    const isLive = details.type === "TvChannel";
+    if (this.persistence && !isLive) {
       await this.persistence.upsertMediaItem({
         serverId: identity!.serverId,
         userId: identity!.userId,
@@ -293,8 +302,9 @@ export class PlaybackSessionService {
       localVersionId: null,
       externalSubtitles: externalSubtitleTracks,
       requests: new Set(),
+      liveStreamId: sourceInfo.liveStreamId,
     };
-    this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks });
+    this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks, contentKind: isLive ? "live-tv" : "on-demand" });
     return {
       playbackId,
       serverPlaySessionId,
@@ -312,6 +322,8 @@ export class PlaybackSessionService {
       diagnostics,
       externalSubtitles: externalSubtitleTracks,
       initialAction: initialAction(resumeMode, previous.played, previous.positionTicks),
+      contentKind: isLive ? "live-tv" : "on-demand",
+      liveStreamId: sourceInfo.liveStreamId,
     };
   }
 
@@ -382,31 +394,27 @@ export class PlaybackSessionService {
     let upstream: Response;
     try {
       if (playback.delivery === "transcode") {
-        upstream = await this.api.fetchTranscodedStream(
+        const args = [
           playback.itemId,
           playback.mediaSourceId,
           playback.serverPlaySessionId,
           playback.streamStartTimeTicks,
           requestController.signal,
-        );
+        ] as const;
+        upstream = playback.liveStreamId
+          ? await this.api.fetchTranscodedStream(...args, playback.liveStreamId)
+          : await this.api.fetchTranscodedStream(...args);
       } else if (playback.sourceKind === "direct-stream") {
         const fetchDirectStream = this.api.fetchDirectStream;
         if (!fetchDirectStream) throw new AppError("DIRECT_STREAM_UNAVAILABLE", "Direct streaming is unavailable.", 422);
-        upstream = await fetchDirectStream.call(
-          this.api,
-          playback.itemId,
-          playback.mediaSourceId,
-          playback.serverPlaySessionId,
-          playback.streamStartTimeTicks,
-          requestController.signal,
-        );
+        upstream = playback.liveStreamId
+          ? await fetchDirectStream.call(this.api, playback.itemId, playback.mediaSourceId, playback.serverPlaySessionId, playback.streamStartTimeTicks, requestController.signal, playback.liveStreamId)
+          : await fetchDirectStream.call(this.api, playback.itemId, playback.mediaSourceId, playback.serverPlaySessionId, playback.streamStartTimeTicks, requestController.signal);
       } else {
-        upstream = await this.api.fetchStaticStream(
-          playback.itemId,
-          playback.mediaSourceId,
-          request.headers.get("range") || undefined,
-          requestController.signal,
-        );
+        const range = request.headers.get("range") || undefined;
+        upstream = playback.liveStreamId
+          ? await this.api.fetchStaticStream(playback.itemId, playback.mediaSourceId, range, requestController.signal, playback.liveStreamId)
+          : await this.api.fetchStaticStream(playback.itemId, playback.mediaSourceId, range, requestController.signal);
       }
     } catch (error) {
       playback.requests.delete(requestController);
@@ -491,9 +499,11 @@ export class PlaybackSessionService {
 
   private abortCurrent(): void {
     if (!this.current) return;
-    for (const request of this.current.requests) request.abort();
-    this.current.requests.clear();
+    const current = this.current;
+    for (const request of current.requests) request.abort();
+    current.requests.clear();
     this.current = null;
+    if (current.liveStreamId) void this.api.closeLiveStream?.(current.liveStreamId).catch(() => undefined);
   }
 
   private trackBody(
