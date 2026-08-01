@@ -126,6 +126,14 @@ describe("Seeing Stone player shell", () => {
     expect(nativeStop).toContain("this.libMpvHost?.stop()");
   });
 
+  it("presents playback started by Companion Remote in the desktop player shell", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("async function presentExternallyStartedPlayback");
+    expect(renderer).toContain('playerMeta.textContent = "Started from Companion Remote"');
+    expect(renderer).toContain("if (externallyStarted) void presentExternallyStartedPlayback(playback)");
+    expect(renderer).toContain("dismissedPlaybackId = playbackId");
+  });
+
   it("bundles local fonts, responsive layouts, reduced motion, and visible focus", async () => {
     const styles = await readFile("src/renderer/styles.css", "utf8");
     expect(styles).toContain('./assets/fonts/InterVariable.woff2');

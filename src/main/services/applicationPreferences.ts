@@ -21,6 +21,14 @@ const cachedDiagnosticsSchema = z.object({
     transcodeReason: z.string().max(512).nullable(),
   }).strict(),
 }).strict();
+const companionSettingsSchema = z.object({
+  enabled: z.boolean(),
+  networkId: z.string().max(128).nullable(),
+  port: z.number().int().min(49152).max(65535),
+  hostSuffix: z.string().regex(/^[a-z0-9]{4,12}$/),
+}).strict();
+
+export type StoredCompanionSettings = z.infer<typeof companionSettingsSchema>;
 
 export interface CachedPlaybackDiagnostics {
   itemId: string;
@@ -34,6 +42,8 @@ export interface ApplicationPreferences {
   setBufferingPolicy(mode: BufferingPolicyMode): Promise<void>;
   getCachedDiagnostics(): Promise<CachedPlaybackDiagnostics | null>;
   setCachedDiagnostics(value: CachedPlaybackDiagnostics): Promise<void>;
+  getCompanionSettings(): Promise<StoredCompanionSettings | null>;
+  setCompanionSettings(value: StoredCompanionSettings): Promise<void>;
 }
 
 function parseRecord<T>(valueJson: string | null, schema: z.ZodType<T>): T | null {
@@ -77,5 +87,14 @@ export class ApplicationPreferencesService implements ApplicationPreferences {
   async setCachedDiagnostics(value: CachedPlaybackDiagnostics): Promise<void> {
     const safe = cachedDiagnosticsSchema.parse(value);
     await this.persistence.setApplicationPreference("player.cached-diagnostics", safe);
+  }
+
+  async getCompanionSettings(): Promise<StoredCompanionSettings | null> {
+    const record = await this.persistence.getApplicationPreference("companion.settings");
+    return parseRecord(record?.valueJson ?? null, companionSettingsSchema);
+  }
+
+  async setCompanionSettings(value: StoredCompanionSettings): Promise<void> {
+    await this.persistence.setApplicationPreference("companion.settings", companionSettingsSchema.parse(value));
   }
 }

@@ -23,6 +23,7 @@ import type {
 } from "./playerController";
 import type { PlaybackReportingService } from "./playbackReporting";
 import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackSession";
+import type { PlaybackContinuationResult } from "./playbackContinuationResolver";
 import type { MpvVideoHost } from "./embeddedVideoHost";
 
 const TICKS_PER_SECOND = 10_000_000;
@@ -403,8 +404,17 @@ export class MpvPlayerService implements PlayerController {
   ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     this.pendingFullscreen = { fullscreen, expiresAt: performance.now() + 3000 };
-    if (this.videoHost) this.videoHost.setFullscreen(fullscreen);
-    else if (this.libMpvHost) this.mainWindow.setFullScreen(fullscreen);
+    if (this.videoHost || this.libMpvHost) {
+      if (fullscreen && context.origin === "companion") {
+        if (!this.mainWindow.isKiosk()) this.mainWindow.setKiosk(true);
+      } else {
+        if (!fullscreen && this.mainWindow.isKiosk()) this.mainWindow.setKiosk(false);
+        if (!this.videoHost && this.mainWindow.isFullScreen() !== fullscreen) {
+          this.mainWindow.setFullScreen(fullscreen);
+        }
+      }
+      this.videoHost?.setFullscreen(fullscreen);
+    }
     else await this.command(["set_property", "fullscreen", fullscreen]);
     this.update({ ...this.state, fullscreen }, "fullscreen", context);
     return this.getState();
@@ -486,6 +496,7 @@ export class MpvPlayerService implements PlayerController {
       ipc?.close();
       if (process && !process.killed) process.kill();
       await this.libMpvHost?.stop().catch(() => undefined);
+      this.exitIntegratedFullscreen();
       await this.report("stop", undefined, context.origin === "local-user" ? "explicit" : "automatic");
       await this.proxy.close();
       this.videoHost?.detachWindow();
@@ -517,6 +528,7 @@ export class MpvPlayerService implements PlayerController {
     if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
     else {
       this.playbackRevision += 1;
+      this.exitIntegratedFullscreen();
       this.playback.clear();
       this.playbackRate = 1;
       this.timelineBaseTicks = 0;
@@ -542,6 +554,7 @@ export class MpvPlayerService implements PlayerController {
     this.ipc?.close();
     this.ipc = null;
     await this.proxy.close().catch(() => undefined);
+    this.exitIntegratedFullscreen();
     this.videoHost?.detachWindow();
     this.playbackTarget = null;
     try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
@@ -999,31 +1012,60 @@ export class MpvPlayerService implements PlayerController {
         await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         return;
       }
-
-      if (completedSource.itemType !== "Episode" || !completedSource.seriesId) {
+      if (this.state.contentKind === "live-tv") {
         await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         return;
       }
 
-      const nextEpisode = await this.completion.findNextEpisode(
-        completedSource.itemId,
-        () => this.playback.getNextUpForSeries(completedSource.seriesId!),
+      const continuation = await this.completion.findNextItem(
+        async () => {
+          const genericResolver = (this.playback as PlaybackSessionService & {
+            getNextContinuation?: PlaybackSessionService["getNextContinuation"];
+          }).getNextContinuation;
+          if (typeof genericResolver === "function") {
+            return genericResolver.call(this.playback, {
+              itemId: completedSource.itemId,
+              itemType: completedSource.itemType,
+              seriesId: completedSource.seriesId,
+            });
+          }
+          if (completedSource.itemType !== "Episode" || !completedSource.seriesId) return null;
+          const item = await this.playback.getNextUpForSeries(completedSource.seriesId);
+          return item && item.id !== completedSource.itemId
+            ? { item, source: "jellyfin-next-up" as const, continuationId: null }
+            : null;
+        },
         () => this.isCurrent(revision, completedSource),
       );
-      if (!nextEpisode || !this.isCurrent(revision, completedSource)) {
+      if (!continuation || !this.isCurrent(revision, completedSource)) {
         if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         return;
       }
 
-      const decision = await this.waitForAutomaticTransition(revision, completedSource, nextEpisode);
+      if (continuation.continuationId) {
+        this.playback.reserveContinuation(continuation.continuationId, completedSource.playbackId);
+      }
+      const decision = await this.waitForAutomaticTransition(revision, completedSource, continuation);
       if (decision === "cancel") {
+        this.playback.releaseContinuation(continuation.continuationId);
         if (this.isCurrent(revision, completedSource)) {
           await this.stop(completedSource.playbackId, "ended", { origin: "system" });
         }
         return;
       }
-      if (!this.isCurrent(revision, completedSource)) return;
-      await this.transitionToNextEpisode(revision, completedSource, nextEpisode.id);
+      if (!this.isCurrent(revision, completedSource)) {
+        this.playback.releaseContinuation(continuation.continuationId);
+        return;
+      }
+      try {
+        await this.transitionToNextItem(revision, completedSource, continuation.item.id);
+        if (continuation.continuationId) {
+          this.playback.commitContinuation(continuation.continuationId, completedSource.playbackId);
+        }
+      } catch (error) {
+        this.playback.releaseContinuation(continuation.continuationId);
+        throw error;
+      }
     } catch {
       if (this.isCurrent(revision, completedSource)) await this.stop(completedSource.playbackId, "ended", { origin: "system" }).catch(() => undefined);
     } finally {
@@ -1034,7 +1076,7 @@ export class MpvPlayerService implements PlayerController {
   private async waitForAutomaticTransition(
     revision: number,
     completedSource: ResolvedPlaybackSource,
-    nextEpisode: MediaItem,
+    continuation: PlaybackContinuationResult,
   ): Promise<"continue" | "cancel"> {
     let resolveDecision!: (decision: "continue" | "cancel") => void;
     const manualDecision = new Promise<"continue" | "cancel">((resolve) => {
@@ -1052,16 +1094,20 @@ export class MpvPlayerService implements PlayerController {
         this.update({
           ...this.state,
           nextEpisodeCountdown: {
-            nextItemId: nextEpisode.id,
-            title: nextEpisode.name,
-            seriesName: nextEpisode.seriesName,
-            seasonNumber: nextEpisode.parentIndexNumber,
-            episodeNumber: nextEpisode.indexNumber,
+            nextItemId: continuation.item.id,
+            itemType: ["Movie", "Episode", "Video"].includes(continuation.item.type)
+              ? continuation.item.type as "Movie" | "Episode" | "Video"
+              : "Video",
+            title: continuation.item.name,
+            seriesName: continuation.item.seriesName,
+            seasonNumber: continuation.item.parentIndexNumber,
+            episodeNumber: continuation.item.indexNumber,
             remainingSeconds,
             totalSeconds: NEXT_EPISODE_COUNTDOWN_SECONDS,
           },
         });
-        await this.command(["show-text", `Next episode in ${remainingSeconds} seconds\nEsc to exit`, 1100]);
+        const label = continuation.item.type === "Episode" ? "Next episode" : "Next up";
+        await this.command(["show-text", `${label} in ${remainingSeconds} seconds\nEsc to exit`, 1100]);
       },
     }).then((continuePlayback) => continuePlayback ? "continue" as const : "cancel" as const);
 
@@ -1081,17 +1127,19 @@ export class MpvPlayerService implements PlayerController {
     pending.resolve(decision);
   }
 
-  private async transitionToNextEpisode(
+  private async transitionToNextItem(
     completedRevision: number,
     completedSource: ResolvedPlaybackSource,
     nextItemId: string,
   ): Promise<void> {
     const ipc = this.ipc;
-    if (!ipc || !this.isCurrent(completedRevision, completedSource)) return;
+    if (!ipc || !this.isCurrent(completedRevision, completedSource)) {
+      throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed before the next item could start.", 409);
+    }
     let nextSource = await this.playback.start(nextItemId, "start-over");
     if (!this.isCurrent(completedRevision, completedSource)) {
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
-      return;
+      throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed before the next item could start.", 409);
     }
     let playbackTargets: PlaybackTargets | null = null;
     while (playbackTargets === null) {
@@ -1100,7 +1148,7 @@ export class MpvPlayerService implements PlayerController {
         if (!this.isCurrent(completedRevision, completedSource)) {
           await this.proxy.close();
           try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
-          return;
+          throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed before the next item could start.", 409);
         }
         this.replacingFile = true;
         this.eofArmed = false;
@@ -1118,7 +1166,7 @@ export class MpvPlayerService implements PlayerController {
         await this.proxy.close().catch(() => undefined);
         if (!this.isCurrent(completedRevision, completedSource)) {
           try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
-          return;
+          throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed before the next item could start.", 409);
         }
         if (nextSource.source !== "local") {
           try { this.playback.stop(nextSource.playbackId); } catch { /* Resolution already finalized. */ }
@@ -1135,7 +1183,7 @@ export class MpvPlayerService implements PlayerController {
     if (!this.isCurrent(completedRevision, completedSource)) {
       await this.proxy.close();
       try { this.playback.stop(nextSource.playbackId); } catch { /* Cancelled concurrently. */ }
-      return;
+      throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed before the next item could start.", 409);
     }
 
     const retained = { volume: this.state.volume, fullscreen: this.state.fullscreen };
@@ -1145,7 +1193,7 @@ export class MpvPlayerService implements PlayerController {
     this.adoptResolvedSource(nextSource, nextItemId, "item-transition", { origin: "system" }, retained);
 
     try {
-      if (!this.isCurrent(revision, nextSource)) return;
+      if (!this.isCurrent(revision, nextSource)) throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed during the item transition.", 409);
       await this.addExternalSubtitles(ipc, playbackTargets);
       // keep-open=yes leaves mpv paused at EOF. Replacing the file does not
       // reliably clear that native pause state, so explicitly re-arm playback
@@ -1160,9 +1208,12 @@ export class MpvPlayerService implements PlayerController {
         phase: "loading",
       });
       await this.report("start");
-      if (!this.isCurrent(revision, nextSource)) return;
+      if (!this.isCurrent(revision, nextSource)) throw new AppError("PLAYBACK_TRANSITION_STALE", "Playback changed during the item transition.", 409);
       this.update({ ...this.state, phase: "playing" });
       this.startReportingTimer();
+      if (!this.isCurrent(revision, nextSource) || this.state.playbackId !== nextSource.playbackId || this.state.itemId !== nextItemId) {
+        throw new AppError("PLAYBACK_ADOPTION_UNCONFIRMED", "The next item transition was not confirmed.", 409);
+      }
     } catch (error) {
       if (this.isCurrent(revision, nextSource)) {
         await this.stop(nextSource.playbackId, "ended", { origin: "system" }).catch(() => undefined);
@@ -1462,6 +1513,12 @@ export class MpvPlayerService implements PlayerController {
 
   private assertPlayback(playbackId: string): void {
     if (!this.source || this.source.playbackId !== playbackId) throw new AppError("INVALID_PLAYBACK", "That playback session is no longer active.", 409);
+  }
+
+  private exitIntegratedFullscreen(): void {
+    if ((!this.videoHost && !this.libMpvHost) || this.mainWindow.isDestroyed()) return;
+    if (this.mainWindow.isKiosk()) this.mainWindow.setKiosk(false);
+    if (this.mainWindow.isFullScreen()) this.mainWindow.setFullScreen(false);
   }
 
   private async report(

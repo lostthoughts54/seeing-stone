@@ -93,6 +93,8 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     clear: vi.fn(),
     getNextUpForSeries: vi.fn(async () => options.nextId === null ? null : nextEpisode(options.nextId || "episode-2")),
   };
+  let kiosk = false;
+  let fullscreen = false;
   const window = {
     isDestroyed: () => false,
     minimize: vi.fn(),
@@ -100,6 +102,10 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     restore: vi.fn(),
     show: vi.fn(),
     focus: vi.fn(),
+    isKiosk: () => kiosk,
+    setKiosk: vi.fn((value: boolean) => { kiosk = value; fullscreen = value; }),
+    isFullScreen: () => fullscreen,
+    setFullScreen: vi.fn((value: boolean) => { fullscreen = value; }),
   };
   const listeners = new Set<(message: Record<string, unknown>) => void>();
   const commands: unknown[][] = [];
@@ -187,6 +193,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("MpvPlayerService natural completion", () => {
+  it("uses kiosk fullscreen for Companion playback and restores the Windows window on exit", async () => {
+    const h = harness({ embedded: true });
+    await h.player.setFullscreen(h.current.playbackId, true, { origin: "companion" });
+    expect(h.window.setKiosk).toHaveBeenCalledWith(true);
+    expect(h.videoHost.setFullscreen).toHaveBeenCalledWith(true);
+
+    await h.player.setFullscreen(h.current.playbackId, false, { origin: "local-user" });
+    expect(h.window.setKiosk).toHaveBeenCalledWith(false);
+    expect(h.videoHost.setFullscreen).toHaveBeenCalledWith(false);
+  });
+
   it("uses the Windows D3D11 profile before the software-safe embedded fallback", () => {
     expect(embeddedRenderProfileArgs("d3d11")).toEqual([
       "--vo=gpu-next", "--gpu-api=d3d11", "--gpu-context=d3d11", "--hwdec=auto-safe", "--panscan=0",
@@ -660,6 +677,7 @@ describe("MpvPlayerService natural completion", () => {
 
     expect(h.player.getState().nextEpisodeCountdown).toEqual({
       nextItemId: "episode-2",
+      itemType: "Episode",
       title: "episode-2",
       seriesName: "Series",
       seasonNumber: 2,
@@ -799,12 +817,19 @@ describe("MpvPlayerService natural completion", () => {
 
   it("suppresses solo Next Up when a watch-party coordinator assigns another participant", async () => {
     const h = harness({ nextId: "episode-2" });
+    const resolver = vi.fn(async () => ({
+      item: nextEpisode("episode-2"),
+      source: "jellyfin-next-up" as const,
+      continuationId: null,
+    }));
+    (h.playback as typeof h.playback & { getNextContinuation: typeof resolver }).getNextContinuation = resolver;
     h.player.setAutomaticTransitionsEnabled(false);
 
     (h.player as never as { handleMessage(message: unknown): void }).handleMessage({ event: "end-file", reason: "eof" });
     await waitFor(() => h.window.show.mock.calls.length === 1);
 
     expect(h.playback.getNextUpForSeries).not.toHaveBeenCalled();
+    expect(resolver).not.toHaveBeenCalled();
     expect(h.commands.some((command) => command[0] === "loadfile")).toBe(false);
     expect(h.player.getState().phase).toBe("ended");
   });

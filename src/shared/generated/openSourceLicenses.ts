@@ -9,7 +9,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "redistributionStatus": "source-only"
@@ -116,6 +116,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "3.1.1",
       "license": "MIT",
       "projectUrl": "https://github.com/Koromix/koffi",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "@leichtgewicht/ip-codec",
+      "version": "2.0.5",
+      "license": "MIT",
+      "projectUrl": "https://github.com/martinheidegger/ip-codec",
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -288,8 +296,24 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "@types/qrcode",
+      "version": "1.5.6",
+      "license": "MIT",
+      "projectUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "@types/responselike",
       "version": "1.0.3",
+      "license": "MIT",
+      "projectUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "@types/ws",
+      "version": "8.18.1",
       "license": "MIT",
       "projectUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
       "redistributionStatus": "source-and-binary"
@@ -496,6 +520,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "bonjour-service",
+      "version": "1.4.3",
+      "license": "MIT",
+      "projectUrl": "https://github.com/onlxltd/bonjour-service",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "boolean",
       "version": "3.2.0",
       "license": "MIT",
@@ -576,6 +608,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "camelcase",
+      "version": "5.3.1",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "chai",
       "version": "5.3.3",
       "license": "MIT",
@@ -625,7 +665,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "cliui",
-      "version": "8.0.1",
+      "version": "6.0.0",
       "license": "ISC",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -720,6 +760,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "decamelize",
+      "version": "1.2.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "decompress-response",
       "version": "6.0.0",
       "license": "MIT",
@@ -776,6 +824,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "dijkstrajs",
+      "version": "1.0.3",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "dir-compare",
       "version": "4.2.0",
       "license": "MIT",
@@ -788,6 +844,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "26.15.3",
       "license": "MIT",
       "projectUrl": "https://github.com/electron-userland/electron-builder",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "dns-packet",
+      "version": "5.6.1",
+      "license": "MIT",
+      "projectUrl": null,
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -1027,6 +1091,14 @@ export const OPEN_SOURCE_LICENSES = {
       "name": "filelist",
       "version": "1.0.6",
       "license": "Apache-2.0",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "find-up",
+      "version": "4.1.0",
+      "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
     },
@@ -1368,6 +1440,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "locate-path",
+      "version": "5.0.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "lodash",
       "version": "4.18.1",
       "license": "MIT",
@@ -1504,6 +1584,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "multicast-dns",
+      "version": "7.2.5",
+      "license": "MIT",
+      "projectUrl": "https://github.com/mafintosh/multicast-dns",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "nanoid",
       "version": "3.3.15",
       "license": "MIT",
@@ -1593,7 +1681,31 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "p-limit",
-      "version": "3.1.0",
+      "version": "2.3.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "p-locate",
+      "version": "4.1.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "p-try",
+      "version": "2.2.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "path-exists",
+      "version": "4.0.0",
       "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -1666,6 +1778,14 @@ export const OPEN_SOURCE_LICENSES = {
       "category": "dependency",
       "name": "plist",
       "version": "3.1.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "pngjs",
+      "version": "5.0.0",
       "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -1752,6 +1872,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "qrcode",
+      "version": "1.5.4",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "quick-lru",
       "version": "5.1.1",
       "license": "MIT",
@@ -1787,6 +1915,14 @@ export const OPEN_SOURCE_LICENSES = {
       "name": "require-from-string",
       "version": "2.0.2",
       "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "require-main-filename",
+      "version": "2.0.0",
+      "license": "ISC",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
     },
@@ -1892,6 +2028,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "7.0.1",
       "license": "MIT",
       "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "set-blocking",
+      "version": "2.0.0",
+      "license": "ISC",
+      "projectUrl": "https://github.com/yargs/set-blocking",
       "redistributionStatus": "source-and-binary"
     },
     {
@@ -2058,6 +2202,14 @@ export const OPEN_SOURCE_LICENSES = {
       "category": "dependency",
       "name": "temp",
       "version": "0.9.4",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "thunky",
+      "version": "1.1.0",
       "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -2248,6 +2400,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "which-module",
+      "version": "2.0.1",
+      "license": "ISC",
+      "projectUrl": "https://github.com/nexdrew/which-module",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "which",
       "version": "2.0.2",
       "license": "ISC",
@@ -2265,7 +2425,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "wrap-ansi",
-      "version": "7.0.0",
+      "version": "6.2.0",
       "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -2297,7 +2457,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "y18n",
-      "version": "5.0.8",
+      "version": "4.0.3",
       "license": "ISC",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -2313,7 +2473,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "yargs-parser",
-      "version": "21.1.1",
+      "version": "18.1.3",
       "license": "ISC",
       "projectUrl": "https://github.com/yargs/yargs-parser",
       "redistributionStatus": "source-and-binary"
@@ -2321,7 +2481,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "dependency",
       "name": "yargs",
-      "version": "17.7.3",
+      "version": "15.4.1",
       "license": "MIT",
       "projectUrl": "https://github.com/yargs/yargs",
       "redistributionStatus": "source-and-binary"

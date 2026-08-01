@@ -7,6 +7,12 @@ import type {
 } from "../../shared/contracts";
 import { AppError } from "./errors";
 import type { SqlitePersistenceService } from "./persistence";
+import type {
+  PlaybackContinuationItem,
+  PlaybackContinuationResolver,
+  PlaybackContinuationResult,
+  PlaybackContinuationTransactions,
+} from "./playbackContinuationResolver";
 interface PlaybackApi {
   getAuthenticatedContext?(): { serverId: string; userId: string };
   getConnectionDiagnostics?(): import("../../shared/contracts").JellyfinConnectionDiagnostics;
@@ -133,6 +139,7 @@ export class PlaybackSessionService {
     private readonly api: PlaybackApi,
     private readonly localResolver?: LocalSourceResolver,
     private readonly persistence?: PlaybackCatalogPersistence,
+    private readonly continuation?: PlaybackContinuationResolver & PlaybackContinuationTransactions,
   ) {}
 
   async start(
@@ -358,6 +365,33 @@ export class PlaybackSessionService {
 
   async getNextUpForSeries(seriesId: string): Promise<import("../../shared/contracts").MediaItem | null> {
     return this.api.getNextUpForSeries?.(seriesId) ?? null;
+  }
+
+  getNextContinuation(current: PlaybackContinuationItem): Promise<PlaybackContinuationResult | null> {
+    if (this.continuation) return this.continuation.getNext(current);
+    if (current.itemType !== "Episode" || !current.seriesId) return Promise.resolve(null);
+    return this.getNextUpForSeries(current.seriesId).then((item) => (
+      item && item.id !== current.itemId
+        ? { item, source: "jellyfin-next-up" as const, continuationId: null }
+        : null
+    ));
+  }
+
+  reserveContinuation(continuationId: string, completedPlaybackId: string): void {
+    this.continuation?.reserve(continuationId, completedPlaybackId);
+  }
+
+  releaseContinuation(continuationId: string | null): void {
+    this.continuation?.release(continuationId);
+  }
+
+  commitContinuation(continuationId: string, completedPlaybackId: string): void {
+    try {
+      this.continuation?.commit(continuationId, completedPlaybackId);
+    } catch (error) {
+      this.continuation?.recoverAfterInvariant?.(continuationId);
+      throw error;
+    }
   }
 
   stop(playbackId: string): PlaybackState {

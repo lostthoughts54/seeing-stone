@@ -150,8 +150,9 @@ export interface PlaybackTrack {
   external?: boolean;
 }
 
-export interface NextEpisodeCountdown {
+export interface NextItemCountdown {
   nextItemId: string;
+  itemType?: "Movie" | "Episode" | "Video";
   title: string;
   seriesName: string | null;
   seasonNumber: number | null;
@@ -159,6 +160,9 @@ export interface NextEpisodeCountdown {
   remainingSeconds: number;
   totalSeconds: number;
 }
+
+/** @deprecated Use NextItemCountdown. */
+export type NextEpisodeCountdown = NextItemCountdown;
 
 export interface PlaybackState {
   playbackId: string | null;
@@ -176,7 +180,7 @@ export interface PlaybackState {
   fullscreen: boolean;
   audioTracks: PlaybackTrack[];
   subtitleTracks: PlaybackTrack[];
-  nextEpisodeCountdown?: NextEpisodeCountdown | null;
+  nextEpisodeCountdown?: NextItemCountdown | null;
   error: string | null;
   contentKind?: "on-demand" | "live-tv";
 }
@@ -629,6 +633,7 @@ export interface JellyfinBridge {
     copyCleanMachine(): Promise<CleanMachineDiagnosticActionResult>;
     saveCleanMachine(): Promise<CleanMachineDiagnosticActionResult>;
   };
+  companion: CompanionSettingsBridge;
   watchParties: {
     getState(): Promise<WatchPartyViewState>;
     list(): Promise<WatchPartyViewState>;
@@ -709,6 +714,15 @@ export const IPC = {
   diagnosticsGetCleanMachine: "diagnostics:get-clean-machine",
   diagnosticsCopyCleanMachine: "diagnostics:copy-clean-machine",
   diagnosticsSaveCleanMachine: "diagnostics:save-clean-machine",
+  companionGetStatus: "companion:get-status",
+  companionSetEnabled: "companion:set-enabled",
+  companionSelectNetwork: "companion:select-network",
+  companionBeginPairing: "companion:begin-pairing",
+  companionCancelPairing: "companion:cancel-pairing",
+  companionRenameDevice: "companion:rename-device",
+  companionRevokeDevice: "companion:revoke-device",
+  companionRegeneratePort: "companion:regenerate-port",
+  companionChanged: "companion:changed",
   watchPartiesGetState: "watch-parties:get-state",
   watchPartiesList: "watch-parties:list",
   watchPartiesCreate: "watch-parties:create",
@@ -721,3 +735,4 @@ export const IPC = {
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",
 } as const;
+import type { CompanionSettingsBridge } from "./companionContracts";

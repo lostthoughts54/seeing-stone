@@ -1,0 +1,35 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0d0912; color: #f7f1ff; --plum:#24162f; --violet:#a985ff; --strong:#7c4dff; --muted:#b9acc5; --line:#493554; }
+* { box-sizing: border-box; }
+html { min-width: 320px; background: #0d0912; }
+body { margin:0; min-height:100dvh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background:radial-gradient(circle at 90% 0,#39204e 0,#0d0912 38rem); }
+button,input,select,summary { min-height:44px; font:inherit; }
+button,input,select { border:1px solid var(--line); border-radius:12px; color:inherit; background:#1b1223; }
+button { padding:.65rem .9rem; cursor:pointer; } button:disabled { cursor:not-allowed; opacity:.42; }
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible { outline:3px solid #d7c7ff; outline-offset:2px; }
+input,select { width:100%; padding:.65rem .8rem; }
+.app-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.1rem max(1rem,4vw); }
+h1,h2,h3,p { overflow-wrap:anywhere; } h1 { margin:0; font-size:clamp(1.3rem,6vw,2rem); } h1 span { color:var(--violet); font-size:.55em; text-transform:uppercase; letter-spacing:.12em; }
+.eyebrow { margin:0 0 .25rem; color:var(--violet); font-size:.75rem; font-weight:800; text-transform:uppercase; letter-spacing:.16em; }
+.connection { color:var(--muted); text-align:right; }
+main { width:min(64rem,100%); margin-inline:auto; padding:0 max(1rem,4vw) 2rem; }
+.panel { border:1px solid #362640; border-radius:20px; padding:clamp(1rem,4vw,1.5rem); background:#24162fe8; box-shadow:0 1rem 4rem #0006; }
+.hidden { display:none!important; }
+.tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; margin-bottom:.75rem; position:sticky; top:env(safe-area-inset-top); z-index:3; }
+.tabs button { padding-inline:.3rem; font-size:clamp(.72rem,3.4vw,.95rem); } .tabs [aria-current="page"] { background:var(--strong); border-color:var(--violet); }
+.primary { background:var(--strong); border-color:#cbb9ff; min-width:5.5rem; }
+.transport { display:grid; grid-template-columns:repeat(5,minmax(44px,1fr)); gap:.45rem; margin:1rem 0; }
+.volume-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:.6rem; }
+.progress-wrap { margin-top:2rem; } .time-row { display:flex; justify-content:space-between; color:var(--muted); font-variant-numeric:tabular-nums; }
+.muted { color:var(--muted); } .warning,.error { color:#ffd1b8; }
+details { border-top:1px solid var(--line); margin-top:1.25rem; padding-top:.75rem; } details label { display:block; margin:.8rem 0 .35rem; } summary { display:flex; align-items:center; cursor:pointer; }
+.section-heading { display:flex; justify-content:space-between; align-items:center; gap:.75rem; }
+.media-list,.media-grid { list-style:none; padding:0; display:grid; gap:.65rem; }
+.media-grid { grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr)); margin-top:1rem; }
+.media-card { border:1px solid var(--line); border-radius:14px; padding:.85rem; background:#160e1d; } .media-card strong,.media-card span { display:block; }
+.media-card img { width:100%; aspect-ratio:2/3; margin-bottom:.65rem; border-radius:.65rem; object-fit:cover; background:#0d0912; }
+.media-card .actions { display:flex; gap:.4rem; margin-top:.75rem; flex-wrap:wrap; } .media-card .actions button { flex:1; }
+#pairForm { display:grid; gap:.65rem; max-width:28rem; }
+.skip-link { position:fixed; left:.5rem; top:-5rem; z-index:20; background:#fff; color:#000; padding:.75rem; } .skip-link:focus { top:.5rem; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+@media (orientation:landscape) and (max-height:520px) { .app-header{padding-block:.5rem}.panel{padding:.8rem}.progress-wrap{margin-top:.5rem} }
+@media (prefers-reduced-motion:no-preference) { button{transition:transform 100ms ease,background 140ms ease}button:active{transform:scale(.97)} }

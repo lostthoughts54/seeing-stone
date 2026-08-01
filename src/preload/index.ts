@@ -60,6 +60,7 @@ import {
   type WatchPartyVisibilityInput,
   type WatchPartyViewState,
 } from "../shared/contracts";
+import type { CompanionSettingsState } from "../shared/companionContracts";
 
 async function invoke<T>(channel: string, input?: unknown): Promise<T> {
   const result = await ipcRenderer.invoke(channel, input) as RpcResult<T>;
@@ -178,6 +179,21 @@ const bridge: JellyfinBridge = {
     getCleanMachine: () => invoke<CleanMachineDiagnostics>(IPC.diagnosticsGetCleanMachine),
     copyCleanMachine: () => invoke<CleanMachineDiagnosticActionResult>(IPC.diagnosticsCopyCleanMachine),
     saveCleanMachine: () => invoke<CleanMachineDiagnosticActionResult>(IPC.diagnosticsSaveCleanMachine),
+  },
+  companion: {
+    getStatus: () => invoke<CompanionSettingsState>(IPC.companionGetStatus),
+    setEnabled: (input) => invoke<CompanionSettingsState>(IPC.companionSetEnabled, input),
+    selectNetwork: (input) => invoke<CompanionSettingsState>(IPC.companionSelectNetwork, input),
+    beginPairing: () => invoke<CompanionSettingsState>(IPC.companionBeginPairing),
+    cancelPairing: () => invoke<CompanionSettingsState>(IPC.companionCancelPairing),
+    renameDevice: (input) => invoke<CompanionSettingsState>(IPC.companionRenameDevice, input),
+    revokeDevice: (input) => invoke<CompanionSettingsState>(IPC.companionRevokeDevice, input),
+    regeneratePort: (input) => invoke(IPC.companionRegeneratePort, input),
+    subscribe: (listener) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: CompanionSettingsState) => listener(state);
+      ipcRenderer.on(IPC.companionChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.companionChanged, receive);
+    },
   },
   watchParties: {
     getState: () => invoke<WatchPartyViewState>(IPC.watchPartiesGetState),

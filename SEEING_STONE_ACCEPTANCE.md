@@ -1,5 +1,18 @@
 # Seeing Stone Gates 0–6 Acceptance
 
+## 0.6.0 Beta — Companion Remote
+
+- No LAN listener exists on a fresh install or before explicit enablement.
+- The listener binds only the selected RFC1918 IPv4 adapter and high persisted port.
+- Pairing is five-minute, single-use, throttled, and produces only an HttpOnly device cookie.
+- Logout, server change, disable, and exit close HTTP, WebSocket, mDNS, pairing, capabilities, and queue reservations.
+- Desktop and phone actions use the same playback command service and preserve SyncPlay routing.
+- Explicit queue continuation works after movies, episodes, and videos; Jellyfin Next Up is episode-only.
+- Queue reservation and commit use the exact queue entry ID, including duplicate media.
+- The packaged mobile UI shows “Seeing Stone — Companion Remote,” uses 44×44 CSS-pixel targets, and contains no service worker or external assets.
+- Port regeneration cannot proceed without the Home Screen shortcut warning.
+- Physical iPhone acceptance still requires Safari/Home Screen, Wi-Fi loss, DHCP change, mDNS fallback, VoiceOver, orientation, and 200% text checks.
+
 This record contains only sanitized, synthetic, or repository-owned evidence. It intentionally omits media locations, server addresses, credentials, authenticated URLs, and user data.
 
 ## Safety boundary

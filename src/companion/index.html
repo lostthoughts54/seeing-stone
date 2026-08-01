@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#17111f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Seeing Stone">
+    <title>Seeing Stone — Companion Remote</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/seeing-stone.svg">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to controls</a>
+    <header class="app-header">
+      <div><p class="eyebrow">Seeing Stone</p><h1>Companion Remote <span>Beta</span></h1></div>
+      <output id="connection" class="connection" aria-live="polite">Connecting…</output>
+    </header>
+    <main id="main">
+      <section id="pairing" class="panel hidden" aria-labelledby="pairingTitle">
+        <h2 id="pairingTitle">Pair this phone</h2>
+        <p>On the desktop, open Companion Remote (Beta) and choose <strong>Pair a phone</strong>.</p>
+        <form id="pairForm">
+          <label for="deviceName">Device name</label>
+          <input id="deviceName" name="name" maxlength="40" autocomplete="name" value="iPhone" required>
+          <label for="pairCode">8-digit code</label>
+          <input id="pairCode" name="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code">
+          <button type="submit">Pair securely</button>
+        </form>
+        <output id="pairError" class="error" aria-live="assertive"></output>
+      </section>
+      <div id="remote" class="hidden">
+        <nav class="tabs" aria-label="Companion sections">
+          <button data-view="player" aria-current="page">Now Playing</button>
+          <button data-view="queue">Up Next</button>
+          <button data-view="browse">Browse</button>
+          <button data-view="settings">Settings</button>
+        </nav>
+        <section id="playerView" class="view panel" aria-labelledby="nowPlayingTitle">
+          <p class="eyebrow">Now Playing</p><h2 id="nowPlayingTitle">Nothing playing</h2>
+          <p id="mediaDetail" class="muted"></p>
+          <div class="progress-wrap">
+            <label class="sr-only" for="seek">Playback position</label>
+            <input id="seek" type="range" min="0" max="1000" value="0">
+            <div class="time-row"><span id="position">0:00</span><span id="duration">0:00</span></div>
+          </div>
+          <div class="transport" aria-label="Playback controls">
+            <button id="previous" aria-label="Previous">‹‹</button><button id="seekBack" aria-label="Back 10 seconds">−10</button>
+            <button id="playPause" class="primary" aria-label="Play or pause">Play</button>
+            <button id="seekForward" aria-label="Forward 30 seconds">+30</button><button id="next" aria-label="Next">››</button>
+          </div>
+          <div class="volume-row">
+            <button id="mute">Mute</button><label class="sr-only" for="volume">Volume</label>
+            <input id="volume" type="range" min="0" max="100" value="100"><button id="stop">Stop</button>
+          </div>
+          <button id="goLive" class="primary hidden">Go Live</button>
+          <details><summary>Audio and subtitles</summary>
+            <label for="audioTrack">Audio</label><select id="audioTrack"></select>
+            <label for="subtitleTrack">Subtitles</label><select id="subtitleTrack"></select>
+          </details>
+        </section>
+        <section id="queueView" class="view panel hidden" aria-labelledby="queueTitle">
+          <div class="section-heading"><h2 id="queueTitle">Up Next</h2><button id="clearQueue">Clear upcoming</button></div>
+          <p id="queueMessage" class="muted"></p><ol id="queueList" class="media-list"></ol>
+        </section>
+        <section id="browseView" class="view panel hidden" aria-labelledby="browseTitle">
+          <h2 id="browseTitle">Browse</h2>
+          <form id="searchForm" role="search"><label class="sr-only" for="search">Search your Jellyfin library</label>
+            <input id="search" type="search" maxlength="100" placeholder="Search movies, shows, episodes"></form>
+          <div id="browseList" class="media-grid" aria-live="polite"></div>
+        </section>
+        <section id="settingsView" class="view panel hidden" aria-labelledby="settingsTitle">
+          <h2 id="settingsTitle">Connection</h2><p>Paired with Seeing Stone.</p>
+          <h3>Add to Home Screen</h3>
+          <p>In Safari, tap Share, then <strong>Add to Home Screen</strong>. On iOS before 17.2 you may need to pair again after installation.</p>
+          <p>Controls use touch targets of at least 44×44 CSS pixels and support VoiceOver, text zoom, and reduced motion.</p>
+          <p class="warning">This Beta uses HTTP on your private network. A hostile device on the same network could observe or alter traffic.</p>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/app.ts"></script>
+  </body>
+</html>

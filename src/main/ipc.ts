@@ -1,4 +1,5 @@
 import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
+import { z } from "zod";
 import {
   IPC,
   type CleanMachineDiagnosticActionResult,
@@ -54,6 +55,8 @@ import type { PlayerPreferencesService } from "./services/playerPreferences";
 import type { PlayerAdapterLaunchStatus } from "./services/playerAdapterSelection";
 import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
+import type { CompanionSettingsBridge } from "../shared/companionContracts";
+import type { PlaybackCommandService } from "./services/playbackCommandService";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
 
@@ -80,6 +83,11 @@ export interface CleanMachineDiagnosticsProvider {
 
 export interface PlaybackViewportSink {
   updateViewport(viewport: VideoViewport & { deviceScaleFactor?: number }): void;
+}
+
+export interface CompanionController extends CompanionSettingsBridge {
+  activateAfterLogin?(): Promise<void>;
+  stopForSessionChange?(): Promise<void>;
 }
 
 function safeResult<T>(handler: Handler<T>): Handler<RpcResult<T>> {
@@ -126,6 +134,8 @@ export function registerIpcHandlers(
   soloSessionDiagnostics?: SoloSessionDiagnosticsProvider,
   openSourceLicenses?: OpenSourceLicensesProvider,
   cleanMachineDiagnostics?: CleanMachineDiagnosticsProvider,
+  companion?: CompanionController,
+  playbackCommands?: PlaybackCommandService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -144,7 +154,10 @@ export function registerIpcHandlers(
     window.close();
   });
   register(IPC.serverDiscover, () => discoverServers());
-  register(IPC.serverConnect, (input) => api.connect(serverUrlSchema.strict().parse(input).url));
+  register(IPC.serverConnect, async (input) => {
+    await companion?.stopForSessionChange?.();
+    return api.connect(serverUrlSchema.strict().parse(input).url);
+  });
   register(IPC.sessionLogin, async (input) => {
     const value = loginSchema.strict().parse(input);
     await syncPlay?.deactivate();
@@ -152,16 +165,19 @@ export function registerIpcHandlers(
     await playback.clear();
     await downloads.deactivate();
     synchronization.deactivate();
+    await companion?.stopForSessionChange?.();
     const session = await api.login(value.connectionId, value.username, value.password, value.remember);
     await downloads.activate();
     synchronization.activate();
     await syncPlay?.activate();
+    await companion?.activateAfterLogin?.();
     return session;
   });
   register(IPC.sessionRestore, async () => {
     await syncPlay?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
+    await companion?.stopForSessionChange?.();
     const session = await api.restore();
     artwork.clear();
     await playback.clear();
@@ -169,11 +185,13 @@ export function registerIpcHandlers(
       await downloads.activate();
       synchronization.activate();
       await syncPlay?.activate();
+      await companion?.activateAfterLogin?.();
     }
     return session;
   });
   register(IPC.sessionGetState, () => api.getSafeSession());
   register(IPC.sessionLogout, async () => {
+    await companion?.stopForSessionChange?.();
     await syncPlay?.deactivate();
     artwork.clear();
     await playback.clear();
@@ -276,21 +294,25 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.start(value.itemId, value.resumeMode, false, "local-user");
     if (syncPlay?.isJoined()) return syncPlay.selectItem(value.itemId, value.resumeMode);
     return playback.loadItem(value.itemId, value.resumeMode, { origin: "local-user" });
   });
   register(IPC.playbackStartLive, (input) => {
     const value = liveTvPlaybackSchema.parse(input);
+    if (playbackCommands) return playbackCommands.startLive(value.channelId, "local-user");
     if (syncPlay?.isJoined()) throw new AppError("LIVE_TV_WATCH_PARTY_UNAVAILABLE", "Live TV cannot be started in a watch party.", 409);
     return playback.loadItem(value.channelId, "start-over", { origin: "local-user" });
   });
   register(IPC.playbackSetPaused, (input) => {
     const value = playbackPauseSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.setPaused(value.playbackId, value.paused, "local-user");
     if (syncPlay?.isJoined()) return syncPlay.requestPaused(value.paused);
     return playback.setPaused(value.playbackId, value.paused, { origin: "local-user" });
   });
   register(IPC.playbackSeek, (input) => {
     const value = playbackSeekSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.seek(value.playbackId, value.positionTicks, "local-user");
     if (playback.getState().contentKind === "live-tv") {
       throw new AppError("LIVE_TV_SEEK_UNAVAILABLE", "Use Go Live to return to the current live edge.", 422);
     }
@@ -299,22 +321,27 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackSetRate, (input) => {
     const value = playbackRateSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.setRate(value.playbackId, value.rate, "local-user");
     return playback.setRate(value.playbackId, value.rate, { origin: "local-user" });
   });
   register(IPC.playbackSetVolume, (input) => {
     const value = playbackVolumeSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.setVolume(value.playbackId, value.volume, "local-user");
     return playback.setVolume(value.playbackId, value.volume, { origin: "local-user" });
   });
   register(IPC.playbackSelectAudio, (input) => {
     const value = playbackTrackSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.selectAudio(value.playbackId, value.trackId);
     return playback.selectAudio(value.playbackId, value.trackId);
   });
   register(IPC.playbackSelectSubtitle, (input) => {
     const value = playbackTrackSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.selectSubtitle(value.playbackId, value.trackId);
     return playback.selectSubtitle(value.playbackId, value.trackId);
   });
   register(IPC.playbackSetFullscreen, (input) => {
     const value = playbackFullscreenSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.setFullscreen(value.playbackId, value.fullscreen, "local-user");
     return playback.setFullscreen(value.playbackId, value.fullscreen, { origin: "local-user" });
   });
   register(IPC.playbackContinueNextEpisode, (input) => {
@@ -327,6 +354,7 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackStop, (input) => {
     const value = playbackIdSchema.strict().parse(input);
+    if (playbackCommands) return playbackCommands.stop(value.playbackId, "local-user");
     if (syncPlay?.isJoined()) return syncPlay.requestStop();
     return playback.stop(value.playbackId, "stopped", { origin: "local-user" });
   });
@@ -385,6 +413,37 @@ export function registerIpcHandlers(
     if (!cleanMachineDiagnostics) throw new AppError("DIAGNOSTICS_UNAVAILABLE", "Clean-machine diagnostics are unavailable.", 503);
     return cleanMachineDiagnostics.saveReport();
   });
+  const requireCompanion = (): CompanionController => {
+    if (!companion) throw new AppError("COMPANION_UNAVAILABLE", "Companion Remote is unavailable in this build.", 503);
+    return companion;
+  };
+  register(IPC.companionGetStatus, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireCompanion().getStatus();
+  });
+  register(IPC.companionSetEnabled, (input) => requireCompanion().setEnabled(
+    z.object({ enabled: z.boolean() }).strict().parse(input),
+  ));
+  register(IPC.companionSelectNetwork, (input) => requireCompanion().selectNetwork(
+    z.object({ networkId: z.string().min(1).max(128) }).strict().parse(input),
+  ));
+  register(IPC.companionBeginPairing, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireCompanion().beginPairing();
+  });
+  register(IPC.companionCancelPairing, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireCompanion().cancelPairing();
+  });
+  register(IPC.companionRenameDevice, (input) => requireCompanion().renameDevice(
+    z.object({ deviceId: z.string().uuid(), name: z.string().min(1).max(40) }).strict().parse(input),
+  ));
+  register(IPC.companionRevokeDevice, (input) => requireCompanion().revokeDevice(
+    z.object({ deviceId: z.string().uuid() }).strict().parse(input),
+  ));
+  register(IPC.companionRegeneratePort, (input) => requireCompanion().regeneratePort(
+    z.object({ confirmed: z.literal(true) }).strict().parse(input),
+  ));
   const requireSyncPlay = (): SyncPlayService => {
     if (!syncPlay) throw new AppError("SYNCPLAY_UNAVAILABLE", "Watch parties are unavailable in this build.", 503);
     return syncPlay;

@@ -80,3 +80,25 @@ Watch party should be a later sync layer:
 - Each client resolves local or server playback independently.
 - A session coordinator syncs play, pause, seek, and time drift.
 - Sync should tolerate buffering differences between local and server sources.
+
+## Companion Remote (0.6.0 Beta)
+
+The optional Companion Remote is owned entirely by Electron main. It binds one
+selected RFC1918 IPv4 address, serves the packaged mobile bundle over HTTP, and
+accepts authenticated state-only WebSockets on the same origin. Pairing,
+credentials, capabilities, library projection, artwork, rate limits, queue
+state, and shutdown remain outside both renderers.
+
+Desktop IPC and Companion commands converge on `PlaybackCommandService`.
+Natural completion converges on `PlaybackContinuationResolver`: explicit queue
+entries are peeked and reserved by unique queue entry ID, then committed only
+after the new playback ID is adopted. SyncPlay disables automatic transitions
+before this resolver boundary, and Live TV never enters it.
+
+```text
+desktop IPC ─┐
+             ├─> PlaybackCommandService ─> PlayerController
+phone POST ──┘                              │
+                                           ├─> sanitized player state
+explicit queue ─> continuation resolver ───┘
+```

@@ -3363,6 +3363,60 @@ select option {
   }
 }
 
+.companion-panel {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+.beta-label {
+  color: #c79cff;
+  font-size: .55em;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.companion-toggle {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin: 1rem 0;
+}
+
+.companion-toggle input {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.companion-addresses {
+  margin: .75rem 0;
+  color: #cbc4d2;
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.companion-pairing {
+  display: grid;
+  justify-items: center;
+  gap: .4rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(178,82,255,.45);
+  border-radius: 1rem;
+  background: rgba(14,9,19,.65);
+}
+
+.companion-pairing img {
+  width: min(18rem, 100%);
+  border-radius: .75rem;
+  background: white;
+}
+
+.companion-pairing strong {
+  font-size: 1.75rem;
+  letter-spacing: .22em;
+}
+
 @media (max-width: 440px) {
   .server-input-row {
     grid-template-columns: 1fr;

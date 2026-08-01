@@ -1,11 +1,12 @@
 import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
 
-export const DATABASE_SCHEMA_VERSION = 5;
+export const DATABASE_SCHEMA_VERSION = 6;
 
 export type ApplicationPreferenceKey =
   | "player.adapter-mode"
   | "watchparty.buffering-policy"
-  | "player.cached-diagnostics";
+  | "player.cached-diagnostics"
+  | "companion.settings";
 
 export interface ApplicationPreferenceRecord {
   key: ApplicationPreferenceKey;

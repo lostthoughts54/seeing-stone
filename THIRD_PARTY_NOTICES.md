@@ -7,7 +7,7 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.5.0 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.6.0 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
@@ -41,6 +41,7 @@ The current native runtime remains internal-only because upstream did not record
 | @isaacs/fs-minipass | 4.0.1 | ISC |
 | @jridgewell/sourcemap-codec | 1.5.5 | MIT |
 | @koromix/koffi-win32-x64 | 3.1.1 | MIT |
+| @leichtgewicht/ip-codec | 2.0.5 | MIT |
 | @malept/cross-spawn-promise | 2.0.0 | Apache-2.0 |
 | @malept/flatpak-bundler | 0.4.0 | MIT |
 | @noble/hashes | 2.2.0 | MIT |
@@ -62,7 +63,9 @@ The current native runtime remains internal-only because upstream did not record
 | @types/keyv | 3.1.4 | MIT |
 | @types/ms | 2.1.0 | MIT |
 | @types/node | 24.13.3 | MIT |
+| @types/qrcode | 1.5.6 | MIT |
 | @types/responselike | 1.0.3 | MIT |
+| @types/ws | 8.18.1 | MIT |
 | @vitest/expect | 3.2.7 | MIT |
 | @vitest/mocker | 3.2.7 | MIT |
 | @vitest/pretty-format | 3.2.7 | MIT |
@@ -88,6 +91,7 @@ The current native runtime remains internal-only because upstream did not record
 | balanced-match | 1.0.2 | MIT |
 | base64-js | 1.5.1 | MIT |
 | bluebird | 3.7.2 | MIT |
+| bonjour-service | 1.4.3 | MIT |
 | boolean | 3.2.0 | MIT |
 | brace-expansion | 2.1.2 | MIT |
 | buffer-from | 1.1.2 | MIT |
@@ -98,13 +102,14 @@ The current native runtime remains internal-only because upstream did not record
 | cacheable-lookup | 5.0.4 | MIT |
 | cacheable-request | 7.0.4 | MIT |
 | call-bind-apply-helpers | 1.0.2 | MIT |
+| camelcase | 5.3.1 | MIT |
 | chai | 5.3.3 | MIT |
 | chalk | 4.1.2 | MIT |
 | check-error | 2.1.3 | MIT |
 | chownr | 3.0.0 | BlueOak-1.0.0 |
 | chromium-pickle-js | 0.2.0 | MIT |
 | ci-info | 4.3.1 | MIT |
-| cliui | 8.0.1 | ISC |
+| cliui | 6.0.0 | ISC |
 | clone-response | 1.0.3 | MIT |
 | color-convert | 2.0.1 | MIT |
 | color-name | 1.1.4 | MIT |
@@ -116,6 +121,7 @@ The current native runtime remains internal-only because upstream did not record
 | cross-dirname | 0.1.0 | MIT |
 | cross-spawn | 7.0.6 | MIT |
 | debug | 4.4.3 | MIT |
+| decamelize | 1.2.0 | MIT |
 | decompress-response | 6.0.0 | MIT |
 | deep-eql | 5.0.2 | MIT |
 | defer-to-connect | 2.0.1 | MIT |
@@ -123,8 +129,10 @@ The current native runtime remains internal-only because upstream did not record
 | define-properties | 1.2.1 | MIT |
 | delayed-stream | 1.0.0 | MIT |
 | detect-node | 2.1.0 | MIT |
+| dijkstrajs | 1.0.3 | MIT |
 | dir-compare | 4.2.0 | MIT |
 | dmg-builder | 26.15.3 | MIT |
+| dns-packet | 5.6.1 | MIT |
 | dotenv-expand | 11.0.7 | BSD-2-Clause |
 | dotenv | 16.6.1 | BSD-2-Clause |
 | dunder-proto | 1.0.1 | MIT |
@@ -155,6 +163,7 @@ The current native runtime remains internal-only because upstream did not record
 | fast-uri | 3.1.3 | BSD-3-Clause |
 | fdir | 6.5.0 | MIT |
 | filelist | 1.0.6 | Apache-2.0 |
+| find-up | 4.1.0 | MIT |
 | form-data | 4.0.6 | MIT |
 | fs-extra | 10.1.0 | MIT |
 | fs.realpath | 1.0.0 | ISC |
@@ -197,6 +206,7 @@ The current native runtime remains internal-only because upstream did not record
 | keyv | 4.5.4 | MIT |
 | koffi | 3.1.1 | MIT |
 | lazy-val | 1.0.5 | MIT |
+| locate-path | 5.0.0 | MIT |
 | lodash | 4.18.1 | MIT |
 | loupe | 3.2.1 | MIT |
 | lowercase-keys | 2.0.0 | MIT |
@@ -214,6 +224,7 @@ The current native runtime remains internal-only because upstream did not record
 | minizlib | 3.1.0 | MIT |
 | mkdirp | 0.5.6 | MIT |
 | ms | 2.1.3 | MIT |
+| multicast-dns | 7.2.5 | MIT |
 | nanoid | 3.3.15 | MIT |
 | node-abi | 4.33.0 | MIT |
 | node-addon-api | 8.5.0 | MIT |
@@ -225,7 +236,10 @@ The current native runtime remains internal-only because upstream did not record
 | object-keys | 1.1.1 | MIT |
 | once | 1.4.0 | ISC |
 | p-cancelable | 2.1.1 | MIT |
-| p-limit | 3.1.0 | MIT |
+| p-limit | 2.3.0 | MIT |
+| p-locate | 4.1.0 | MIT |
+| p-try | 2.2.0 | MIT |
+| path-exists | 4.0.0 | MIT |
 | path-is-absolute | 1.0.1 | MIT |
 | path-key | 3.1.1 | MIT |
 | pathe | 2.0.3 | MIT |
@@ -235,6 +249,7 @@ The current native runtime remains internal-only because upstream did not record
 | picomatch | 4.0.5 | MIT |
 | pkijs | 3.4.0 | BSD-3-Clause |
 | plist | 3.1.0 | MIT |
+| pngjs | 5.0.0 | MIT |
 | postcss | 8.5.16 | MIT |
 | postject | 1.0.0-alpha.6 | MIT |
 | proc-log | 6.1.0 | ISC |
@@ -245,11 +260,13 @@ The current native runtime remains internal-only because upstream did not record
 | pump | 3.0.4 | MIT |
 | pvtsutils | 1.3.6 | MIT |
 | pvutils | 1.1.5 | MIT |
+| qrcode | 1.5.4 | MIT |
 | quick-lru | 5.1.1 | MIT |
 | read-binary-file-arch | 1.0.6 | MIT |
 | readable-stream | 2.3.8 | MIT |
 | require-directory | 2.1.1 | MIT |
 | require-from-string | 2.0.2 | MIT |
+| require-main-filename | 2.0.0 | ISC |
 | resedit | 1.7.2 | MIT |
 | resolve-alpn | 1.2.1 | MIT |
 | responselike | 2.0.1 | MIT |
@@ -263,6 +280,7 @@ The current native runtime remains internal-only because upstream did not record
 | semver-compare | 1.0.0 | MIT |
 | semver | 7.8.5 | ISC |
 | serialize-error | 7.0.1 | MIT |
+| set-blocking | 2.0.0 | ISC |
 | shebang-command | 2.0.0 | MIT |
 | shebang-regex | 3.0.0 | MIT |
 | siginfo | 2.0.0 | ISC |
@@ -284,6 +302,7 @@ The current native runtime remains internal-only because upstream did not record
 | tar | 7.5.20 | BlueOak-1.0.0 |
 | temp-file | 3.4.0 | MIT |
 | temp | 0.9.4 | MIT |
+| thunky | 1.1.0 | MIT |
 | tiny-async-pool | 1.3.0 | MIT |
 | tinybench | 2.9.0 | MIT |
 | tinyexec | 0.3.2 | MIT |
@@ -307,16 +326,17 @@ The current native runtime remains internal-only because upstream did not record
 | vite | 7.3.6 | MIT |
 | vitest | 3.2.7 | MIT |
 | webcrypto-core | 1.9.2 | MIT |
+| which-module | 2.0.1 | ISC |
 | which | 2.0.2 | ISC |
 | why-is-node-running | 2.3.0 | MIT |
-| wrap-ansi | 7.0.0 | MIT |
+| wrap-ansi | 6.2.0 | MIT |
 | wrappy | 1.0.2 | ISC |
 | ws | 8.18.3 | MIT |
 | xmlbuilder | 15.1.1 | MIT |
-| y18n | 5.0.8 | ISC |
+| y18n | 4.0.3 | ISC |
 | yallist | 5.0.0 | BlueOak-1.0.0 |
-| yargs-parser | 21.1.1 | ISC |
-| yargs | 17.7.3 | MIT |
+| yargs-parser | 18.1.3 | ISC |
+| yargs | 15.4.1 | MIT |
 | yocto-queue | 0.1.0 | MIT |
 | zod | 4.4.3 | MIT |
 

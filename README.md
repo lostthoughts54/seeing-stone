@@ -1,6 +1,6 @@
 # Seeing Stone
 
-Current application version: `0.5.0`.
+Current application version: `0.6.0 Beta`.
 
 Seeing Stone is a Windows-first, local-first Jellyfin client. This repository
 contains the Electron client built from the accepted `0.3.0` interface baseline.
@@ -24,6 +24,7 @@ contains the Electron client built from the accepted `0.3.0` interface baseline.
 - Coalesces ordinary offline progress without dropping completion or newer explicit Start Over, replay, watched, or unwatched actions.
 - Lets users explicitly mark movies or episodes watched or unwatched from details and episode rows; offline actions remain queued durably.
 - Closes movies at natural completion and uses Jellyfin Next Up for episode autoplay after a cancellable countdown.
+- Adds an opt-in Companion Remote (Beta) for paired phones on one selected private IPv4 network, with an explicit queue that continues after movies, episodes, and videos.
 - Initializes a versioned SQLite database in a worker thread for later downloads, verified local versions, and offline progress.
 - Downloads individual movies and episodes into the user's Videos folder through a main-owned transfer queue.
 - Selects an entire season or any combination of episodes and queues them through the same item-ID-only download boundary.
@@ -42,6 +43,10 @@ contains the Electron client built from the accepted `0.3.0` interface baseline.
 - Produces a branded x64 Windows installer with the sandboxed application and pinned mpv runtime packaged together.
 
 ## Try it
+
+Companion Remote is disabled by default. After signing in, open the profile menu,
+choose **Companion Remote (Beta)**, select a trusted private network, enable it,
+and choose **Pair a phone**. See [COMPANION_REMOTE.md](COMPANION_REMOTE.md).
 
 Install dependencies and the bundled mpv runtime once:
 

@@ -22,6 +22,7 @@ import type {
   SoloSessionDiagnostics,
   WatchPartyViewState,
 } from "../shared/contracts";
+import type { CompanionSettingsState } from "../shared/companionContracts";
 import { BRANDING } from "../shared/branding";
 import {
   connectionStatePresentation,
@@ -77,6 +78,7 @@ const serverLabel = byId<HTMLElement>("serverLabel");
 const profileAdapterSelect = byId<HTMLSelectElement>("profileAdapterSelect");
 const profileAdapterStatus = byId<HTMLElement>("profileAdapterStatus");
 const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
+const companionButton = byId<HTMLButtonElement>("companionButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
 
@@ -240,6 +242,22 @@ const saveCleanMachineDiagnosticsButton = byId<HTMLButtonElement>("saveCleanMach
 const downloadsScrim = byId<HTMLElement>("downloadsScrim");
 const downloadsPanel = byId<HTMLElement>("downloadsPanel");
 const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
+const companionScrim = byId<HTMLElement>("companionScrim");
+const companionPanel = byId<HTMLElement>("companionPanel");
+const closeCompanionButton = byId<HTMLButtonElement>("closeCompanionButton");
+const companionNetwork = byId<HTMLSelectElement>("companionNetwork");
+const companionEnabled = byId<HTMLInputElement>("companionEnabled");
+const companionStatus = byId<HTMLElement>("companionStatus");
+const companionAddresses = byId<HTMLElement>("companionAddresses");
+const companionPairButton = byId<HTMLButtonElement>("companionPairButton");
+const companionCancelPairButton = byId<HTMLButtonElement>("companionCancelPairButton");
+const companionRegeneratePortButton = byId<HTMLButtonElement>("companionRegeneratePortButton");
+const companionPairing = byId<HTMLElement>("companionPairing");
+const companionQr = byId<HTMLImageElement>("companionQr");
+const companionPairAddress = byId<HTMLElement>("companionPairAddress");
+const companionPairCode = byId<HTMLElement>("companionPairCode");
+const companionPairExpiry = byId<HTMLElement>("companionPairExpiry");
+const companionDevices = byId<HTMLElement>("companionDevices");
 const downloadLocationLabel = byId<HTMLElement>("downloadLocationLabel");
 const chooseDownloadLocationButton = byId<HTMLButtonElement>("chooseDownloadLocationButton");
 const openDownloadLocationButton = byId<HTMLButtonElement>("openDownloadLocationButton");
@@ -368,6 +386,7 @@ const state: RendererState = {
 };
 
 let connectionRetryInFlight = false;
+let companionPairingExpiresAt = 0;
 let watchPartiesVisible = false;
 let playerControlsTimer: ReturnType<typeof setTimeout> | null = null;
 let playerViewportClickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -383,6 +402,7 @@ let offlinePlayableRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let playerAdapterPreference: PlaybackAdapterPreference | null = null;
 let visibleCatalogRefreshInFlight = false;
 let visibleCatalogRefreshQueued = false;
+let dismissedPlaybackId: string | null = null;
 
 const CATALOG_REFRESH_INTERVAL_MS = 60_000;
 
@@ -2120,6 +2140,99 @@ function closeDownloads(): void {
   downloadsPanel.classList.add("is-hidden");
 }
 
+function renderCompanion(status: CompanionSettingsState): void {
+  companionEnabled.checked = status.enabled;
+  companionStatus.textContent = status.message
+    ? `${status.runtimeState}: ${status.message}`
+    : `${status.runtimeState}${status.connectedDevices ? ` · ${status.connectedDevices} connected` : ""}`;
+  const knownNetworks = new Set(Array.from(companionNetwork.options).map((option) => option.value));
+  const currentNetworks = new Set(status.networks.map((network) => network.id));
+  if (knownNetworks.size !== currentNetworks.size || [...currentNetworks].some((id) => !knownNetworks.has(id))) {
+    companionNetwork.replaceChildren();
+    companionNetwork.add(new Option("Select a trusted private network", ""));
+    for (const network of status.networks) {
+      companionNetwork.add(new Option(`${network.name} — ${network.address}${network.recommended ? " (recommended)" : ""}`, network.id));
+    }
+  }
+  companionNetwork.value = status.selectedNetworkId ?? "";
+  companionAddresses.replaceChildren();
+  for (const address of status.addresses) {
+    const line = document.createElement("p");
+    line.textContent = address;
+    companionAddresses.append(line);
+  }
+  companionPairButton.disabled = status.runtimeState !== "listening";
+  companionCancelPairButton.disabled = !status.pairing;
+  companionPairing.classList.toggle("is-hidden", !status.pairing);
+  if (status.pairing) {
+    companionPairingExpiresAt = Date.parse(status.pairing.expiresAt);
+    companionQr.src = status.pairing.qrDataUrl;
+    companionPairAddress.textContent = status.pairing.address;
+    companionPairCode.textContent = status.pairing.code;
+    updateCompanionPairingCountdown();
+  } else {
+    companionPairingExpiresAt = 0;
+    companionQr.removeAttribute("src");
+    companionPairAddress.textContent = "";
+    companionPairCode.textContent = "";
+    companionPairExpiry.textContent = "";
+  }
+  companionDevices.replaceChildren();
+  if (!status.devices.length) companionDevices.textContent = "No phones paired.";
+  for (const device of status.devices) {
+    const row = document.createElement("article");
+    row.className = "download-row";
+    const summary = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = device.name;
+    const details = document.createElement("small");
+    details.textContent = `${device.connected ? "Connected" : "Offline"} · Paired ${new Date(device.pairedAt).toLocaleDateString()}${device.lastUsedAt ? ` · Last used ${new Date(device.lastUsedAt).toLocaleString()}` : ""}`;
+    summary.append(title, details);
+    const actions = document.createElement("div");
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.textContent = "Rename";
+    rename.addEventListener("click", () => {
+      const name = window.prompt("Device name", device.name);
+      if (name) void window.jellyfin.companion.renameDevice({ deviceId: device.deviceId, name }).then(renderCompanion).catch((error) => showToast(errorMessage(error, "The device could not be renamed.")));
+    });
+    const revoke = document.createElement("button");
+    revoke.type = "button";
+    revoke.textContent = "Revoke";
+    revoke.addEventListener("click", () => {
+      if (window.confirm(`Revoke ${device.name}? It will need to be paired again.`)) {
+        void window.jellyfin.companion.revokeDevice({ deviceId: device.deviceId }).then(renderCompanion).catch((error) => showToast(errorMessage(error, "The device could not be revoked.")));
+      }
+    });
+    actions.append(rename, revoke);
+    row.append(summary, actions);
+    companionDevices.append(row);
+  }
+}
+
+function updateCompanionPairingCountdown(): void {
+  if (!companionPairingExpiresAt) return;
+  const seconds = Math.max(0, Math.ceil((companionPairingExpiresAt - Date.now()) / 1000));
+  companionPairExpiry.textContent = seconds > 0
+    ? `Expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+    : "Pairing code expired.";
+}
+
+async function openCompanion(): Promise<void> {
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  companionScrim.classList.remove("is-hidden");
+  companionPanel.classList.remove("is-hidden");
+  closeCompanionButton.focus();
+  try { renderCompanion(await window.jellyfin.companion.getStatus()); }
+  catch (error) { showToast(errorMessage(error, "Companion Remote settings could not be loaded.")); }
+}
+
+function closeCompanion(): void {
+  companionScrim.classList.add("is-hidden");
+  companionPanel.classList.add("is-hidden");
+}
+
 async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
   const [downloads, offlinePlayable] = await Promise.all([
     window.jellyfin.downloads.list(),
@@ -3335,6 +3448,65 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   if (state.currentRoute === "watch-parties") renderWatchParties();
 }
 
+async function presentExternallyStartedPlayback(playback: PlaybackState): Promise<void> {
+  if (!playback.playbackId || playback.playbackId === dismissedPlaybackId
+    || !playerView.classList.contains("is-hidden")) return;
+  const expectedPlaybackId = playback.playbackId;
+  const requestId = ++state.playbackRequestId;
+  state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  state.playbackItem = null;
+  state.playbackId = expectedPlaybackId;
+  state.playbackSource = playback.source;
+  state.playbackSourceKind = playback.diagnostics?.sourceKind ?? null;
+  state.playbackState = playback;
+  state.soloDiagnostics = null;
+  state.soloDiagnosticsRequestId += 1;
+  playerStructuralRenderKey = "";
+  closePlayerSettings(false);
+  closePlayerEpisodeBrowser(false);
+  soloDiagnosticsRefreshedAt = 0;
+  playerTitle.textContent = "Now Playing";
+  playerMeta.textContent = "Started from Companion Remote";
+  playerMetadataTitle.textContent = "Now Playing";
+  playerEyebrow.textContent = "";
+  playerOverview.textContent = "";
+  playerView.classList.remove("is-hidden");
+  document.body.classList.add("is-playing");
+  setSessionPanelCollapsed(window.matchMedia("(max-width: 1120px)").matches);
+  renderPlayerState();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
+  await Promise.all([
+    syncPlayerViewport(true),
+    refreshPlayerAdapterPreference(),
+  ]);
+  if (playback.itemId) {
+    try {
+      const item = await window.jellyfin.items.getDetails({ itemId: playback.itemId });
+      if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
+      state.playbackItem = item;
+      playerTitle.textContent = item.type === "Episode" && item.seriesName
+        ? item.seriesName
+        : item.name || "Now Playing";
+      playerMeta.textContent = item.type === "Episode"
+        ? [episodeCode(item), item.name].filter(Boolean).join(" - ")
+        : metadataParts(item).join(" - ");
+      playerMetadataTitle.textContent = item.name || "Now Playing";
+      playerEyebrow.textContent = item.type === "Episode"
+        ? [item.seriesName, episodeCode(item)].filter(Boolean).join(" · ")
+        : item.type || "";
+      playerOverview.textContent = item.overview || "";
+      renderPlayerState(true);
+    } catch {
+      // Playback remains usable when metadata refresh is temporarily unavailable.
+    }
+  }
+  if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
+  void refreshSoloDiagnostics(true);
+  playerPlayPauseButton.focus();
+  markPlayerActivity();
+}
+
 async function playDownloadedItem(download: DownloadSummary): Promise<void> {
   if (download.state !== "downloaded") return;
   await startPresentedPlayback({
@@ -3378,6 +3550,7 @@ async function closePlayer(): Promise<void> {
   state.playbackRequestId += 1;
   state.soloDiagnosticsRequestId += 1;
   const playbackId = state.playbackId;
+  dismissedPlaybackId = playbackId;
   // Start native shutdown before any renderer layout or viewport cleanup.
   // This keeps audio termination independent from a stalled GPU presenter.
   const stopPromise = playbackId
@@ -3410,6 +3583,9 @@ window.jellyfin.playback.subscribe((playback) => {
   const previousPlaybackId = state.playbackState?.playbackId;
   const previousItemId = state.playbackState?.itemId;
   const playerVisible = !playerView.classList.contains("is-hidden");
+  if (dismissedPlaybackId && playback.playbackId !== dismissedPlaybackId) dismissedPlaybackId = null;
+  const externallyStarted = !playerVisible && Boolean(playback.playbackId)
+    && playback.playbackId !== dismissedPlaybackId;
   const lostActivePlayback = playerVisible && Boolean(state.playbackId) && playback.playbackId === null;
   const itemChanged = Boolean(playback.playbackId && (playback.playbackId !== previousPlaybackId || playback.itemId !== previousItemId));
   if (playerVisible && playback.playbackId && playback.playbackId !== state.playbackId) {
@@ -3427,6 +3603,7 @@ window.jellyfin.playback.subscribe((playback) => {
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
   renderPlayerState();
+  if (externallyStarted) void presentExternallyStartedPlayback(playback);
   if (playback.playbackId && playback.playbackId === state.playbackId && (itemChanged || Date.now() - soloDiagnosticsRefreshedAt >= 30_000)) {
     void refreshSoloDiagnostics(itemChanged);
   }
@@ -3890,6 +4067,7 @@ document.addEventListener("click", () => {
 refreshButton.addEventListener("click", () => { void retryConnection(refreshButton); });
 
 window.setInterval(() => { void refreshVisibleCatalog(); }, CATALOG_REFRESH_INTERVAL_MS);
+window.setInterval(updateCompanionPairingCountdown, 1000);
 window.setInterval(() => {
   if (state.currentRoute === "live-tv" && playerView.classList.contains("is-hidden")) void refreshLiveTv(false);
 }, 5 * 60_000);
@@ -3904,6 +4082,37 @@ document.addEventListener("visibilitychange", () => {
 downloadsButton.addEventListener("click", () => openDownloads());
 closeDownloadsButton.addEventListener("click", closeDownloads);
 downloadsScrim.addEventListener("click", closeDownloads);
+companionButton.addEventListener("click", () => { void openCompanion(); });
+closeCompanionButton.addEventListener("click", closeCompanion);
+companionScrim.addEventListener("click", closeCompanion);
+companionNetwork.addEventListener("change", () => {
+  if (!companionNetwork.value) return;
+  void window.jellyfin.companion.selectNetwork({ networkId: companionNetwork.value })
+    .then(renderCompanion).catch((error) => showToast(errorMessage(error, "The private network could not be selected.")));
+});
+companionEnabled.addEventListener("change", () => {
+  void window.jellyfin.companion.setEnabled({ enabled: companionEnabled.checked })
+    .then(renderCompanion).catch((error) => {
+      companionEnabled.checked = !companionEnabled.checked;
+      showToast(errorMessage(error, "Companion Remote could not be changed."));
+    });
+});
+companionPairButton.addEventListener("click", () => {
+  void window.jellyfin.companion.beginPairing().then(renderCompanion)
+    .catch((error) => showToast(errorMessage(error, "Pairing could not be started.")));
+});
+companionCancelPairButton.addEventListener("click", () => {
+  void window.jellyfin.companion.cancelPairing().then(renderCompanion)
+    .catch((error) => showToast(errorMessage(error, "Pairing could not be cancelled.")));
+});
+companionRegeneratePortButton.addEventListener("click", () => {
+  const warning = "Existing bookmarks and Home Screen shortcuts contain the old port and may need to be removed and added again. Choose a new port?";
+  if (!window.confirm(warning)) return;
+  void window.jellyfin.companion.regeneratePort({ confirmed: true }).then((result) => {
+    renderCompanion(result.state);
+    showToast("Companion Remote is using a new port. Re-add old Home Screen shortcuts if they no longer connect.");
+  }).catch((error) => showToast(errorMessage(error, "The Companion port could not be changed.")));
+});
 licensesButton.addEventListener("click", () => { void openLicenses(); });
 closeLicensesButton.addEventListener("click", closeLicenses);
 licensesScrim.addEventListener("click", closeLicenses);
@@ -4253,6 +4462,8 @@ document.addEventListener("keydown", (event) => {
     profileButton.setAttribute("aria-expanded", "false");
   } else if (!downloadsPanel.classList.contains("is-hidden")) {
     closeDownloads();
+  } else if (!companionPanel.classList.contains("is-hidden")) {
+    closeCompanion();
   } else if (state.currentRoute === "details") {
     returnFromDetails();
   }
@@ -4278,6 +4489,10 @@ window.jellyfin.watchParties.subscribe((watchParties) => {
   state.watchParties = watchParties;
   if (state.currentRoute === "watch-parties") renderWatchParties();
   if (!playerView.classList.contains("is-hidden")) renderPlayerState();
+});
+
+window.jellyfin.companion.subscribe((status) => {
+  if (!companionPanel.classList.contains("is-hidden")) renderCompanion(status);
 });
 
 void bootstrap();

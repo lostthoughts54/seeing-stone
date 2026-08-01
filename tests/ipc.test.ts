@@ -176,6 +176,7 @@ describe("IPC authorization and allowlist", () => {
       IPC.downloadsChanged,
       IPC.sessionPanelSoloChanged,
       IPC.watchPartiesChanged,
+      IPC.companionChanged,
     ].includes(channel));
     expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
     expect([...handlers.keys()].join(" ")).not.toMatch(/report|sessions\/playing|request|fetch|filesystem|shell|command/i);

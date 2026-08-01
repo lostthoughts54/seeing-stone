@@ -88,7 +88,7 @@ async function createSeededService(prefix = "lf-sqlite-") {
   return { directory, service };
 }
 
-test("schema v1 upgrades additively to v5 while preserving existing rows", async () => {
+test("schema v1 upgrades additively to v6 while preserving existing rows", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lf-sqlite-v1-upgrade-"));
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const v1Schema = await fs.readFile(path.join(__dirname, "fixtures", "persistence-schema-v1.sql"), "utf8");
@@ -135,7 +135,7 @@ test("schema v1 upgrades additively to v5 while preserving existing rows", async
 
   const service = new SqlitePersistenceService(directory);
   try {
-    assert.equal((await service.open()).schemaVersion, 5);
+    assert.equal((await service.open()).schemaVersion, 6);
     const bundle = await service.getDownloadBundle("download-v1");
     assert.equal(bundle.job.state, "paused");
     assert.equal(bundle.localVersion.localVersionId, "local-v1");
@@ -172,13 +172,24 @@ test("schema v1 upgrades additively to v5 while preserving existing rows", async
     assert.equal(v5Revision.report.conflictPolicy, "automatic");
     await service.setApplicationPreference("player.adapter-mode", { mode: "embedded" });
     assert.equal(JSON.parse((await service.getApplicationPreference("player.adapter-mode")).valueJson).mode, "embedded");
+    const companionSettings = {
+      enabled: false,
+      networkId: null,
+      port: 50_123,
+      hostSuffix: "abc123",
+    };
+    await service.setApplicationPreference("companion.settings", companionSettings);
+    assert.deepEqual(
+      JSON.parse((await service.getApplicationPreference("companion.settings")).valueJson),
+      companionSettings,
+    );
   } finally {
     await service.close();
   }
 
   const verify = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 5);
+    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 6);
     const columns = verify.prepare("PRAGMA table_info(playback_revisions)").all().map((row) => row.name);
     for (const name of [
       "report_kind", "report_media_source_id", "report_play_method", "report_play_session_id",
@@ -202,7 +213,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 5);
+    assert.equal(health.schemaVersion, 6);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -226,7 +237,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 5);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 6);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
@@ -237,7 +248,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   }
 });
 
-test("schema v5 caches sanitized media per identity and lists verified local playback without paths", async () => {
+test("schema caches sanitized media per identity and lists verified local playback without paths", async () => {
   const { service } = await createSeededService("lf-sqlite-offline-cache-");
   const metadata = cachedItem(media.itemId, media.name);
   const nextUp = cachedItem("episode-2", "Episode 2", { indexNumber: 2 });

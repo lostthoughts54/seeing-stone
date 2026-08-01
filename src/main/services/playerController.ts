@@ -1,6 +1,6 @@
 import type { PlaybackStartResult, PlaybackState } from "../../shared/contracts";
 
-export type PlayerActionOrigin = "local-user" | "remote-sync" | "system";
+export type PlayerActionOrigin = "local-user" | "remote-sync" | "companion" | "system";
 
 export type PlayerAction =
   | "state"

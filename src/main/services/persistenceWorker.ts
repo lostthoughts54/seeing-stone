@@ -222,6 +222,24 @@ CREATE INDEX local_versions_offline_idx
   WHERE file_state = 'finalized' AND probe_state = 'valid' AND media_source_id IS NOT NULL;
 `;
 
+const MIGRATION_6 = `
+ALTER TABLE application_preferences RENAME TO application_preferences_v5;
+CREATE TABLE application_preferences (
+  preference_key TEXT PRIMARY KEY
+    CHECK (preference_key IN (
+      'player.adapter-mode',
+      'watchparty.buffering-policy',
+      'player.cached-diagnostics',
+      'companion.settings'
+    )),
+  value_json TEXT NOT NULL CHECK (length(value_json) BETWEEN 1 AND 16384),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= 0)
+) STRICT, WITHOUT ROWID;
+INSERT INTO application_preferences(preference_key, value_json, updated_at)
+  SELECT preference_key, value_json, updated_at FROM application_preferences_v5;
+DROP TABLE application_preferences_v5;
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -291,6 +309,12 @@ function initialize(): PersistenceHealth {
       transaction(() => {
         db().exec(MIGRATION_5);
         db().exec("PRAGMA user_version = 5");
+      });
+    }
+    if (version < 6) {
+      transaction(() => {
+        db().exec(MIGRATION_6);
+        db().exec("PRAGMA user_version = 6");
       });
     }
     const now = Date.now();

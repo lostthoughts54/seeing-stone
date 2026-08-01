@@ -45,6 +45,14 @@ import type { PlayerController } from "./services/playerController";
 import { SoloSessionDiagnosticsService } from "./services/soloSessionDiagnostics";
 import { OpenSourceLicensesService } from "./services/openSourceLicenses";
 import { ApplicationPreferencesService } from "./services/applicationPreferences";
+import { PlaybackQueueStore } from "./services/playbackQueue";
+import { DefaultPlaybackContinuationResolver } from "./services/playbackContinuationResolver";
+import { PlaybackCommandService } from "./services/playbackCommandService";
+import { CompanionCredentialStore } from "./services/companionCredentialStore";
+import { CompanionStateService } from "./services/companionState";
+import { CompanionRemoteManager } from "./services/companionRemoteManager";
+import { CompanionArtworkService } from "./services/companionArtwork";
+import { LiveTvContextService } from "./services/liveTvContext";
 import { requestedPlayerAdapterMode, resolvePlayerAdapterLaunch } from "./services/playerAdapterSelection";
 import { detectLibMpvRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "./services/libMpvRuntime";
 import { LibMpvHost } from "./services/libMpvHost";
@@ -74,6 +82,7 @@ let offlineSynchronization: OfflineSynchronizationService | null = null;
 let activeSyncPlay: SyncPlayService | null = null;
 let activePlayback: PlayerController | null = null;
 let activeVideoHost: EmbeddedVideoHost | null = null;
+let activeCompanion: CompanionRemoteManager | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -88,17 +97,20 @@ app.on("before-quit", (event) => {
   const syncPlay = activeSyncPlay;
   const playback = activePlayback;
   const videoHost = activeVideoHost;
+  const companion = activeCompanion;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
   activeSyncPlay = null;
   activePlayback = null;
   activeVideoHost = null;
+  activeCompanion = null;
   const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
   const stopPlayback = playback ? playback.clear().catch(() => undefined) : Promise.resolve();
-  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback]).then(() => activePersistence.close()).finally(() => {
+  const stopCompanion = companion ? companion.shutdown().catch(() => undefined) : Promise.resolve();
+  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback, stopCompanion]).then(() => activePersistence.close()).finally(() => {
     videoHost?.destroy();
     persistenceClosing = true;
     app.quit();
@@ -126,7 +138,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     app.getName(),
     app.getVersion(),
   ).get();
-  const sessionStore = new SecureSessionStore(app.getPath("userData"), createSafeStorageProtector());
+  const sessionProtector = createSafeStorageProtector();
+  const sessionStore = new SecureSessionStore(app.getPath("userData"), sessionProtector);
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
   const playerPreferences = new PlayerPreferencesService(
@@ -151,7 +164,9 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const downloadStorageRoot = await downloadLocation.getActiveRoot();
   const downloadStorageRoots = await downloadLocation.getAuthorizedRoots();
   const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, downloadStorageRoots);
-  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence);
+  const playbackQueue = new PlaybackQueueStore();
+  const playbackContinuation = new DefaultPlaybackContinuationResolver(playbackQueue, api);
+  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence, playbackContinuation);
   offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
   offlineSynchronization.activate();
   const playbackReporting = new PlaybackReportingService(api, offlineSynchronization, logger);
@@ -252,6 +267,9 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   );
   recordPlayerEngineStatus();
   const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);
+  const playbackCommands = new PlaybackCommandService(playback, api, playbackQueue);
+  const liveTvContext = new LiveTvContextService(api);
+  playbackCommands.setLiveTvContext(liveTvContext);
   const openSourceLicenses = new OpenSourceLicensesService();
   const cleanMachineDiagnosticsService = new CleanMachineDiagnosticsService({
     applicationVersion: app.getVersion(),
@@ -298,7 +316,35 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.sessionPanelSoloChanged, snapshot);
   });
   activeSyncPlay = new SyncPlayService(api, playback, logger, 5000, applicationPreferences);
+  playbackCommands.setSyncPlay(activeSyncPlay);
+  const companionState = new CompanionStateService(
+    playback,
+    playbackQueue,
+    soloSessionDiagnostics,
+    api,
+    () => activeSyncPlay?.isJoined() ?? false,
+    liveTvContext,
+  );
+  const companionCredentials = new CompanionCredentialStore(app.getPath("userData"), sessionProtector);
+  const companionArtwork = new CompanionArtworkService(api, companionState);
+  activeCompanion = new CompanionRemoteManager(
+    applicationPreferences,
+    companionCredentials,
+    companionState,
+    playbackCommands,
+    playbackQueue,
+    companionArtwork,
+    () => {
+      const context = api.getAuthenticatedContext();
+      return { serverId: context.serverId, userId: context.userId };
+    },
+    join(__dirname, "../companion"),
+  );
+  activeCompanion.subscribe((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.companionChanged, state);
+  });
   activeSyncPlay.onState((state) => {
+    companionState.notifyWatchPartyChange();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
   });
   const downloadLocationController = {
@@ -347,6 +393,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     soloSessionDiagnostics,
     openSourceLicenses,
     cleanMachineDiagnostics,
+    activeCompanion,
+    playbackCommands,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the

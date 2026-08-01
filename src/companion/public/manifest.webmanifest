@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Seeing Stone — Companion Remote",
+  "short_name": "Seeing Stone",
+  "description": "A private-network remote for Seeing Stone.",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#17111f",
+  "background_color": "#0d0912",
+  "icons": [
+    {
+      "src": "/icons/seeing-stone.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

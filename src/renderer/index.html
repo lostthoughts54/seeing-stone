@@ -129,6 +129,7 @@
           <div id="profileMenu" class="profile-menu is-hidden">
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
+            <small>Seeing Stone 0.6.0 Beta</small>
             <label class="profile-engine-setting">
               <span>Player engine</span>
               <select id="profileAdapterSelect" aria-label="Player engine">
@@ -139,6 +140,7 @@
             </label>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
             <button id="downloadsButton" type="button">Downloads</button>
+            <button id="companionButton" type="button">Companion Remote (Beta)</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
             <button id="refreshButton" type="button">Refresh Connection</button>
@@ -569,7 +571,7 @@
             <p class="eyebrow">Experimental player</p>
             <h2 id="cleanMachineDiagnosticsTitle">Clean-machine diagnostics</h2>
           </div>
-          <button id="closeCleanMachineDiagnosticsButton" type="button" aria-label="Close diagnostics" title="Close diagnostics">Ã—</button>
+          <button id="closeCleanMachineDiagnosticsButton" type="button" aria-label="Close diagnostics" title="Close diagnostics">×</button>
         </header>
         <p class="clean-machine-diagnostics-intro">Checks the packaged runtime, native DLL loading, Electron GPU support, engine fallback, and real-video presentation without including private paths or account information.</p>
         <div id="cleanMachineDiagnosticsSummary" class="clean-machine-diagnostics-summary" role="status">Running checks&hellip;</div>
@@ -580,6 +582,32 @@
           <button id="copyCleanMachineDiagnosticsButton" type="button">Copy report</button>
           <button id="saveCleanMachineDiagnosticsButton" type="button">Save report</button>
         </footer>
+      </section>
+
+      <div id="companionScrim" class="downloads-scrim is-hidden"></div>
+      <section id="companionPanel" class="downloads-panel companion-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="companionTitle">
+        <header class="downloads-header">
+          <div><p class="eyebrow">Private-network remote</p><h2 id="companionTitle">Companion Remote <span class="beta-label">Beta</span></h2></div>
+          <button id="closeCompanionButton" type="button" aria-label="Close Companion Remote">×</button>
+        </header>
+        <p class="downloads-note">Only enable this on a trusted private network. HTTP cannot protect against a hostile device on the same LAN.</p>
+        <label class="profile-engine-setting"><span>Private IPv4 network</span><select id="companionNetwork"></select></label>
+        <label class="companion-toggle"><input id="companionEnabled" type="checkbox"><span>Enable Companion Remote</span></label>
+        <p id="companionStatus" class="player-adapter-status" aria-live="polite">Disabled</p>
+        <div id="companionAddresses" class="companion-addresses"></div>
+        <div class="download-location-actions">
+          <button id="companionPairButton" class="primary" type="button">Pair a phone</button>
+          <button id="companionCancelPairButton" type="button">Cancel pairing</button>
+          <button id="companionRegeneratePortButton" type="button">Choose a new port</button>
+        </div>
+        <section id="companionPairing" class="companion-pairing is-hidden" aria-live="polite">
+          <img id="companionQr" alt="Pairing QR code">
+          <p id="companionPairAddress"></p><strong id="companionPairCode"></strong><p id="companionPairExpiry"></p>
+        </section>
+        <h3>Paired phones</h3><div id="companionDevices" class="downloads-list"></div>
+        <details><summary>Troubleshooting</summary>
+          <p>Allow Seeing Stone on Windows Private networks only. Guest Wi-Fi isolation, VPNs, mDNS filtering, DHCP changes, or a blocked port may prevent connection. Try the direct-IP address when the .local name does not resolve.</p>
+        </details>
       </section>
 
       <aside id="playerFallbackNotice" class="player-fallback-notice is-hidden" role="alert" aria-live="assertive">
