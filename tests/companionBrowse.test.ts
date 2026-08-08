@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { CompanionStateService } from "../src/main/services/companionState";
-import type { PlaybackState } from "../src/shared/contracts";
+import type { PlaybackState, WatchPartyViewState } from "../src/shared/contracts";
+import { companionWatchPartyStateSchema } from "../src/shared/companionSchemas";
 
 const playbackState = (overrides: Partial<PlaybackState> = {}): PlaybackState => ({
   playbackId: "11111111-1111-4111-8111-111111111111", itemId: "item-a", phase: "playing", source: "server",
@@ -24,7 +25,49 @@ function companionStateFor(state: PlaybackState, segments: unknown) {
   return { service, player };
 }
 
+function watchPartyState(scheduledStartAtUnixMs: number | null): WatchPartyViewState {
+  return {
+    availability: "available",
+    connection: "connected",
+    groups: [],
+    joinedGroup: null,
+    sharedControls: true,
+    preparation: { phase: "starting", minimumParticipants: 2, localSyncOffsetMilliseconds: 0, scheduledStartAtUnixMs },
+    sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
+    telemetry: { protocolVersion: 1, availability: "disabled", transport: "none", reason: "disabled", participants: [], incident: null, policy: { mode: "wait-for-all", gracePeriodMs: 1500 } },
+    error: null,
+  };
+}
+
 describe("Companion library browsing", () => {
+  it("normalizes Watch Party presentation timestamps without loosening the strict schema", () => {
+    let watchParty = watchPartyState(1_234_567_890.5);
+    const service = new CompanionStateService(
+      { onState: vi.fn() } as never,
+      { onChanged: vi.fn() } as never,
+      {} as never,
+      {} as never,
+      () => false,
+      undefined,
+      () => watchParty,
+    );
+
+    const getWatchPartyStateValue = (service as unknown as { getWatchPartyStateValue(): unknown }).getWatchPartyStateValue.bind(service);
+    expect(getWatchPartyStateValue()).toMatchObject({ scheduledStartAtUnixMs: 1_234_567_891 });
+    watchParty = watchPartyState(null);
+    expect(getWatchPartyStateValue()).toMatchObject({ scheduledStartAtUnixMs: null });
+    watchParty = watchPartyState(1_234_567_890);
+    expect(getWatchPartyStateValue()).toMatchObject({ scheduledStartAtUnixMs: 1_234_567_890 });
+    expect(() => companionWatchPartyStateSchema.parse({
+      joined: false,
+      phase: "starting",
+      participantCount: 0,
+      minimumParticipants: 2,
+      localSyncOffsetMilliseconds: 0,
+      scheduledStartAtUnixMs: 1_234_567_890.5,
+    })).toThrow();
+  });
+
   it("ships a searchable phone guide that can switch channels without leaving the view", async () => {
     const [html, app] = await Promise.all([
       readFile("src/companion/index.html", "utf8"),

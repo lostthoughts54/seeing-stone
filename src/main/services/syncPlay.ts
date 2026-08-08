@@ -702,7 +702,7 @@ export class SyncPlayService {
         await this.sendBuffering(true).catch(() => undefined);
         return;
       }
-      this.setPreparation({ phase: "starting", scheduledStartAtUnixMs: Date.now() + delay });
+      this.setPreparation({ phase: "starting", scheduledStartAtUnixMs: Math.round(Date.now() + delay) });
       const current = this.player.getState();
       if (current.playbackId) {
         await this.player.showMessage(current.playbackId, "Starting…", Math.max(500, delay)).catch(() => undefined);

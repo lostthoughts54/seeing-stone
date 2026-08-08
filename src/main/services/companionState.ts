@@ -100,6 +100,13 @@ function phase(state: PlaybackState): CompanionPlayerState["phase"] {
   return state.phase;
 }
 
+function safeUnixMilliseconds(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isFinite(value) || value < 0) return null;
+  const rounded = Math.round(value);
+  return Number.isSafeInteger(rounded) ? rounded : null;
+}
+
 export class CompanionStateService {
   private playerRevision = 0;
   private lastPlayerPushAt = 0;
@@ -247,7 +254,7 @@ export class CompanionStateService {
       participantCount: state?.joinedGroup?.participantCount ?? 0,
       minimumParticipants: 2,
       localSyncOffsetMilliseconds: state?.preparation.localSyncOffsetMilliseconds ?? 0,
-      scheduledStartAtUnixMs: state?.preparation.scheduledStartAtUnixMs ?? null,
+      scheduledStartAtUnixMs: safeUnixMilliseconds(state?.preparation.scheduledStartAtUnixMs),
     }) as CompanionWatchPartyState);
   }
 

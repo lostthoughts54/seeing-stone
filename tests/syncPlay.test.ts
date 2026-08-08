@@ -280,6 +280,35 @@ describe("SyncPlayService", () => {
     expect(h.player.seek).not.toHaveBeenCalled();
   });
 
+  it("rounds the public scheduled start timestamp while retaining a fractional clock offset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-07-13T20:00:00.000Z"));
+    const h = harness();
+    h.internals.serverTimeOffsetMs = 0.5;
+
+    try {
+      const command = h.internals.handleCommand("dddddddddddd4ddd8ddddddddddddddd", {
+        GroupId: groupId,
+        PlaylistItemId: playlistItemId,
+        When: new Date(Date.now() + 1).toISOString(),
+        PositionTicks: 40_000_000,
+        Command: "Unpause",
+        EmittedAt: new Date().toISOString(),
+      });
+
+      const scheduledStartAtUnixMs = h.service.getState().preparation.scheduledStartAtUnixMs;
+      expect(h.internals.serverTimeOffsetMs).toBe(0.5);
+      expect(scheduledStartAtUnixMs).not.toBeNull();
+      expect(Number.isInteger(scheduledStartAtUnixMs)).toBe(true);
+      expect(scheduledStartAtUnixMs).toBe(Date.now() + 1);
+
+      await vi.runAllTimersAsync();
+      await command;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects malformed, duplicate, wrong-group, and stale commands", async () => {
     const h = harness();
     const valid = {
