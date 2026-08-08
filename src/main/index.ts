@@ -484,6 +484,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     activeSmartDownloads,
     playbackMetadata,
     trickplay,
+    !packagedProduction,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the

@@ -133,7 +133,7 @@
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
             <small>Seeing Stone 0.7.0 Beta</small>
-            <label class="profile-engine-setting">
+            <label id="profileAdapterSelectSetting" class="profile-engine-setting is-hidden">
               <span>Player engine</span>
               <select id="profileAdapterSelect" aria-label="Player engine">
                 <option value="embedded">Embedded (recommended)</option>
@@ -141,6 +141,11 @@
                 <option value="libmpv">Libmpv (experimental)</option>
               </select>
             </label>
+            <div id="profileAdapterFixed" class="profile-engine-fixed">
+              <span>Player engine</span>
+              <strong>Libmpv</strong>
+              <small>Built-in playback engine</small>
+            </div>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
             <button id="downloadsButton" type="button">Downloads</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
@@ -523,7 +528,8 @@
                     <label><span>Playback speed</span><select id="playerSettingsRateSelect" aria-label="Playback speed in settings"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
                     <label><span>Audio track</span><select id="playerSettingsAudioSelect" aria-label="Audio track in settings" disabled><option>Default</option></select></label>
                     <label><span>Subtitle track</span><select id="playerSettingsSubtitleSelect" aria-label="Subtitle track in settings" disabled><option value="">Off</option></select></label>
-                    <label class="player-engine-setting"><span>Player engine</span><select id="playerAdapterSelect" aria-label="Player engine"><option value="embedded">Embedded (recommended)</option><option value="legacy">Legacy external</option><option value="libmpv">Libmpv (experimental)</option></select></label>
+                    <label id="playerAdapterSelectSetting" class="player-engine-setting is-hidden"><span>Player engine</span><select id="playerAdapterSelect" aria-label="Player engine"><option value="embedded">Embedded (recommended)</option><option value="legacy">Legacy external</option><option value="libmpv">Libmpv (experimental)</option></select></label>
+                    <div id="playerAdapterFixed" class="player-engine-fixed"><span>Player engine</span><strong>Libmpv</strong><small>Built-in playback engine</small></div>
                   </div>
                   <p id="playerAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
                   <button id="playerSettingsDiagnosticsButton" class="player-settings-diagnostics" type="button">Open playback diagnostics</button>

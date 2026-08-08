@@ -4,7 +4,7 @@ import { IPC } from "../src/shared/contracts";
 
 type RegisteredHandler = (event: unknown, input?: unknown) => Promise<unknown>;
 
-function createHarness() {
+function createHarness(options: { playerPreferences?: { get: () => Promise<{ adapterMode?: "legacy" | "embedded" | "libmpv" }>; setAdapterMode: (mode: "legacy" | "embedded" | "libmpv") => Promise<void> | void }; adapterSelectionAvailable?: boolean } = {}) {
   const handlers = new Map<string, RegisteredHandler>();
   const frame = { url: "app://bundle/index.html" };
   const webContents = {
@@ -151,7 +151,7 @@ function createHarness() {
     syncPlay as never,
     downloadLocation,
     undefined,
-    undefined,
+    options.playerPreferences as never,
     undefined,
     undefined,
     undefined,
@@ -162,12 +162,26 @@ function createHarness() {
     smartDownloads as never,
     playbackMetadata as never,
     trickplay as never,
+    options.adapterSelectionAvailable,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
   return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, playbackMetadata, trickplay, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
+  it("does not allow packaged production IPC to change the fixed libmpv adapter", async () => {
+    const playerPreferences = {
+      get: vi.fn(async () => ({ adapterMode: "libmpv" as const })),
+      setAdapterMode: vi.fn(),
+    };
+    const { handlers, validEvent } = createHarness({ playerPreferences, adapterSelectionAvailable: false });
+
+    await expect(handlers.get(IPC.playbackSetAdapterPreference)?.(validEvent, { mode: "legacy" })).resolves.toMatchObject({
+      ok: true,
+      data: expect.objectContaining({ selected: "libmpv", adapterSelectionAvailable: false }),
+    });
+    expect(playerPreferences.setAdapterMode).not.toHaveBeenCalled();
+  });
   it("revokes prior-session capabilities before awaiting session restore", async () => {
     const { handlers, validEvent, api, artwork, playbackMetadata, trickplay, playback } = createHarness();
     let resolveRestore!: (session: unknown) => void;

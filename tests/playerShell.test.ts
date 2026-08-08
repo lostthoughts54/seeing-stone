@@ -250,6 +250,21 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('playerView.addEventListener("focusin", markPlayerActivity)');
   });
 
+  it("shows fixed built-in libmpv engine details in production while retaining development selectors", async () => {
+    const [html, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    for (const id of ["playerAdapterSelectSetting", "profileAdapterSelectSetting"]) {
+      expect(html).toContain(`id="${id}" class=`);
+    }
+    for (const id of ["playerAdapterFixed", "profileAdapterFixed"]) expect(html).toContain(`id="${id}"`);
+    expect(html).toContain("Built-in playback engine");
+    expect(renderer).toContain("preference.adapterSelectionAvailable");
+    expect(renderer).toContain('classList.toggle("is-hidden", !selectionAvailable)');
+    expect(renderer).toContain('classList.toggle("is-hidden", selectionAvailable)');
+  });
+
   it("provides a control-safe cinema fullscreen with idle restoration behavior", async () => {
     const [styles, renderer, preload] = await Promise.all([
       readFile("src/renderer/styles.css", "utf8"),
@@ -275,6 +290,9 @@ describe("Seeing Stone player shell", () => {
     expect(styles).toMatch(/\.player-viewport \{[^}]*isolation: isolate[^}]*z-index: 0/s);
     expect(styles).toContain('.player-view.is-controls-idle[data-fullscreen="true"]');
     expect(styles).toContain('cursor: none');
+    expect(styles).toContain('[data-controls-overlay="true"] .player-timeline-row');
+    expect(styles).toContain('[data-controls-overlay="true"] #playerTimeline');
+    expect(styles).toMatch(/\[data-controls-overlay="true"\] \.player-controls:not\(:focus-within\) \{\s*display: none;/);
     expect(renderer).toContain('playback.phase === "playing" && playback.paused === false');
     expect(renderer).toContain('playerViewport.addEventListener("click"');
     expect(renderer).toContain('playerViewport.addEventListener("dblclick"');

@@ -470,6 +470,7 @@ export interface PlaybackAdapterPreference {
   active: PlayerAdapterMode;
   selected: PlayerAdapterMode;
   launchSelection: PlayerAdapterMode;
+  adapterSelectionAvailable: boolean;
   embeddedAvailable: boolean;
   libmpvAvailable: boolean;
   fallbackActive: boolean;

@@ -2981,6 +2981,15 @@ button.danger:hover:not(:disabled) {
 }
 
 .player-engine-setting { grid-column: 1 / -1; }
+.player-engine-fixed {
+  color: #aba5b4;
+  display: grid;
+  font-size: 0.68rem;
+  gap: 3px;
+  grid-column: 1 / -1;
+}
+.player-engine-fixed strong { color: #ded7e6; font-size: 0.82rem; }
+.player-engine-fixed small { color: #aba5b4; font-size: 0.68rem; }
 .player-adapter-status {
   color: #aba5b4;
   font-size: 0.68rem;
@@ -3397,12 +3406,12 @@ button.danger:hover:not(:disabled) {
 }
 
 .player-view.is-controls-idle[data-fullscreen="true"][data-controls-overlay="true"] .player-controls:not(:focus-within) {
-  background: transparent;
-  bottom: 0;
-  height: 3px;
-  min-height: 0;
-  padding: 0;
-  position: absolute;
+  display: none;
+}
+
+.player-view.is-controls-idle[data-fullscreen="true"][data-controls-overlay="true"] .player-timeline-row,
+.player-view.is-controls-idle[data-fullscreen="true"][data-controls-overlay="true"] #playerTimeline {
+  display: none;
 }
 
 .toast {

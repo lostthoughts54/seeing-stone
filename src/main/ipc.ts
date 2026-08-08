@@ -150,6 +150,7 @@ export function registerIpcHandlers(
   smartDownloads?: SmartDownloadService,
   playbackMetadata?: PlaybackMetadataService,
   trickplay?: TrickplayService,
+  adapterSelectionAvailable = true,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -458,6 +459,7 @@ export function registerIpcHandlers(
       active,
       selected,
       launchSelection,
+      adapterSelectionAvailable,
       embeddedAvailable: playerAdapterStatus?.embeddedAvailable ?? true,
       libmpvAvailable: playerAdapterStatus?.libmpvAvailable ?? false,
       fallbackActive: playerAdapterStatus?.fallbackActive ?? false,
@@ -470,6 +472,7 @@ export function registerIpcHandlers(
   register(IPC.playbackSetAdapterPreference, async (input) => {
     if (!playerPreferences) throw new AppError("PLAYER_PREFERENCES_UNAVAILABLE", "Player preferences are unavailable.", 503);
     const { mode } = playbackAdapterPreferenceSchema.strict().parse(input);
+    if (!adapterSelectionAvailable) return adapterPreference();
     await playerPreferences.setAdapterMode(mode);
     return adapterPreference();
   });
