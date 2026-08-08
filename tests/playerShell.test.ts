@@ -367,6 +367,13 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("if (!document.hidden) void refreshVisibleCatalog()");
   });
 
+  it("hides a stale trickplay image before requesting the newly targeted sprite", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    const schedule = renderer.slice(renderer.indexOf("function scheduleTrickplaySprite"), renderer.indexOf("function renderPlayerState"));
+    expect(schedule.indexOf('previewPendingUrl = "";')).toBeLessThan(schedule.indexOf("setTimeout"));
+    expect(schedule.indexOf('playerTimelinePreviewImage.classList.add("is-hidden")')).toBeLessThan(schedule.indexOf("setTimeout"));
+  });
+
   it("builds both library rails from every server-provided user view", async () => {
     const [renderer, api] = await Promise.all([
       readFile("src/renderer/app.ts", "utf8"),

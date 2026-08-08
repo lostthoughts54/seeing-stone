@@ -87,6 +87,8 @@ function createHarness() {
     error: null,
   };
   const syncPlay = {
+    activate: vi.fn(),
+    deactivate: vi.fn(),
     getState: vi.fn(() => structuredClone(watchPartyState)),
     list: vi.fn(async () => structuredClone(watchPartyState)),
     create: vi.fn(async () => structuredClone(watchPartyState)),
@@ -135,6 +137,8 @@ function createHarness() {
     skip: vi.fn(async () => smartState),
     notifyWatchedItem: vi.fn(),
   };
+  const playbackMetadata = { clear: vi.fn(), getMediaSegments: vi.fn() };
+  const trickplay = { clear: vi.fn(), getManifest: vi.fn(), getSpriteUrl: vi.fn() };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -155,12 +159,30 @@ function createHarness() {
     undefined,
     trailerWindow,
     smartDownloads as never,
+    playbackMetadata as never,
+    trickplay as never,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, playbackMetadata, trickplay, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
+  it("revokes prior-session capabilities before awaiting session restore", async () => {
+    const { handlers, validEvent, api, artwork, playbackMetadata, trickplay, playback } = createHarness();
+    let resolveRestore!: (session: unknown) => void;
+    api.restore.mockReturnValueOnce(new Promise((resolve) => { resolveRestore = resolve; }));
+
+    const pending = handlers.get(IPC.sessionRestore)?.(validEvent);
+    await vi.waitFor(() => expect(api.restore).toHaveBeenCalledOnce());
+    expect(artwork.clear).toHaveBeenCalledOnce();
+    expect(playbackMetadata.clear).toHaveBeenCalledOnce();
+    expect(trickplay.clear).toHaveBeenCalledOnce();
+    expect(playback.clear).toHaveBeenCalledOnce();
+
+    resolveRestore({ authenticated: false, persistence: "none", server: null, user: null });
+    await expect(pending).resolves.toMatchObject({ ok: true });
+  });
+
   it("closes the application window only through the authorized main frame", async () => {
     const { handlers, frame, validEvent, window } = createHarness();
     await expect(handlers.get(IPC.applicationClose)?.(validEvent)).resolves.toEqual({

@@ -197,11 +197,11 @@ export function registerIpcHandlers(
     await downloads.deactivate();
     synchronization.deactivate();
     await companion?.stopForSessionChange?.();
-    const session = await api.restore();
     artwork.clear();
     playbackMetadata?.clear();
     trickplay?.clear();
     await playback.clear();
+    const session = await api.restore();
     if (session.authenticated) {
       await downloads.activate();
       await smartDownloads?.activate();

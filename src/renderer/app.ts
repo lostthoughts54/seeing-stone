@@ -42,6 +42,7 @@ import {
 } from "./playerPresentation";
 import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
 import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
+import { loadAllBrowseItems } from "./browsePagination";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -2289,13 +2290,18 @@ async function refreshLibrary(library: LibrarySummary, showLoading = false): Pro
   const requestId = (state.libraryRequestIds.get(library.id) || 0) + 1;
   state.libraryRequestIds.set(library.id, requestId);
   try {
-    const page = await window.jellyfin.browse.get({
+    const query = {
       libraryId: library.id, type,
       watched: state.libraryFilter === "all" || state.libraryFilter === "downloaded" ? undefined : state.libraryFilter === "watched",
       sort: state.librarySort === "year-descending" ? "release-date-descending" : state.librarySort === "year-ascending" ? "release-date-ascending" : state.librarySort,
       startIndex: 0, limit: 100,
-    });
-    const items = page.items;
+    } as const;
+    const items = await loadAllBrowseItems(
+      query,
+      (pageQuery) => window.jellyfin.browse.get(pageQuery),
+      () => state.libraryRequestIds.get(library.id) === requestId,
+    );
+    if (!items) return;
     if (state.libraryRequestIds.get(library.id) !== requestId) return;
     const itemsChanged = !cachedItems || !mediaItemsEqual(cachedItems, items);
     state.libraryCache.set(library.id, items);
@@ -2571,9 +2577,13 @@ async function openBrowse(title: string, input: Parameters<typeof window.jellyfi
   setRoute("search");
   renderLoadingRows(searchRows);
   try {
-    const page = await window.jellyfin.browse.get(input);
-    if (requestId !== state.searchRequestId) return;
-    renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items: page.items, shape: "poster" }]);
+    const items = await loadAllBrowseItems(
+      input,
+      (pageQuery) => window.jellyfin.browse.get(pageQuery),
+      () => requestId === state.searchRequestId,
+    );
+    if (!items) return;
+    renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items, shape: "poster" }]);
   } catch (error) {
     if (requestId === state.searchRequestId) renderMessage(searchRows, errorMessage(error, "Browse results could not be loaded."));
   }
@@ -3604,11 +3614,16 @@ function scheduleTrickplaySprite(): void {
     return;
   }
   const frame = trickplayFrame(manifest, previewTargetTicks, playback.durationTicks);
+  previewPendingUrl = "";
+  playerTimelinePreviewImage.classList.add("is-hidden");
   const applySprite = (url: string): void => {
     previewPendingUrl = url;
-    playerTimelinePreviewImage.classList.add("is-hidden");
     playerTimelinePreviewImage.style.setProperty("--preview-x", `${frame.x}px`);
     playerTimelinePreviewImage.style.setProperty("--preview-y", `${frame.y}px`);
+    if (playerTimelinePreviewImg.src === url && playerTimelinePreviewImg.complete && playerTimelinePreviewImg.naturalWidth > 0) {
+      playerTimelinePreviewImage.classList.remove("is-hidden");
+      return;
+    }
     playerTimelinePreviewImg.src = url;
   };
   const cached = trickplaySpriteUrls.get(frame.spriteIndex);
