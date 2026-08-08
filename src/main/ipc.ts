@@ -36,6 +36,7 @@ import {
   playbackTrackSchema,
   playbackViewportSchema,
   playbackVolumeSchema,
+  trickplaySpriteSchema,
   playbackAdapterPreferenceSchema,
   bufferingPolicyPreferenceSchema,
   searchSchema,
@@ -64,6 +65,8 @@ import type { CompanionSettingsBridge } from "../shared/companionContracts";
 import type { PlaybackCommandService } from "./services/playbackCommandService";
 import type { TrailerWindowController } from "./services/trailerWindow";
 import type { SmartDownloadService } from "./services/smartDownloads";
+import type { PlaybackMetadataService } from "./services/playbackMetadata";
+import type { TrickplayService } from "./services/trickplay";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
 
@@ -145,6 +148,8 @@ export function registerIpcHandlers(
   playbackCommands?: PlaybackCommandService,
   trailerWindow?: TrailerWindowController,
   smartDownloads?: SmartDownloadService,
+  playbackMetadata?: PlaybackMetadataService,
+  trickplay?: TrickplayService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -171,6 +176,8 @@ export function registerIpcHandlers(
     const value = loginSchema.strict().parse(input);
     await syncPlay?.deactivate();
     artwork.clear();
+    playbackMetadata?.clear();
+    trickplay?.clear();
     await playback.clear();
     await smartDownloads?.deactivate();
     await downloads.deactivate();
@@ -192,6 +199,8 @@ export function registerIpcHandlers(
     await companion?.stopForSessionChange?.();
     const session = await api.restore();
     artwork.clear();
+    playbackMetadata?.clear();
+    trickplay?.clear();
     await playback.clear();
     if (session.authenticated) {
       await downloads.activate();
@@ -207,6 +216,8 @@ export function registerIpcHandlers(
     await companion?.stopForSessionChange?.();
     await syncPlay?.deactivate();
     artwork.clear();
+    playbackMetadata?.clear();
+    trickplay?.clear();
     await playback.clear();
     await smartDownloads?.deactivate();
     await downloads.deactivate();
@@ -244,6 +255,19 @@ export function registerIpcHandlers(
     return api.getEpisodes(value.seriesId, value.seasonId);
   });
   register(IPC.artworkGetUrl, (input) => artwork.getUrl(artworkSchema.strict().parse(input)));
+  register(IPC.playbackFeaturesGetMediaSegments, (input) => {
+    if (!playbackMetadata) throw new AppError("PLAYBACK_FEATURES_UNAVAILABLE", "Playback features are unavailable.", 503);
+    return playbackMetadata.getMediaSegments(playbackIdSchema.strict().parse(input).playbackId);
+  });
+  register(IPC.playbackFeaturesGetTrickplayManifest, (input) => {
+    if (!trickplay) throw new AppError("PLAYBACK_FEATURES_UNAVAILABLE", "Playback features are unavailable.", 503);
+    return trickplay.getManifest(playbackIdSchema.strict().parse(input).playbackId);
+  });
+  register(IPC.playbackFeaturesGetTrickplaySpriteUrl, (input) => {
+    if (!trickplay) throw new AppError("PLAYBACK_FEATURES_UNAVAILABLE", "Playback features are unavailable.", 503);
+    const value = trickplaySpriteSchema.strict().parse(input);
+    return trickplay.getSpriteUrl(value.playbackId, value.manifestId, value.spriteIndex);
+  });
   register(IPC.mediaSourcesGetCapabilities, (input) => api.getMediaSourceCapabilities(itemIdSchema.strict().parse(input).itemId));
   register(IPC.liveTvGetStatus, (input) => {
     emptySchema.strict().parse(input ?? {});

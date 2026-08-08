@@ -844,6 +844,7 @@ async function runElectronChild() {
         items: ["getDetails", "openTrailer", "setWatched"],
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
+        playbackFeatures: ["getMediaSegments", "getTrickplayManifest", "getTrickplaySpriteUrl"],
         mediaSources: ["getCapabilities"],
         liveTv: ["cancelSchedule", "createRecording", "deleteRecording", "getGuide", "getRecordings", "getSeriesTimers", "getStatus", "getTimers", "updateSchedule"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "listOfflinePlayable", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
@@ -1399,9 +1400,11 @@ async function runElectronChild() {
         const watched = titles();
         filter.value = "downloaded";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let attempt = 0; attempt < 100 && titles()[0] !== "Runtime movie"; attempt += 1) await delay(20);
         const downloaded = titles();
         filter.value = "all";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let attempt = 0; attempt < 100 && (titles().length !== 3 || titles()[0] !== "Zulu movie"); attempt += 1) await delay(20);
         return { descending, unwatched, watched, downloaded };
       })()`);
 
@@ -1414,6 +1417,11 @@ async function runElectronChild() {
     await test("Home, library, and search cards expose narrow quick Play without replacing details navigation", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('[data-library-id="runtime-library"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelector('#libraryGrid [data-media-item="runtime-zulu-movie-id"]')) break;
+          await delay(20);
+        }
         const card = document.querySelector('#libraryGrid [data-media-item="runtime-zulu-movie-id"]');
         const libraryQuickPlay = document.querySelector('#libraryGrid [data-quick-play-item="runtime-zulu-movie-id"]');
         const homeQuickPlay = document.querySelector('#homeRows [data-quick-play-item="runtime-movie-id"]');

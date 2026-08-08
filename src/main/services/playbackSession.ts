@@ -535,6 +535,17 @@ export class PlaybackSessionService {
     return { ...this.state };
   }
 
+  /** Main-process-only identity for optional resources tied to the active source. */
+  getActiveResourceContext(playbackId: string): { itemId: string; mediaSourceId: string; contentKind: "on-demand" | "live-tv" } | null {
+    const playback = this.current;
+    if (!playback || playback.id !== playbackId) return null;
+    return {
+      itemId: playback.itemId,
+      mediaSourceId: playback.mediaSourceId,
+      contentKind: this.state.contentKind ?? "on-demand",
+    };
+  }
+
   clear(): void {
     this.revision += 1;
     this.abortCurrent();

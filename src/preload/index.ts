@@ -37,6 +37,7 @@ import {
   type OpenSourceLicenseInventory,
   type OfflinePlayableSummary,
   type PlaybackIdInput,
+  type PlaybackMediaSegmentsResult,
   type PlaybackFullscreenInput,
   type PlaybackPauseInput,
   type PlaybackRateInput,
@@ -47,6 +48,8 @@ import {
   type PlaybackTrackInput,
   type PlaybackViewportInput,
   type PlaybackVolumeInput,
+  type TrickplayManifest,
+  type TrickplaySpriteInput,
   type PlaybackAdapterPreference,
   type PlaybackAdapterPreferenceInput,
   type RpcResult,
@@ -117,6 +120,11 @@ const bridge: JellyfinBridge = {
     getEpisodes: (input: EpisodesInput) => invoke<MediaItem[]>(IPC.showsGetEpisodes, input),
   },
   artwork: { getUrl: (input: ArtworkInput) => invoke<string>(IPC.artworkGetUrl, input) },
+  playbackFeatures: {
+    getMediaSegments: (input: PlaybackIdInput) => invoke<PlaybackMediaSegmentsResult>(IPC.playbackFeaturesGetMediaSegments, input),
+    getTrickplayManifest: (input: PlaybackIdInput) => invoke<TrickplayManifest | null>(IPC.playbackFeaturesGetTrickplayManifest, input),
+    getTrickplaySpriteUrl: (input: TrickplaySpriteInput) => invoke<string>(IPC.playbackFeaturesGetTrickplaySpriteUrl, input),
+  },
   mediaSources: {
     getCapabilities: (input: ItemIdInput) => invoke<MediaSourceCapabilities>(IPC.mediaSourcesGetCapabilities, input),
   },

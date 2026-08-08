@@ -15,6 +15,7 @@ import type {
   PlaybackAdapterPreference,
   OfflinePlayableSummary,
   PlaybackSourceKind,
+  PlaybackMediaSegment,
   PlaybackState,
   PlaybackTrack,
   SafeSession,
@@ -23,6 +24,7 @@ import type {
   SmartSeriesSummary,
   SoloSessionDiagnostics,
   WatchPartyViewState,
+  TrickplayManifest,
 } from "../shared/contracts";
 import type { CompanionSettingsState } from "../shared/companionContracts";
 import { BRANDING } from "../shared/branding";
@@ -38,6 +40,8 @@ import {
   timelineTicks,
   trackLabel,
 } from "./playerPresentation";
+import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
+import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -181,6 +185,7 @@ const playerLibraryNavigation = byId<HTMLElement>("playerLibraryNavigation");
 const playerCenter = byId<HTMLElement>("playerCenter");
 const playerFrame = byId<HTMLElement>("playerFrame");
 const playerViewport = byId<HTMLElement>("playerViewport");
+const playerSegmentSkipButton = byId<HTMLButtonElement>("playerSegmentSkipButton");
 const nextEpisodeCountdown = byId<HTMLElement>("nextEpisodeCountdown");
 const watchPartyStartCue = byId<HTMLElement>("watchPartyStartCue");
 const nextEpisodeCountdownTitle = byId<HTMLElement>("nextEpisodeCountdownTitle");
@@ -210,6 +215,11 @@ const playerMiniGuideButton = byId<HTMLButtonElement>("playerMiniGuideButton");
 const playerNextChannelButton = byId<HTMLButtonElement>("playerNextChannelButton");
 const playerMiniGuide = byId<HTMLElement>("playerMiniGuide");
 const playerTimeline = byId<HTMLInputElement>("playerTimeline");
+const playerTimelineTrack = byId<HTMLElement>("playerTimelineTrack");
+const playerTimelinePreview = byId<HTMLElement>("playerTimelinePreview");
+const playerTimelinePreviewImage = byId<HTMLElement>("playerTimelinePreviewImage");
+const playerTimelinePreviewImg = byId<HTMLImageElement>("playerTimelinePreviewImg");
+const playerTimelinePreviewTime = byId<HTMLElement>("playerTimelinePreviewTime");
 const playerCurrentTime = byId<HTMLElement>("playerCurrentTime");
 const playerDuration = byId<HTMLElement>("playerDuration");
 const playerMuteButton = byId<HTMLButtonElement>("playerMuteButton");
@@ -439,6 +449,16 @@ let companionPairingExpiresAt = 0;
 let watchPartiesVisible = false;
 let playerControlsTimer: ReturnType<typeof setTimeout> | null = null;
 let playerViewportClickTimer: ReturnType<typeof setTimeout> | null = null;
+let playbackFeatureRequestId = 0;
+let playbackSegments: PlaybackMediaSegment[] = [];
+let trickplayManifest: TrickplayManifest | null = null;
+let trickplaySpriteTimer: ReturnType<typeof setTimeout> | null = null;
+let trickplaySpriteRequestId = 0;
+let trickplaySpriteUrls = new Map<number, string>();
+let previewTargetTicks = 0;
+let previewHovering = false;
+let previewFocused = false;
+let previewPendingUrl = "";
 let volumeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAudibleVolume = 100;
 let soloDiagnosticsRefreshedAt = 0;
@@ -3501,9 +3521,129 @@ function renderNextEpisodeCountdown(playback: PlaybackState | null): void {
   nextEpisodeCancelButton.disabled = false;
 }
 
+function clearPlaybackFeatures(): void {
+  playbackFeatureRequestId += 1;
+  playbackSegments = [];
+  trickplayManifest = null;
+  trickplaySpriteUrls.clear();
+  previewPendingUrl = "";
+  trickplaySpriteRequestId += 1;
+  if (trickplaySpriteTimer) clearTimeout(trickplaySpriteTimer);
+  trickplaySpriteTimer = null;
+  playerSegmentSkipButton.classList.add("is-hidden");
+  playerSegmentSkipButton.disabled = false;
+  playerSegmentSkipButton.removeAttribute("aria-describedby");
+  playerTimelinePreview.classList.add("is-hidden");
+  playerTimelinePreviewImage.classList.add("is-hidden");
+  playerTimelinePreviewImg.removeAttribute("src");
+}
+
+async function loadPlaybackFeatures(playback: PlaybackState): Promise<void> {
+  if (!playback.playbackId || !playback.itemId || playback.contentKind === "live-tv") return;
+  const requestId = ++playbackFeatureRequestId;
+  const playbackId = playback.playbackId;
+  const itemId = playback.itemId;
+  void window.jellyfin.playbackFeatures.getMediaSegments({ playbackId }).then((result) => {
+    if (requestId !== playbackFeatureRequestId || state.playbackId !== playbackId || playbackForPlayer()?.itemId !== itemId || result.itemId !== itemId) return;
+    playbackSegments = result.segments;
+    renderPlayerState();
+  }).catch(() => undefined);
+  void window.jellyfin.playbackFeatures.getTrickplayManifest({ playbackId }).then((manifest) => {
+    if (requestId !== playbackFeatureRequestId || state.playbackId !== playbackId || playbackForPlayer()?.itemId !== itemId) return;
+    trickplayManifest = manifest?.itemId === itemId ? manifest : null;
+    if (previewHovering || previewFocused || playerTimeline.dataset.scrubbing === "true") scheduleTrickplaySprite();
+  }).catch(() => undefined);
+}
+
+function renderSegmentSkip(playback: PlaybackState | null): void {
+  const segment = playback && playback.contentKind !== "live-tv"
+    ? activeMediaSegment(playbackSegments, playback.positionTicks)
+    : null;
+  const visible = Boolean(segment && state.playbackId === playback?.playbackId);
+  const enabled = Boolean(segment && playback?.seekable && canSkipSegment(segment, playback.seekableUntilTicks));
+  const focused = document.activeElement === playerSegmentSkipButton;
+  playerSegmentSkipButton.classList.toggle("is-hidden", !visible);
+  if (!segment) {
+    playerSegmentSkipButton.disabled = false;
+    if (focused) (playerTimeline.disabled ? playerPlayPauseButton : playerTimeline).focus({ preventScroll: true });
+    return;
+  }
+  playerSegmentSkipButton.textContent = segmentLabel(segment.type);
+  playerSegmentSkipButton.disabled = !enabled;
+  playerSegmentSkipButton.title = enabled ? segmentLabel(segment.type) : `${segmentLabel(segment.type)} is unavailable until more of the download is ready.`;
+  playerSegmentSkipButton.setAttribute("aria-label", playerSegmentSkipButton.title);
+  if (!enabled && focused) (playerTimeline.disabled ? playerPlayPauseButton : playerTimeline).focus({ preventScroll: true });
+}
+
+function hideTimelinePreviewIfInactive(): void {
+  if (previewHovering || previewFocused || playerTimeline.dataset.scrubbing === "true") return;
+  playerTimelinePreview.classList.add("is-hidden");
+  playerTimelinePreviewImage.classList.add("is-hidden");
+}
+
+function presentTimelinePreview(targetTicks: number, pointerX?: number): void {
+  const playback = playbackForPlayer();
+  if (!playback || playback.durationTicks <= 0 || playback.contentKind === "live-tv") return;
+  previewTargetTicks = Math.max(0, Math.min(playback.durationTicks, targetTicks));
+  const bounds = playerTimelineTrack.getBoundingClientRect();
+  const localX = pointerX === undefined
+    ? bounds.width * (previewTargetTicks / playback.durationTicks)
+    : Math.max(0, Math.min(bounds.width, pointerX - bounds.left));
+  playerTimelinePreview.style.setProperty("--preview-left", `${clampedPreviewLeft(localX, bounds.width, 180)}px`);
+  playerTimelinePreviewTime.textContent = formatPlaybackTime(previewTargetTicks);
+  playerTimelinePreview.classList.remove("is-hidden");
+  scheduleTrickplaySprite();
+}
+
+function scheduleTrickplaySprite(): void {
+  if (trickplaySpriteTimer) clearTimeout(trickplaySpriteTimer);
+  const playback = playbackForPlayer();
+  const manifest = trickplayManifest;
+  if (!playback || !manifest || manifest.playbackId !== playback.playbackId || manifest.itemId !== playback.itemId) {
+    playerTimelinePreviewImage.classList.add("is-hidden");
+    return;
+  }
+  const frame = trickplayFrame(manifest, previewTargetTicks, playback.durationTicks);
+  const applySprite = (url: string): void => {
+    previewPendingUrl = url;
+    playerTimelinePreviewImage.classList.add("is-hidden");
+    playerTimelinePreviewImage.style.setProperty("--preview-x", `${frame.x}px`);
+    playerTimelinePreviewImage.style.setProperty("--preview-y", `${frame.y}px`);
+    playerTimelinePreviewImg.src = url;
+  };
+  const cached = trickplaySpriteUrls.get(frame.spriteIndex);
+  if (cached) {
+    trickplaySpriteUrls.delete(frame.spriteIndex);
+    trickplaySpriteUrls.set(frame.spriteIndex, cached);
+    applySprite(cached);
+    return;
+  }
+  const requestId = ++trickplaySpriteRequestId;
+  trickplaySpriteTimer = setTimeout(() => {
+    void window.jellyfin.playbackFeatures.getTrickplaySpriteUrl({
+      playbackId: manifest.playbackId,
+      manifestId: manifest.manifestId,
+      spriteIndex: frame.spriteIndex,
+    }).then((url) => {
+      if (requestId !== trickplaySpriteRequestId || trickplayManifest?.manifestId !== manifest.manifestId) return;
+      trickplaySpriteUrls.set(frame.spriteIndex, url);
+      while (trickplaySpriteUrls.size > 3) trickplaySpriteUrls.delete(trickplaySpriteUrls.keys().next().value as number);
+      applySprite(url);
+    }).catch(() => {
+      if (requestId === trickplaySpriteRequestId) playerTimelinePreviewImage.classList.add("is-hidden");
+    });
+  }, 100);
+}
+
+playerTimelinePreviewImg.addEventListener("load", () => {
+  if (playerTimelinePreviewImg.currentSrc === previewPendingUrl || playerTimelinePreviewImg.src === previewPendingUrl) playerTimelinePreviewImage.classList.remove("is-hidden");
+});
+playerTimelinePreviewImg.addEventListener("error", () => playerTimelinePreviewImage.classList.add("is-hidden"));
+
 function renderPlayerState(forceStructure = false): void {
   const playback = playbackForPlayer();
   renderNextEpisodeCountdown(playback);
+  renderSegmentSkip(playback);
   const phase = playbackPhasePresentation(playback);
   const replayAvailable = !state.playbackId
     && Boolean(state.playbackItem)
@@ -4026,6 +4166,7 @@ function armPlayerControlsTimer(): void {
     const playback = playbackForPlayer();
     if (playback?.fullscreen && playback.phase === "playing" && playback.paused === false
       && !playerControls.contains(document.activeElement)
+      && document.activeElement !== playerSegmentSkipButton
       && playerEpisodeBrowser.classList.contains("is-hidden")) {
       setPlayerControlsIdle(true);
     }
@@ -4126,6 +4267,7 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   state.playbackSource = null;
   state.playbackSourceKind = null;
   state.playbackState = null;
+  clearPlaybackFeatures();
   state.soloDiagnostics = null;
   state.soloDiagnosticsRequestId += 1;
   playerStructuralRenderKey = "";
@@ -4190,6 +4332,7 @@ async function presentExternallyStartedPlayback(playback: PlaybackState): Promis
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind ?? null;
   state.playbackState = playback;
+  clearPlaybackFeatures();
   state.soloDiagnostics = null;
   state.soloDiagnosticsRequestId += 1;
   playerStructuralRenderKey = "";
@@ -4205,6 +4348,7 @@ async function presentExternallyStartedPlayback(playback: PlaybackState): Promis
   document.body.classList.add("is-playing");
   setSessionPanelCollapsed(window.matchMedia("(max-width: 1120px)").matches);
   renderPlayerState();
+  void loadPlaybackFeatures(playback);
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
   await Promise.all([
@@ -4318,6 +4462,7 @@ async function closePlayer(): Promise<void> {
   state.playbackSource = null;
   state.playbackSourceKind = null;
   state.playbackState = null;
+  clearPlaybackFeatures();
   state.soloDiagnostics = null;
   playerStructuralRenderKey = "";
   closePlayerSettings(false);
@@ -4347,6 +4492,7 @@ window.jellyfin.playback.subscribe((playback) => {
     state.playbackId = playback.playbackId;
   }
   if (playerVisible && itemChanged) {
+    clearPlaybackFeatures();
     closePlayerEpisodeBrowser(false);
     state.playbackItem = null;
     state.soloDiagnostics = null;
@@ -4358,6 +4504,7 @@ window.jellyfin.playback.subscribe((playback) => {
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
   renderPlayerState();
+  if (itemChanged && !externallyStarted) void loadPlaybackFeatures(playback);
   if (externallyStarted) void presentExternallyStartedPlayback(playback);
   if (playback.playbackId && playback.playbackId === state.playbackId && (itemChanged || Date.now() - soloDiagnosticsRefreshedAt >= 30_000)) {
     void refreshSoloDiagnostics(itemChanged);
@@ -4966,7 +5113,34 @@ playerExitButton.addEventListener("click", () => { void closePlayer(); });
 playerPlayPauseButton.addEventListener("click", () => { void togglePlayerPaused(); });
 playerBack10Button.addEventListener("click", () => { void seekPlayerBy(-10); });
 playerForward10Button.addEventListener("click", () => { void seekPlayerBy(10); });
+playerSegmentSkipButton.addEventListener("click", () => {
+  const playback = playbackForPlayer();
+  const segment = playback ? activeMediaSegment(playbackSegments, playback.positionTicks) : null;
+  if (!playback || !segment || !state.playbackId || playerSegmentSkipButton.disabled) return;
+  void applyPlaybackCommand(
+    () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks: segment.endTicks }),
+    "Playback could not be seeked.",
+  );
+});
 
+playerTimeline.addEventListener("pointerenter", (event) => {
+  previewHovering = true;
+  const playback = playbackForPlayer();
+  const bounds = playerTimelineTrack.getBoundingClientRect();
+  if (playback && bounds.width > 0) presentTimelinePreview((event.clientX - bounds.left) / bounds.width * playback.durationTicks, event.clientX);
+});
+playerTimeline.addEventListener("pointermove", (event) => {
+  const playback = playbackForPlayer();
+  const bounds = playerTimelineTrack.getBoundingClientRect();
+  if (playback && bounds.width > 0) presentTimelinePreview((event.clientX - bounds.left) / bounds.width * playback.durationTicks, event.clientX);
+});
+playerTimeline.addEventListener("pointerleave", () => { previewHovering = false; hideTimelinePreviewIfInactive(); });
+playerTimeline.addEventListener("focus", () => {
+  previewFocused = true;
+  const playback = playbackForPlayer();
+  if (playback) presentTimelinePreview(timelineTicks(Number(playerTimeline.value), playback.durationTicks));
+});
+playerTimeline.addEventListener("blur", () => { previewFocused = false; hideTimelinePreviewIfInactive(); });
 playerTimeline.addEventListener("pointerdown", () => { playerTimeline.dataset.scrubbing = "true"; });
 playerTimeline.addEventListener("input", () => {
   const playback = playbackForPlayer();
@@ -4977,6 +5151,7 @@ playerTimeline.addEventListener("input", () => {
   const position = Math.min(maximum, requested);
   if (position !== requested) playerTimeline.value = String(safeTimelineValue(position, playback.durationTicks));
   playerCurrentTime.textContent = formatPlaybackTime(position);
+  presentTimelinePreview(position);
 });
 playerTimeline.addEventListener("change", () => {
   const playback = playbackForPlayer();
@@ -4990,8 +5165,9 @@ playerTimeline.addEventListener("change", () => {
     () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks }),
     "Playback could not be seeked.",
   );
+  hideTimelinePreviewIfInactive();
 });
-playerTimeline.addEventListener("pointercancel", () => { delete playerTimeline.dataset.scrubbing; });
+playerTimeline.addEventListener("pointercancel", () => { delete playerTimeline.dataset.scrubbing; hideTimelinePreviewIfInactive(); });
 
 playerVolume.addEventListener("input", () => {
   const volume = Math.max(0, Math.min(100, Math.round(Number(playerVolume.value))));

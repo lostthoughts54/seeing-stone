@@ -7,6 +7,8 @@ import type {
   BrowseQuery,
   BrowsePage,
   MediaItem,
+  PlaybackMediaSegment,
+  PlaybackMediaSegmentType,
   MediaSourceCapabilities,
   JellyfinConnectionDiagnostics,
   LiveTvGuide,
@@ -49,6 +51,8 @@ const ITEM_FIELDS = [
 ].join(",");
 
 type JsonRecord = Record<string, unknown>;
+const MAX_PLAYBACK_TICKS = 864_000_000_000;
+const MEDIA_SEGMENT_TYPES = new Set<PlaybackMediaSegmentType>(["Intro", "Recap", "Outro"]);
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" ? value as JsonRecord : {};
@@ -60,6 +64,31 @@ function asString(value: unknown, fallback = ""): string {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+export function sanitizeMediaSegments(value: unknown): PlaybackMediaSegment[] {
+  const records = asRecord(value);
+  const items = Array.isArray(value) ? value : Array.isArray(records.Items) ? records.Items : [];
+  if (items.length > 256) return [];
+  const unique = new Map<string, PlaybackMediaSegment>();
+  for (const candidate of items) {
+    const segment = asRecord(candidate);
+    const type = typeof segment.Type === "string" && MEDIA_SEGMENT_TYPES.has(segment.Type as PlaybackMediaSegmentType)
+      ? segment.Type as PlaybackMediaSegmentType
+      : null;
+    const startTicks = segment.StartTicks;
+    const endTicks = segment.EndTicks;
+    if (!type || !Number.isSafeInteger(startTicks) || !Number.isSafeInteger(endTicks)) continue;
+    const start = startTicks as number;
+    const end = endTicks as number;
+    if (start < 0 || end <= start || end > MAX_PLAYBACK_TICKS) continue;
+    const normalized = { type, startTicks: start, endTicks: end };
+    unique.set(`${type}:${startTicks}:${endTicks}`, normalized);
+  }
+  const result = [...unique.values()].sort((left, right) => (
+    left.startTicks - right.startTicks || left.endTicks - right.endTicks || left.type.localeCompare(right.type)
+  ));
+  return result.length <= 64 ? result : [];
 }
 
 function nullableString(value: unknown): string | null {
@@ -791,6 +820,27 @@ export class JellyfinApi {
     return sanitizeMediaItem(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items/${encodeURIComponent(itemId)}`, { Fields: ITEM_FIELDS }));
   }
 
+  async getMediaSegments(itemId: string, signal?: AbortSignal): Promise<PlaybackMediaSegment[]> {
+    let result: unknown;
+    try {
+      result = await this.request(`/MediaSegments/${encodeURIComponent(itemId)}`, {}, { signal });
+    } catch (error) {
+      if (error instanceof AppError && (error.status === 404 || error.status === 405)) return [];
+      throw error;
+    }
+    return sanitizeMediaSegments(result);
+  }
+
+  async getTrickplayMetadata(itemId: string, signal?: AbortSignal): Promise<unknown> {
+    const session = this.requireSession();
+    const result = asRecord(await this.request(
+      `/Users/${encodeURIComponent(session.userId)}/Items/${encodeURIComponent(itemId)}`,
+      { Fields: "Trickplay" },
+      { signal },
+    ));
+    return result.Trickplay;
+  }
+
   async getSeasons(seriesId: string): Promise<MediaItem[]> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Shows/${encodeURIComponent(seriesId)}/Seasons`, { UserId: session.userId, Fields: ITEM_FIELDS }));
@@ -1047,6 +1097,14 @@ export class JellyfinApi {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchTrickplayTile(itemId: string, mediaSourceId: string, width: number, index: number, signal?: AbortSignal): Promise<Response> {
+    return this.fetchAuthenticated(
+      `/Videos/${encodeURIComponent(itemId)}/Trickplay/${encodeURIComponent(String(width))}/${encodeURIComponent(String(index))}.jpg`,
+      { mediaSourceId },
+      { signal },
+    );
   }
 
   async fetchStaticStream(itemId: string, mediaSourceId: string, range?: string, signal?: AbortSignal, liveStreamId?: string | null): Promise<Response> {

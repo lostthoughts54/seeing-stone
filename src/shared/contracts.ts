@@ -401,6 +401,29 @@ export type BrowseInput = BrowseQuery;
 export interface SearchInput { query: string }
 export interface EpisodesInput { seriesId: string; seasonId: string }
 export interface ArtworkInput { itemId: string; kind: ImageKind; tag?: string; width?: number; height?: number }
+export type PlaybackMediaSegmentType = "Intro" | "Recap" | "Outro";
+export interface PlaybackMediaSegment {
+  type: PlaybackMediaSegmentType;
+  startTicks: number;
+  endTicks: number;
+}
+export interface PlaybackMediaSegmentsResult {
+  playbackId: string;
+  itemId: string;
+  segments: PlaybackMediaSegment[];
+}
+export interface TrickplayManifest {
+  manifestId: string;
+  playbackId: string;
+  itemId: string;
+  frameWidth: number;
+  frameHeight: number;
+  intervalTicks: number;
+  columns: number;
+  rows: number;
+  frameCount: number;
+  spriteCount: number;
+}
 export interface PlaybackStartInput {
   itemId: string;
   resumeMode: "resume" | "start-over";
@@ -408,6 +431,7 @@ export interface PlaybackStartInput {
   progressiveOnly?: boolean;
 }
 export interface PlaybackIdInput { playbackId: string }
+export interface TrickplaySpriteInput extends PlaybackIdInput { manifestId: string; spriteIndex: number }
 export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
 export interface PlaybackRateInput extends PlaybackIdInput { rate: number }
@@ -649,6 +673,11 @@ export interface JellyfinBridge {
   artwork: {
     getUrl(input: ArtworkInput): Promise<string>;
   };
+  playbackFeatures: {
+    getMediaSegments(input: PlaybackIdInput): Promise<PlaybackMediaSegmentsResult>;
+    getTrickplayManifest(input: PlaybackIdInput): Promise<TrickplayManifest | null>;
+    getTrickplaySpriteUrl(input: TrickplaySpriteInput): Promise<string>;
+  };
   mediaSources: {
     getCapabilities(input: ItemIdInput): Promise<MediaSourceCapabilities>;
   };
@@ -755,6 +784,9 @@ export const IPC = {
   showsGetSeasons: "shows:get-seasons",
   showsGetEpisodes: "shows:get-episodes",
   artworkGetUrl: "artwork:get-url",
+  playbackFeaturesGetMediaSegments: "playback-features:get-media-segments",
+  playbackFeaturesGetTrickplayManifest: "playback-features:get-trickplay-manifest",
+  playbackFeaturesGetTrickplaySpriteUrl: "playback-features:get-trickplay-sprite-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
   liveTvGetStatus: "live-tv:get-status",
   liveTvGetGuide: "live-tv:get-guide",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MediaItem, PlaybackStartResult } from "../src/shared/contracts";
+import type { MediaItem, PlaybackStartResult, PlaybackState } from "../src/shared/contracts";
 import type { PlayerController } from "../src/main/services/playerController";
 import { PlaybackCommandService } from "../src/main/services/playbackCommandService";
 import type { PlaybackQueueStore } from "../src/main/services/playbackQueue";
@@ -15,11 +15,18 @@ const result: PlaybackStartResult = {
 
 function harness(): {
   service: PlaybackCommandService;
-  player: { loadItem: ReturnType<typeof vi.fn>; setFullscreen: ReturnType<typeof vi.fn> };
+  player: { loadItem: ReturnType<typeof vi.fn>; setFullscreen: ReturnType<typeof vi.fn>; seek: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
 } {
+  const state: PlaybackState = {
+    playbackId: result.playbackId, itemId: item.id, phase: "playing", source: "server", positionTicks: 0, durationTicks: result.durationTicks,
+    paused: false, buffering: false, seekable: true, seekableUntilTicks: null, volume: 100, fullscreen: false, audioTracks: [], subtitleTracks: [], error: null,
+    contentKind: "on-demand",
+  };
   const player = {
     loadItem: vi.fn(async () => result),
     setFullscreen: vi.fn(async () => ({})),
+    getState: vi.fn(() => state),
+    seek: vi.fn(async () => state),
   };
   const queue = { reset: vi.fn() };
   const service = new PlaybackCommandService(
@@ -54,5 +61,27 @@ describe("PlaybackCommandService Companion presentation", () => {
       origin: "local-user",
       requireProgressive: true,
     });
+  });
+});
+
+describe("PlaybackCommandService seek identity", () => {
+  it("seeks the current ordinary playback and rejects a stale one", async () => {
+    const { service, player } = harness();
+    await service.seek(result.playbackId, 5_000_000, "local-user");
+    expect(player.seek).toHaveBeenCalledWith(result.playbackId, 5_000_000, { origin: "local-user" });
+    await expect(service.seek("11111111-1111-4111-8111-111111111111", 5_000_000, "local-user"))
+      .rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+  });
+
+  it("uses only the shared SyncPlay seek for the current playback", async () => {
+    const { service, player } = harness();
+    const requestSeek = vi.fn(async () => player.getState());
+    service.setSyncPlay({ isJoined: () => true, requestSeek } as never);
+    await service.seek(result.playbackId, 5_000_000, "local-user");
+    expect(requestSeek).toHaveBeenCalledWith(5_000_000);
+    expect(player.seek).not.toHaveBeenCalled();
+    await expect(service.seek("11111111-1111-4111-8111-111111111111", 5_000_000, "local-user"))
+      .rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+    expect(requestSeek).toHaveBeenCalledTimes(1);
   });
 });

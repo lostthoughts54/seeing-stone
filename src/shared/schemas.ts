@@ -95,6 +95,11 @@ export const liveTvPlaybackSchema = z.object({ channelId: liveTvId }).strict();
 
 export const playbackIdSchema = z.object({ playbackId: z.string().uuid() });
 
+export const trickplaySpriteSchema = playbackIdSchema.extend({
+  manifestId: z.string().uuid(),
+  spriteIndex: z.number().int().min(0).max(10_000),
+});
+
 export const playbackPauseSchema = playbackIdSchema.extend({ paused: z.boolean() });
 
 export const playbackSeekSchema = playbackIdSchema.extend({

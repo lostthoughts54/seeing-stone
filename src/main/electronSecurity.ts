@@ -16,6 +16,7 @@ export function registerPrivilegedSchemes(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
     { scheme: "jellyfin-artwork", privileges: { standard: true, secure: true } },
+    { scheme: "jellyfin-trickplay", privileges: { standard: true, secure: true } },
   ]);
 }
 
@@ -37,7 +38,7 @@ export function appContentSecurityPolicy(): string {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self' data: jellyfin-artwork:",
+    "img-src 'self' data: jellyfin-artwork: jellyfin-trickplay:",
     "media-src 'none'",
     "connect-src 'none'",
     "font-src 'self'",

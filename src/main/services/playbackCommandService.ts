@@ -99,7 +99,11 @@ export class PlaybackCommandService {
   }
 
   async seek(playbackId: string, positionTicks: number, origin: PlayerActionOrigin = "companion"): Promise<PlaybackState> {
-    if (this.player.getState().contentKind === "live-tv") {
+    const state = this.player.getState();
+    if (state.playbackId !== playbackId) {
+      throw new AppError("INVALID_PLAYBACK", "That playback session is no longer active.", 409);
+    }
+    if (state.contentKind === "live-tv") {
       throw new AppError("LIVE_TV_SEEK_UNAVAILABLE", "Use Go Live to return to the current live edge.", 422);
     }
     if (this.syncPlay?.isJoined()) return this.syncPlay.requestSeek(positionTicks);

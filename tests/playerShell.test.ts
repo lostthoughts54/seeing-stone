@@ -2,6 +2,22 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("Seeing Stone player shell", () => {
+  it("provides bounded segment and trickplay controls without a new seek path", async () => {
+    const [html, renderer, preload, security] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/preload/index.ts", "utf8"),
+      readFile("src/main/electronSecurity.ts", "utf8"),
+    ]);
+    for (const id of ["playerSegmentSkipButton", "playerTimelineTrack", "playerTimelinePreview", "playerTimelinePreviewImg"]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(renderer).toContain("window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks: segment.endTicks })");
+    expect(renderer).toContain("getTrickplaySpriteUrl");
+    expect(renderer).toContain("playerTimeline.addEventListener(\"change\"");
+    expect(preload).toContain("playbackFeaturesGetTrickplaySpriteUrl");
+    expect(security).toContain("jellyfin-trickplay");
+  });
   it("ships guide-first Live TV across desktop, mobile, and player navigation", async () => {
     const [html, app] = await Promise.all([
       readFile("src/renderer/index.html", "utf8"),

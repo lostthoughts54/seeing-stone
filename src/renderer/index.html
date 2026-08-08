@@ -415,6 +415,7 @@
               <section id="playerFrame" class="seeing-frame" aria-labelledby="playerTitle">
                 <div class="seeing-frame-glow" aria-hidden="true"></div>
                 <div id="playerViewport" class="player-viewport" aria-label="Native video surface"></div>
+                <button id="playerSegmentSkipButton" class="player-segment-skip is-hidden" type="button"></button>
                 <div id="watchPartyStartCue" class="watch-party-start-cue is-hidden" role="status" aria-live="polite">Starting…</div>
                 <article id="nextEpisodeCountdown" class="next-episode-countdown is-hidden" role="status" aria-live="polite" aria-atomic="true">
                   <p class="next-episode-countdown-kicker">Up next</p>
@@ -462,7 +463,13 @@
                 <div id="playerMiniGuide" class="player-mini-guide is-hidden" aria-label="Live TV mini guide"></div>
                 <div class="player-timeline-row">
                   <span id="playerCurrentTime">0:00</span>
-                  <input id="playerTimeline" type="range" min="0" max="1000" value="0" step="1" aria-label="Playback position" disabled />
+                  <div id="playerTimelineTrack" class="player-timeline-track">
+                    <input id="playerTimeline" type="range" min="0" max="1000" value="0" step="1" aria-label="Playback position" disabled />
+                    <div id="playerTimelinePreview" class="player-timeline-preview is-hidden" aria-hidden="true">
+                      <div id="playerTimelinePreviewImage" class="player-timeline-preview-image is-hidden"><img id="playerTimelinePreviewImg" alt="" /></div>
+                      <span id="playerTimelinePreviewTime">0:00</span>
+                    </div>
+                  </div>
                   <span id="playerDuration">0:00</span>
                 </div>
                 <div class="player-control-row">

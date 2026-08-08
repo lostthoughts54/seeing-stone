@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceIdentity } from "../src/main/services/deviceIdentity";
-import { JellyfinApi, normalizeServerUrl, sanitizeMediaItem } from "../src/main/services/jellyfinApi";
+import { JellyfinApi, normalizeServerUrl, sanitizeMediaItem, sanitizeMediaSegments } from "../src/main/services/jellyfinApi";
 import { SecureSessionStore, type SessionProtector } from "../src/main/services/secureSession";
 import { browseSchema } from "../src/shared/schemas";
 
@@ -83,6 +83,18 @@ const unsafeItem = {
 };
 
 describe("JellyfinApi main-side boundary", () => {
+  it("sanitizes bounded recognized media segments only", () => {
+    expect(sanitizeMediaSegments({ Items: [
+      { Type: "Intro", StartTicks: 0, EndTicks: 100 },
+      { Type: "Intro", StartTicks: 0, EndTicks: 100 },
+      { Type: "Commercial", StartTicks: 100, EndTicks: 200 },
+      { Type: "Recap", StartTicks: -1, EndTicks: 5 },
+      { Type: "Outro", StartTicks: 200, EndTicks: 200 },
+    ] })).toEqual([{ type: "Intro", startTicks: 0, endTicks: 100 }]);
+    expect(sanitizeMediaSegments([{ Type: "Outro", StartTicks: 100, EndTicks: 200 }]))
+      .toEqual([{ type: "Outro", startTicks: 100, endTicks: 200 }]);
+    expect(sanitizeMediaSegments({ Items: Array.from({ length: 257 }, () => ({ Type: "Intro", StartTicks: 0, EndTicks: 1 })) })).toEqual([]);
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();

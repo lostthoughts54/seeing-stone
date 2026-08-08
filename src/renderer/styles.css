@@ -2442,6 +2442,15 @@ button.danger:hover:not(:disabled) {
   z-index: 0;
 }
 
+.player-segment-skip {
+  bottom: 22px;
+  position: absolute;
+  right: 22px;
+  z-index: 5;
+}
+
+.player-segment-skip:disabled { cursor: not-allowed; opacity: .58; }
+
 .next-episode-countdown {
   background: linear-gradient(145deg, rgba(18, 13, 30, 0.96), rgba(7, 7, 13, 0.97));
   border: 1px solid rgba(196, 145, 255, 0.38);
@@ -2732,6 +2741,39 @@ button.danger:hover:not(:disabled) {
 }
 
 .player-timeline-row span:last-child { text-align: right; }
+
+.player-timeline-track { min-width: 0; position: relative; }
+
+.player-timeline-preview {
+  align-items: center;
+  background: rgba(8, 8, 13, .97);
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: .45rem;
+  bottom: calc(100% + 12px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  display: grid;
+  gap: .2rem;
+  justify-items: center;
+  left: var(--preview-left, 50%);
+  padding: .3rem;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 180px;
+  z-index: 12;
+}
+
+.player-timeline-preview-image {
+  height: 101px;
+  overflow: hidden;
+  position: relative;
+  width: 180px;
+}
+
+.player-timeline-preview-image img { left: var(--preview-x, 0px); position: absolute; top: var(--preview-y, 0px); }
+
+.player-timeline-preview.is-hidden,
+.player-timeline-preview-image.is-hidden { display: none; }
 
 .player-controls input[type="range"] {
   accent-color: var(--ss-violet);

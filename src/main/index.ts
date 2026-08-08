@@ -61,6 +61,8 @@ import { PlayerControllerRouter, type PlayerControllerRoute } from "./services/p
 import { persistPlayerEngineDiagnostics } from "./services/playerEngineDiagnostics";
 import { TrailerWindowService } from "./services/trailerWindow";
 import { SmartDownloadService } from "./services/smartDownloads";
+import { PlaybackMetadataService } from "./services/playbackMetadata";
+import { TrickplayService } from "./services/trickplay";
 import {
   CleanMachineDiagnosticsService,
   formatCleanMachineDiagnostics,
@@ -308,6 +310,13 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   recordPlayerEngineStatus();
   const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);
   const playbackCommands = new PlaybackCommandService(playback, api, playbackQueue);
+  const playbackMetadata = new PlaybackMetadataService(api);
+  const trickplay = new TrickplayService(api, (playbackId) => playbackSource.getActiveResourceContext(playbackId));
+  playbackMetadata.setPlaybackState(playback.getState());
+  trickplay.setPlaybackState(playback.getState());
+  await rendererSession.protocol.handle("jellyfin-trickplay", async (request) => {
+    try { return await trickplay.handle(request); } catch { return new Response(null, { status: 502 }); }
+  });
   const liveTvContext = new LiveTvContextService(api);
   playbackCommands.setLiveTvContext(liveTvContext);
   const openSourceLicenses = new OpenSourceLicensesService();
@@ -361,6 +370,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   });
   let previousPlaybackItemId = playback.getState().itemId;
   playback.onState((state) => {
+    playbackMetadata.setPlaybackState(state);
+    trickplay.setPlaybackState(state);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
     if (previousPlaybackItemId && previousPlaybackItemId !== state.itemId) activeSmartDownloads?.notifyPlaybackStopped();
     previousPlaybackItemId = state.itemId;
@@ -454,6 +465,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     playbackCommands,
     trailerWindow,
     activeSmartDownloads,
+    playbackMetadata,
+    trickplay,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the
