@@ -45,6 +45,11 @@ extraResources:
       - "**/*"
   - from: mpv-runtime.json
     to: mpv/mpv-runtime.json
+  - from: .runtime/libmpv
+    to: libmpv
+    filter:
+      - "*.dll"
+      - "*.node"
 
 afterPack: ./scripts/after-pack.cjs
 

@@ -29,8 +29,8 @@
     "setup:mpv": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-mpv.ps1",
     "package:mpv-spike": "pnpm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-mpv-package.ps1",
     "generate:worker-integrity": "node scripts/generate-worker-integrity.cjs",
-    "package:windows": "pnpm run setup:mpv && pnpm run validate:package-provenance && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win nsis --x64",
-    "package:windows:dir": "pnpm run setup:mpv && pnpm run validate:package-provenance && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win dir --x64",
+    "package:windows": "pnpm run setup:mpv && pnpm run stage:libmpv-runtime && pnpm run validate:package-provenance && pnpm run validate:libmpv-package && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win nsis --x64",
+    "package:windows:dir": "pnpm run setup:mpv && pnpm run stage:libmpv-runtime && pnpm run validate:package-provenance && pnpm run validate:libmpv-package && pnpm run build && pnpm run generate:worker-integrity && electron-builder --win dir --x64",
     "package:windows:libmpv-test": "pnpm run setup:mpv && pnpm run stage:libmpv-runtime && pnpm run validate:libmpv-test-package && pnpm run build && pnpm run generate:worker-integrity && electron-builder --config electron-builder.libmpv-test.yml --win nsis --x64 && pnpm run test:package:libmpv",
     "start": "pnpm run build && electron .",
     "test": "pnpm run typecheck && pnpm run test:unit && pnpm run test:core && pnpm run test:electron && pnpm run test:persistence-runtime && pnpm run test:media-probe",
@@ -66,6 +66,7 @@
     "licenses:check": "node scripts/license-audit.mjs --check",
     "licenses:write": "node scripts/license-audit.mjs --write",
     "validate:package-provenance": "node scripts/validate-package-provenance.mjs",
+    "validate:libmpv-package": "node scripts/validate-libmpv-package.mjs",
     "validate:libmpv-test-package": "node scripts/validate-libmpv-test-package.mjs",
     "validate:libmpv-release": "node scripts/validate-libmpv-release.mjs"
   },

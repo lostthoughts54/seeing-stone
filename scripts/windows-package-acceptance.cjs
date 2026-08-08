@@ -105,6 +105,7 @@ function assertPackagedResources(applicationRoot) {
   const workerPath = join(resources, "app.asar.unpacked", "dist", "main", "services", "persistenceWorker.js");
   const workerTypesPath = join(resources, "app.asar.unpacked", "dist", "main", "services", "persistenceTypes.js");
   const mpvRoot = join(resources, "mpv");
+  const libMpvRoot = join(resources, "libmpv");
   const manifestPath = join(mpvRoot, "mpv-runtime.json");
 
   for (const file of [
@@ -165,6 +166,21 @@ function assertPackagedResources(applicationRoot) {
     requireFile(licensePath);
     assert.equal(hashFileSync(licensePath), license.sha256, `Packaged license checksum mismatch: ${license.path}`);
   }
+
+  assert.equal(manifest.libmpv?.status, "ready", "The packaged runtime manifest does not declare libmpv ready.");
+  assert.equal(manifest.libmpv.realVideoGatePassed, true, "The packaged libmpv runtime has not passed the real-video gate.");
+  const libMpvArtifacts = [
+    manifest.libmpv.library,
+    manifest.libmpv.nativeAddon,
+    ...manifest.libmpv.companionDlls,
+  ];
+  const expectedLibMpvFiles = new Set(libMpvArtifacts.map((artifact) => artifact.filename));
+  for (const artifact of libMpvArtifacts) {
+    const artifactPath = join(libMpvRoot, artifact.filename);
+    requireFile(artifactPath);
+    assert.equal(hashFileSync(artifactPath), artifact.sha256, `Packaged libmpv checksum mismatch: ${artifact.filename}`);
+  }
+  assert.deepEqual(new Set(readdirSync(libMpvRoot)), expectedLibMpvFiles, "The packaged libmpv directory contains missing or unexpected files.");
 }
 
 async function assertHardenedFuses(executable) {

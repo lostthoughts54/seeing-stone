@@ -114,7 +114,12 @@ $result = [ordered]@{
 }
 $json = $result | ConvertTo-Json -Depth 8
 $json = $json.Replace("`r`n", "`n")
-[IO.File]::WriteAllText($resultPath, "$json`n", [Text.UTF8Encoding]::new($false))
+$existingResult = if (Test-Path -LiteralPath $resultPath) { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json } else { $null }
+$existingCanonical = if ($existingResult) { $existingResult | ConvertTo-Json -Depth 8 -Compress } else { $null }
+$resultCanonical = $result | ConvertTo-Json -Depth 8 -Compress
+if ($existingCanonical -ne $resultCanonical) {
+  [IO.File]::WriteAllText($resultPath, "$json`n", [Text.UTF8Encoding]::new($false))
+}
 
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
 $libraryArtifact = $artifacts | Where-Object { $_.role -eq "library" } | Select-Object -First 1
