@@ -33,6 +33,7 @@ import {
   type LiveTvUpdateScheduleInput,
   type LoginInput,
   type MediaItem,
+  type PersonMediaResult,
   type MediaSourceCapabilities,
   type OpenSourceLicenseInventory,
   type OfflinePlayableSummary,
@@ -109,6 +110,7 @@ const bridge: JellyfinBridge = {
     getItems: (input: LibraryItemsInput) => invoke<MediaItem[]>(IPC.librariesGetItems, input),
   },
   browse: { get: (input: BrowseInput) => invoke<BrowsePage>(IPC.browseGet, input) },
+  people: { getResults: (input: ItemIdInput) => invoke<PersonMediaResult[]>(IPC.peopleGetResults, input) },
   search: { query: (input: SearchInput) => invoke<MediaItem[]>(IPC.searchQuery, input) },
   items: {
     getDetails: (input: ItemIdInput) => invoke<MediaItem>(IPC.itemsGetDetails, input),

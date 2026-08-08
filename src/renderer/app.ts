@@ -11,6 +11,8 @@ import type {
   LiveTvSeriesTimer,
   LiveTvTimer,
   MediaItem,
+  MediaPerson,
+  PersonMediaResult,
   OpenSourceLicenseInventory,
   PlaybackAdapterPreference,
   OfflinePlayableSummary,
@@ -43,6 +45,7 @@ import {
 import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
 import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
 import { loadAllBrowseItems } from "./browsePagination";
+import { presentPeople } from "../shared/personPresentation";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -570,6 +573,46 @@ async function imageUrl(item: MediaItem, kind: ImageKind = "Primary", options: I
     width: options.width || (kind === "Backdrop" ? 1600 : 500),
     height: options.height,
   });
+}
+
+async function personImageUrl(person: MediaPerson): Promise<string> {
+  if (!state.session || !person.id || !person.primaryImageTag) return "";
+  return window.jellyfin.artwork.getUrl({ itemId: person.id, kind: "Primary", tag: person.primaryImageTag, width: 280, height: 420 });
+}
+
+function setPersonImage(image: HTMLImageElement, fallback: HTMLElement, person: MediaPerson): void {
+  fallback.textContent = initials(person.name);
+  image.alt = "";
+  image.loading = "lazy";
+  image.decoding = "async";
+  void personImageUrl(person).then((url) => {
+    if (!url || !image.isConnected) return;
+    image.src = url;
+    image.classList.remove("is-hidden");
+    image.onerror = () => { image.removeAttribute("src"); image.classList.add("is-hidden"); };
+  }).catch(() => undefined);
+}
+
+function createPersonCard(person: MediaPerson): HTMLButtonElement {
+  const button = document.createElement("button");
+  const portrait = document.createElement("span");
+  const image = document.createElement("img");
+  const fallback = document.createElement("span");
+  const name = document.createElement("strong");
+  const role = document.createElement("small");
+  button.type = "button";
+  button.className = "person-card";
+  button.setAttribute("aria-label", [person.name, person.role, person.type !== "Actor" ? person.type : ""].filter(Boolean).join(", "));
+  portrait.className = "person-portrait";
+  fallback.className = "person-portrait-fallback";
+  name.textContent = person.name;
+  role.textContent = person.role || (person.type !== "Actor" ? person.type : "");
+  role.classList.toggle("is-hidden", !role.textContent);
+  portrait.append(image, fallback);
+  setPersonImage(image, fallback, person);
+  button.append(portrait, name, role);
+  button.addEventListener("click", () => { void openPersonBrowse(person); });
+  return button;
 }
 
 function preferredArtwork(item: MediaItem, shape: "poster" | "landscape"): ImageKind | "" {
@@ -1802,12 +1845,8 @@ function renderDetails(item: MediaItem): void {
   }
   detailPeople.replaceChildren();
   detailCast.classList.toggle("is-hidden", !(item.people?.length));
-  for (const person of item.people ?? []) {
-    const button = document.createElement("button");
-    button.type = "button"; button.className = "genre-button";
-    button.textContent = person.role ? `${person.name} · ${person.role}` : person.name;
-    button.addEventListener("click", () => { void openBrowse(person.name, { type: "Mixed", personId: person.id, sort: "title-ascending", startIndex: 0, limit: 60 }); });
-    detailPeople.append(button);
+  for (const person of presentPeople(item.people ?? [])) {
+    detailPeople.append(createPersonCard(person));
   }
 
   const backdropKind = hasImage(item, "Backdrop") ? "Backdrop" : hasImage(item, "Primary") ? "Primary" : "";
@@ -2586,6 +2625,49 @@ async function openBrowse(title: string, input: Parameters<typeof window.jellyfi
     renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items, shape: "poster" }]);
   } catch (error) {
     if (requestId === state.searchRequestId) renderMessage(searchRows, errorMessage(error, "Browse results could not be loaded."));
+  }
+}
+
+function renderPersonResults(results: PersonMediaResult[]): void {
+  searchRows.replaceChildren();
+  const heading = document.createElement("h2");
+  const grid = document.createElement("div");
+  heading.className = "person-results-heading";
+  heading.textContent = "Movies & Shows featuring this person";
+  grid.className = "poster-grid-view person-results-grid";
+  if (!results.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No movies or shows were found for this person.";
+    searchRows.append(heading, empty);
+    return;
+  }
+  for (const result of results) {
+    const card = createMediaCard(result.item, "poster");
+    if (result.appearanceCount) {
+      const appearance = document.createElement("small");
+      appearance.className = "person-appearance-count";
+      appearance.textContent = `Appears in ${result.appearanceCount} episode${result.appearanceCount === 1 ? "" : "s"}`;
+      card.querySelector(".media-copy")?.append(appearance);
+    }
+    grid.append(card);
+  }
+  searchRows.append(heading, grid);
+}
+
+async function openPersonBrowse(person: MediaPerson): Promise<void> {
+  state.searchRequestId += 1;
+  const requestId = state.searchRequestId;
+  state.searchReturnRoute = state.currentRoute === "details" ? "home" : state.currentRoute;
+  state.searchReturnScrollTop = contentScroller.scrollTop;
+  searchTitle.textContent = person.name;
+  setRoute("search");
+  renderLoadingRows(searchRows);
+  try {
+    const results = await window.jellyfin.people.getResults({ itemId: person.id });
+    if (requestId === state.searchRequestId) renderPersonResults(results);
+  } catch (error) {
+    if (requestId === state.searchRequestId) renderMessage(searchRows, errorMessage(error, "Person results could not be loaded."));
   }
 }
 

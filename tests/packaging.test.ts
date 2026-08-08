@@ -60,14 +60,19 @@ describe("Windows release packaging boundary", () => {
     }
   });
 
-  it("keeps libmpv out of stable packaging until its separate public-release gate passes", async () => {
+  it("packages only the staged, validated libmpv native closure for stable builds", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       scripts: Record<string, string>;
     };
     const config = await readFile("electron-builder.yml", "utf8");
     const releaseGate = await readFile("scripts/validate-libmpv-release.mjs", "utf8");
 
-    expect(config).not.toContain(".runtime/libmpv");
+    expect(config).toContain("from: .runtime/libmpv");
+    expect(config).toContain("to: libmpv");
+    expect(config).toContain('"*.dll"');
+    expect(config).toContain('"*.node"');
+    expect(packageJson.scripts["package:windows"]).toContain("stage:libmpv-runtime");
+    expect(packageJson.scripts["package:windows:dir"]).toContain("validate:libmpv-package");
     expect(packageJson.scripts["validate:libmpv-release"]).toBe("node scripts/validate-libmpv-release.mjs");
     expect(releaseGate).toContain("LIBMPV_PUBLIC_RELEASE_NO_GO");
     expect(releaseGate).toContain("dependency-provenance.json");

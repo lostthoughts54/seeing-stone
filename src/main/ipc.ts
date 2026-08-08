@@ -231,6 +231,7 @@ export function registerIpcHandlers(
     return api.getLibraryItems(value.libraryId, value.type, value.limit);
   });
   register(IPC.browseGet, (input) => api.browse(browseSchema.parse(input)));
+  register(IPC.peopleGetResults, (input) => api.getPersonMediaResults(itemIdSchema.strict().parse(input).itemId));
   register(IPC.searchQuery, (input) => api.search(searchSchema.strict().parse(input).query));
   register(IPC.itemsGetDetails, (input) => api.getDetails(itemIdSchema.strict().parse(input).itemId));
   register(IPC.itemsOpenTrailer, async (input) => {

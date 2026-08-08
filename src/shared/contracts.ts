@@ -27,6 +27,12 @@ export interface BrowseQuery {
 }
 export interface BrowsePage { items: MediaItem[]; totalRecordCount: number; }
 
+export interface PersonMediaResult {
+  item: MediaItem;
+  appearanceCount?: number;
+  source: "direct" | "episode-group";
+}
+
 export interface MediaItem {
   id: string;
   name: string;
@@ -660,6 +666,7 @@ export interface JellyfinBridge {
     getItems(input: LibraryItemsInput): Promise<MediaItem[]>;
   };
   browse: { get(input: BrowseInput): Promise<BrowsePage> };
+  people: { getResults(input: ItemIdInput): Promise<PersonMediaResult[]> };
   search: { query(input: SearchInput): Promise<MediaItem[]> };
   items: {
     getDetails(input: ItemIdInput): Promise<MediaItem>;
@@ -777,6 +784,7 @@ export const IPC = {
   librariesList: "libraries:list",
   librariesGetItems: "libraries:get-items",
   browseGet: "browse:get",
+  peopleGetResults: "people:get-results",
   searchQuery: "search:query",
   itemsGetDetails: "items:get-details",
   itemsOpenTrailer: "items:open-trailer",

@@ -30,6 +30,7 @@ function createHarness() {
     getHome: vi.fn(),
     getLibraries: vi.fn(),
     getLibraryItems: vi.fn(),
+    getPersonMediaResults: vi.fn(),
     search: vi.fn(),
     getDetails: vi.fn(),
     openTrailer: vi.fn(),

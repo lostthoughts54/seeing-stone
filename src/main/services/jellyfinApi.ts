@@ -7,6 +7,7 @@ import type {
   BrowseQuery,
   BrowsePage,
   MediaItem,
+  PersonMediaResult,
   PlaybackMediaSegment,
   PlaybackMediaSegmentType,
   MediaSourceCapabilities,
@@ -22,6 +23,7 @@ import type {
   SafeSession,
   ServerConnection,
 } from "../../shared/contracts";
+import { groupPersonMediaResults } from "../../shared/personPresentation";
 import type { PlaybackActionKind } from "./persistenceTypes";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
@@ -801,6 +803,50 @@ export class JellyfinApi {
     }));
     const items = this.items(result).map(sanitizeMediaItem);
     return { items, totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))) };
+  }
+
+  async getPersonMediaResults(personId: string): Promise<PersonMediaResult[]> {
+    const [movies, series, episodes] = await Promise.all([
+      this.getAllPersonItems(personId, "Movie"),
+      this.getAllPersonItems(personId, "Series"),
+      this.getAllPersonItems(personId, "Episode"),
+    ]);
+    const seriesIds = [...new Set(episodes.map((item) => item.seriesId).filter((id): id is string => Boolean(id)))];
+    const resolved = new Map<string, MediaItem>();
+    for (let offset = 0; offset < seriesIds.length; offset += 50) {
+      const items = await this.getItemsByIds(seriesIds.slice(offset, offset + 50));
+      for (const item of items) if (item.type === "Series") resolved.set(item.id, item);
+    }
+    return groupPersonMediaResults(movies, series, episodes, resolved);
+  }
+
+  private async getAllPersonItems(personId: string, type: "Movie" | "Series" | "Episode"): Promise<MediaItem[]> {
+    const session = this.requireSession();
+    const found = new Map<string, MediaItem>();
+    let startIndex = 0;
+    let total = Number.MAX_SAFE_INTEGER;
+    while (startIndex < total && startIndex < 100_000) {
+      const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+        Recursive: "true", IncludeItemTypes: type, PersonIds: personId,
+        SortBy: "SortName", SortOrder: "Ascending", Fields: ITEM_FIELDS,
+        StartIndex: String(startIndex), Limit: "100", EnableTotalRecordCount: "true",
+      }));
+      const items = this.items(result).map(sanitizeMediaItem);
+      total = Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length)));
+      for (const item of items) found.set(item.id, item);
+      if (!items.length) break;
+      startIndex += items.length;
+    }
+    return [...found.values()];
+  }
+
+  private async getItemsByIds(ids: string[]): Promise<MediaItem[]> {
+    if (!ids.length) return [];
+    const session = this.requireSession();
+    const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+      Ids: ids.join(","), IncludeItemTypes: "Series", Fields: ITEM_FIELDS, Limit: String(ids.length),
+    }));
+    return this.items(result).map(sanitizeMediaItem);
   }
 
   async search(query: string): Promise<MediaItem[]> {
