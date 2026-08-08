@@ -2464,10 +2464,14 @@ button.danger:hover:not(:disabled) {
 }
 
 .player-segment-skip {
-  bottom: 22px;
+  bottom: max(68px, 12%);
   position: absolute;
   right: 22px;
   z-index: 5;
+}
+
+.player-view[data-fullscreen="true"] .player-segment-skip {
+  bottom: max(76px, 14%);
 }
 
 .player-segment-skip:disabled { cursor: not-allowed; opacity: .58; }
