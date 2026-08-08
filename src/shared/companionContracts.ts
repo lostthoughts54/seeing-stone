@@ -1,4 +1,4 @@
-export const COMPANION_PROTOCOL_VERSION = 1 as const;
+export const COMPANION_PROTOCOL_VERSION = 2 as const;
 
 export type CompanionMediaType =
   | "movie" | "series" | "season" | "episode" | "video"
@@ -34,8 +34,30 @@ export interface CompanionLiveContext {
   programEndUtc: string | null;
 }
 
+export interface CompanionLiveTvProgram {
+  name: string;
+  startUtc: string;
+  endUtc: string;
+  isLive: boolean;
+}
+
+export interface CompanionLiveTvChannel {
+  channelRef: string;
+  name: string;
+  number: string | null;
+  isPlaying: boolean;
+  programs: CompanionLiveTvProgram[];
+}
+
+export interface CompanionLiveTvGuide {
+  availability: "available" | "not-configured" | "forbidden" | "offline";
+  message: string | null;
+  generatedAtUnixMs: number;
+  channels: CompanionLiveTvChannel[];
+}
+
 export interface CompanionPlayerState {
-  protocolVersion: 1;
+  protocolVersion: 2;
   revision: number;
   sentAtUnixMs: number;
   playbackId: string | null;
@@ -48,6 +70,7 @@ export interface CompanionPlayerState {
   paused: boolean;
   buffering: boolean;
   seekable: boolean;
+  seekableUntilTicks: number | null;
   volume: number;
   muted: boolean;
   audioTracks: CompanionTrack[];
@@ -84,11 +107,29 @@ export interface CompanionLibraryPage {
   nextOffset: number | null;
 }
 
+export type CompanionLibrarySort = "recently-added" | "release-date" | "alphabetical";
+
+export interface CompanionLibrarySummary {
+  itemRef: string;
+  name: string;
+  collectionType: string | null;
+}
+
 export interface CompanionBootstrap {
-  protocolVersion: 1;
+  protocolVersion: 2;
   player: CompanionPlayerState;
   queue: CompanionQueueState;
+  watchParty: CompanionWatchPartyState;
   server: { online: boolean };
+}
+
+export interface CompanionWatchPartyState {
+  joined: boolean;
+  phase: "idle" | "waiting-for-participant" | "preparing" | "ready" | "starting" | "playing" | "error";
+  participantCount: number;
+  minimumParticipants: 2;
+  localSyncOffsetMilliseconds: number;
+  scheduledStartAtUnixMs: number | null;
 }
 
 export type CompanionCommand =
@@ -103,8 +144,10 @@ export type CompanionCommand =
   | { type: "go-live" }
   | { type: "previous-channel" }
   | { type: "next-channel" }
+  | { type: "start-live"; channelRef: string }
   | { type: "select-audio"; trackId: number }
   | { type: "select-subtitle"; trackId: number | null }
+  | { type: "set-watchparty-sync-offset"; offsetMilliseconds: number }
   | {
     type: "send-item";
     itemRef: string;

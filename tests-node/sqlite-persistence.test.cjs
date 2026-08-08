@@ -88,7 +88,7 @@ async function createSeededService(prefix = "lf-sqlite-") {
   return { directory, service };
 }
 
-test("schema v1 upgrades additively to v6 while preserving existing rows", async () => {
+test("schema v1 upgrades additively to v8 while preserving existing rows", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lf-sqlite-v1-upgrade-"));
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const v1Schema = await fs.readFile(path.join(__dirname, "fixtures", "persistence-schema-v1.sql"), "utf8");
@@ -135,7 +135,7 @@ test("schema v1 upgrades additively to v6 while preserving existing rows", async
 
   const service = new SqlitePersistenceService(directory);
   try {
-    assert.equal((await service.open()).schemaVersion, 6);
+    assert.equal((await service.open()).schemaVersion, 8);
     const bundle = await service.getDownloadBundle("download-v1");
     assert.equal(bundle.job.state, "paused");
     assert.equal(bundle.localVersion.localVersionId, "local-v1");
@@ -189,7 +189,7 @@ test("schema v1 upgrades additively to v6 while preserving existing rows", async
 
   const verify = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 6);
+    assert.equal(verify.prepare("PRAGMA user_version").get().user_version, 8);
     const columns = verify.prepare("PRAGMA table_info(playback_revisions)").all().map((row) => row.name);
     for (const name of [
       "report_kind", "report_media_source_id", "report_play_method", "report_play_session_id",
@@ -213,7 +213,7 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const { directory, service } = await createSeededService();
   try {
     const health = await service.health();
-    assert.equal(health.schemaVersion, 6);
+    assert.equal(health.schemaVersion, 8);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
@@ -237,11 +237,12 @@ test("SQLite runs off the main thread with WAL, foreign keys, migrations, and in
   const databasePath = path.join(directory, "localfirst.sqlite3");
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 6);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 8);
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
     for (const expected of [
       "download_jobs", "local_versions", "media_items", "media_sources", "playback_heads",
       "playback_revisions", "profiles", "servers", "application_preferences",
+      "smart_series_rules", "smart_episode_skips",
     ]) assert.ok(tables.includes(expected), expected);
   } finally {
     database.close();
@@ -412,6 +413,92 @@ test("download state is durable, rejects invalid transitions and duplicates, and
     );
   } finally {
     await restarted.close();
+  }
+});
+
+test("smart rules, skips, durable check results, and management changes are identity-scoped and transactional", async () => {
+  const { directory, service } = await createSeededService("lf-sqlite-smart-downloads-");
+  const otherIdentity = { ...identity, userId: "user-2", userName: "Other Viewer" };
+  try {
+    await service.upsertCatalogIdentity(otherIdentity);
+    const followed = await service.upsertSmartSeries({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: "series-1",
+      seriesName: "Bridgerton",
+      episodeLimit: 3,
+    });
+    assert.equal(followed.episodeLimit, 3);
+    assert.equal(followed.lastSuccessfulCheck, null);
+    assert.equal((await service.listSmartSeries(identity.serverId, otherIdentity.userId)).length, 0);
+    await assert.rejects(service.upsertSmartSeries({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: "series-1",
+      seriesName: "Bridgerton",
+      episodeLimit: 6,
+    }), { code: "INVALID_PERSISTENCE_INPUT" });
+
+    await service.addSmartEpisodeSkip(identity.serverId, identity.userId, "series-1", media.itemId);
+    assert.deepEqual(await service.listSmartEpisodeSkips(identity.serverId, identity.userId, "series-1"), [media.itemId]);
+    const failed = await service.recordSmartSeriesCheck(identity.serverId, identity.userId, "series-1", {
+      success: false,
+      errorCode: "CHECK_FAILED",
+      errorMessage: "Could not load http://user:password@example.test/private?api_key=secret",
+      errorAt: 20,
+    });
+    assert.equal(failed.lastSuccessfulCheck, null);
+    assert.doesNotMatch(failed.lastErrorMessage, /password|api_key|secret/i);
+    const succeeded = await service.recordSmartSeriesCheck(identity.serverId, identity.userId, "series-1", {
+      success: true,
+      checkedAt: 30,
+    });
+    assert.equal(succeeded.lastSuccessfulCheck, 30);
+    assert.equal(succeeded.lastErrorCode, null);
+
+    const smart = await service.createDownload({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      mediaSourceId: source.mediaSourceId,
+      origin: "smart",
+      smartManaged: true,
+      keepDownloaded: false,
+      qualityProfile: null,
+      expectedSize: 100,
+    });
+    await service.registerLocalVersion({
+      serverId: identity.serverId,
+      userId: identity.userId,
+      itemId: media.itemId,
+      mediaSourceId: source.mediaSourceId,
+      downloadId: smart.downloadId,
+      storageRoot: path.join(directory, "media"),
+      localPath: path.join(directory, "media", "episode-1.part"),
+      origin: "smart",
+      smartManaged: true,
+      keepDownloaded: false,
+      fileState: "staging",
+      probeState: "pending",
+      expectedSize: 100,
+      actualSize: 0,
+      container: "mkv",
+    });
+    const unmanaged = await service.setDownloadSmartManaged(smart.downloadId, false);
+    assert.equal(unmanaged.job.origin, "smart");
+    assert.equal(unmanaged.job.smartManaged, false);
+    assert.equal(unmanaged.localVersion.smartManaged, false);
+    await service.setDownloadSmartManaged(smart.downloadId, true);
+
+    await service.unfollowSmartSeriesKeep(identity.serverId, identity.userId, "series-1");
+    const retained = await service.getDownloadBundle(smart.downloadId);
+    assert.equal(retained.job.origin, "smart");
+    assert.equal(retained.job.smartManaged, false);
+    assert.equal(retained.localVersion.smartManaged, false);
+    assert.equal((await service.listSmartSeries(identity.serverId, identity.userId)).length, 0);
+    assert.deepEqual(await service.listSmartEpisodeSkips(identity.serverId, identity.userId, "series-1"), []);
+  } finally {
+    await service.close();
   }
 });
 

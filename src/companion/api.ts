@@ -1,7 +1,7 @@
-import type { CompanionBootstrap, CompanionCommand, CompanionCommandEnvelope, CompanionLibraryPage } from "../shared/companionContracts";
+import type { CompanionBootstrap, CompanionCommand, CompanionCommandEnvelope, CompanionLibraryPage, CompanionLibrarySort, CompanionLibrarySummary, CompanionLiveTvGuide } from "../shared/companionContracts";
 
 export interface RuntimeSession {
-  protocolVersion: 1;
+  protocolVersion: 2;
   sessionEpoch: string;
   csrfToken: string;
   nextSequence: number;
@@ -34,8 +34,14 @@ export const pair = (input: { ticket?: string; code?: string; name: string }): P
 export const getSession = (): Promise<RuntimeSession> => json("/api/v1/session");
 export const longPoll = (): Promise<CompanionBootstrap> => json("/api/v1/poll");
 export const getHome = (): Promise<CompanionLibraryPage> => json("/api/v1/library/home?limit=30");
+export const getLibraries = (): Promise<CompanionLibrarySummary[]> => json("/api/v1/libraries");
+export const getLibrary = (libraryRef: string, sort: CompanionLibrarySort, offset = 0): Promise<CompanionLibraryPage> =>
+  json(`/api/v1/library/${encodeURIComponent(libraryRef)}?sort=${encodeURIComponent(sort)}&offset=${offset}&limit=30`);
+export const getSeries = (seriesRef: string, offset = 0): Promise<CompanionLibraryPage> =>
+  json(`/api/v1/series/${encodeURIComponent(seriesRef)}?offset=${offset}&limit=30`);
 export const search = (query: string): Promise<CompanionLibraryPage> =>
   json(`/api/v1/library/search?q=${encodeURIComponent(query)}&limit=50`);
+export const getLiveTvGuide = (): Promise<CompanionLiveTvGuide> => json("/api/v1/live-tv/guide");
 
 export function sendCommand(session: RuntimeSession, command: CompanionCommand): Promise<void> {
   const envelope: CompanionCommandEnvelope = {

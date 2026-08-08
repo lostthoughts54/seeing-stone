@@ -59,6 +59,7 @@ export interface LibMpvHostFrame {
 export interface LibMpvHostSource {
   location: string;
   httpHeaders?: Readonly<Record<string, string>>;
+  startupTimeoutMilliseconds?: number;
 }
 
 export interface LibMpvGeneration {

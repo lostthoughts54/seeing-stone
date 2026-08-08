@@ -10,6 +10,10 @@ export class LiveTvContextService {
 
   constructor(private readonly api: LiveTvApi) {}
 
+  async getGuide(): Promise<LiveTvGuide> {
+    return this.guide(Date.now());
+  }
+
   async getContext(channelId: string): Promise<CompanionLiveContext | null> {
     const now = Date.now();
     const guide = await this.guide(now);

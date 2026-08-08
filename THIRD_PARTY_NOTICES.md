@@ -7,7 +7,7 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.6.0 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.7.0 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |

@@ -1,10 +1,11 @@
 import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
 
-export const DATABASE_SCHEMA_VERSION = 6;
+export const DATABASE_SCHEMA_VERSION = 8;
 
 export type ApplicationPreferenceKey =
   | "player.adapter-mode"
   | "watchparty.buffering-policy"
+  | "watchparty.sync-offset"
   | "player.cached-diagnostics"
   | "companion.settings";
 
@@ -150,6 +151,27 @@ export interface DownloadBundleRecord {
   playbackHead: PlaybackHeadRecord | null;
 }
 
+export interface SmartSeriesRecordInput {
+  serverId: string;
+  userId: string;
+  seriesId: string;
+  seriesName: string;
+  episodeLimit: number;
+}
+
+export interface SmartSeriesRecord extends SmartSeriesRecordInput {
+  lastSuccessfulCheck: number | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastErrorAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type SmartSeriesCheckResult =
+  | { success: true; checkedAt: number }
+  | { success: false; errorCode: string; errorMessage: string; errorAt: number };
+
 export interface OfflinePlayableRecord {
   item: MediaItemRecord;
   mediaSource: MediaSourceRecord | null;
@@ -234,13 +256,22 @@ export type PersistenceOperation =
   | { kind: "getDownloadBundle"; downloadId: string }
   | { kind: "listDownloadBundles"; serverId: string; userId: string }
   | { kind: "setDownloadKeep"; downloadId: string; keepDownloaded: boolean }
+  | { kind: "setDownloadSmartManaged"; downloadId: string; smartManaged: boolean }
   | { kind: "setDownloadExpectedSize"; downloadId: string; expectedSize: number }
   | { kind: "registerLocalVersion"; input: RegisterLocalVersionInput & { localVersionId: string; pathKey: string } }
   | { kind: "updateLocalVersion"; input: UpdateLocalVersionInput }
   | { kind: "listLocalVersions"; serverId: string; userId: string; itemId: string }
   | { kind: "listOfflinePlayableItems"; serverId: string; userId: string }
+  | { kind: "upsertSmartSeries"; input: SmartSeriesRecordInput }
+  | { kind: "listSmartSeries"; serverId: string; userId: string }
+  | { kind: "recordSmartSeriesCheck"; serverId: string; userId: string; seriesId: string; result: SmartSeriesCheckResult }
+  | { kind: "addSmartEpisodeSkip"; serverId: string; userId: string; seriesId: string; itemId: string }
+  | { kind: "listSmartEpisodeSkips"; serverId: string; userId: string; seriesId: string }
+  | { kind: "deleteSmartSeries"; serverId: string; userId: string; seriesId: string }
+  | { kind: "unfollowSmartSeriesKeep"; serverId: string; userId: string; seriesId: string }
   | { kind: "recordPlaybackRevision"; input: RecordPlaybackRevisionInput }
   | { kind: "getPlaybackHead"; serverId: string; userId: string; itemId: string }
+  | { kind: "listPlaybackHeadsForSeries"; serverId: string; userId: string; seriesId: string }
   | { kind: "listPendingProgress"; limit: number }
   | { kind: "listPendingProgressForIdentity"; serverId: string; userId: string; limit: number }
   | { kind: "markProgressSucceeded"; serverId: string; userId: string; itemId: string; localRevision: number; syncedAt: number }

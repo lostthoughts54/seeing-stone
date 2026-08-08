@@ -819,9 +819,10 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     {
       std::lock_guard<std::mutex> lock(state_->mutex);
       for (size_t index = 0; index < state_->slots.size(); ++index) {
-        if (state_->slots[index].ready && !state_->slots[index].electron_owned) {
+        if (state_->slots[index].ready && !state_->slots[index].electron_owned &&
+            (slot_index == state_->slots.size() || state_->slots[index].sequence < sequence)) {
           slot_index = index;
-          break;
+          sequence = state_->slots[index].sequence;
         }
       }
       if (slot_index == state_->slots.size()) return env.Null();

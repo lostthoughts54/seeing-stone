@@ -23,9 +23,9 @@ pnpm run package:windows:libmpv-test
 The command restages and hashes the already gate-approved Electron-matched native
 addon, validates the internal package inputs, builds the separate
 NSIS product, verifies every packaged native artifact, renders the H.264 gate
-fixture through the packaged runtime and production presenter, and launches the
-unpacked application with an isolated profile to confirm that libmpv is its
-default active engine.
+fixture through the packaged runtime and production presenter, installs the
+generated setup executable into an isolated test location, and launches that
+installed application to confirm that libmpv is its default active engine.
 
 It deliberately does not rebuild the native bridge. Packaging must consume the
 exact bridge that passed both real-video DPI gates; rebuilding it would
@@ -36,7 +36,7 @@ then run the packaging command.
 The resulting installer is:
 
 ```text
-.runtime/libmpv-test-release/Seeing-Stone-Libmpv-Test-Setup-0.4.3-x64.exe
+.runtime/libmpv-test-release/Seeing-Stone-Libmpv-Test-Setup-0.7.0-x64.exe
 ```
 
 Successful acceptance also writes a matching `.sha256.txt` sidecar and

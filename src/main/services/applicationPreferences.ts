@@ -5,6 +5,9 @@ import type { PlayerAdapterMode } from "./playerPreferences";
 
 const adapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded", "libmpv"]) }).strict();
 const bufferingPolicySchema = z.object({ mode: z.enum(["wait-for-all", "continue"]) }).strict();
+const watchPartySyncOffsetSchema = z.object({
+  offsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
+}).strict();
 const cachedDiagnosticsSchema = z.object({
   itemId: z.string().min(1).max(256),
   diagnostics: z.object({
@@ -40,6 +43,8 @@ export interface ApplicationPreferences {
   setAdapterMode(mode: PlayerAdapterMode): Promise<void>;
   getBufferingPolicy(): Promise<BufferingPolicyMode>;
   setBufferingPolicy(mode: BufferingPolicyMode): Promise<void>;
+  getWatchPartySyncOffset(): Promise<number>;
+  setWatchPartySyncOffset(offsetMilliseconds: number): Promise<void>;
   getCachedDiagnostics(): Promise<CachedPlaybackDiagnostics | null>;
   setCachedDiagnostics(value: CachedPlaybackDiagnostics): Promise<void>;
   getCompanionSettings(): Promise<StoredCompanionSettings | null>;
@@ -77,6 +82,16 @@ export class ApplicationPreferencesService implements ApplicationPreferences {
   async setBufferingPolicy(mode: BufferingPolicyMode): Promise<void> {
     const value = bufferingPolicySchema.parse({ mode });
     await this.persistence.setApplicationPreference("watchparty.buffering-policy", value);
+  }
+
+  async getWatchPartySyncOffset(): Promise<number> {
+    const record = await this.persistence.getApplicationPreference("watchparty.sync-offset");
+    return parseRecord(record?.valueJson ?? null, watchPartySyncOffsetSchema)?.offsetMilliseconds ?? 0;
+  }
+
+  async setWatchPartySyncOffset(offsetMilliseconds: number): Promise<void> {
+    const value = watchPartySyncOffsetSchema.parse({ offsetMilliseconds });
+    await this.persistence.setApplicationPreference("watchparty.sync-offset", value);
   }
 
   async getCachedDiagnostics(): Promise<CachedPlaybackDiagnostics | null> {

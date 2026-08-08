@@ -34,6 +34,11 @@ export class PlaybackCommandService {
     return this.syncPlay?.isJoined() ?? false;
   }
 
+  setWatchPartySyncOffset(offsetMilliseconds: number): Promise<import("../../shared/contracts").WatchPartyViewState> {
+    if (!this.syncPlay?.isJoined()) throw new AppError("SYNCPLAY_NOT_JOINED", "Join a watch party before adjusting its timing.", 409);
+    return this.syncPlay.setLocalSyncOffset(offsetMilliseconds);
+  }
+
   getState(): PlaybackState {
     return this.player.getState();
   }
@@ -42,14 +47,25 @@ export class PlaybackCommandService {
     return this.api.getDetails(itemId);
   }
 
-  async start(itemId: string, resumeMode: "resume" | "start-over", preserveQueue = false, origin: PlayerActionOrigin = "companion"): Promise<PlaybackStartResult> {
+  async start(
+    itemId: string,
+    resumeMode: "resume" | "start-over",
+    preserveQueue = false,
+    origin: PlayerActionOrigin = "companion",
+    requireProgressive = false,
+  ): Promise<PlaybackStartResult> {
+    if (requireProgressive && this.syncPlay?.isJoined()) {
+      throw new AppError("PROGRESSIVE_SYNCPLAY_UNAVAILABLE", "Watch while downloading is unavailable in a watch party.", 409);
+    }
     if (this.syncPlay?.isJoined()) {
       const result = await this.syncPlay.selectItem(itemId, resumeMode);
       await this.enterCompanionFullscreen(result, origin);
       return result;
     }
     const item = await this.api.getDetails(itemId);
-    const result = await this.player.loadItem(itemId, resumeMode, { origin });
+    const result = await this.player.loadItem(itemId, resumeMode, requireProgressive
+      ? { origin, requireProgressive: true }
+      : { origin });
     if (!preserveQueue) await this.queue.reset(item);
     await this.enterCompanionFullscreen(result, origin);
     return result;

@@ -30,7 +30,7 @@ import { LocalPlaybackResolver } from "./services/localPlaybackResolver";
 import { PlaybackSessionService } from "./services/playbackSession";
 import { PlaybackReportingService } from "./services/playbackReporting";
 import { PlayerPreferencesService } from "./services/playerPreferences";
-import { EmbeddedMpvAdapter, LegacyExternalMpvAdapter, LibMpvAdapter } from "./services/mpvPlayer";
+import { EmbeddedMpvAdapter, LegacyExternalMpvAdapter, LibMpvAdapter, MpvPlayerService } from "./services/mpvPlayer";
 import { resolveMpvRuntime } from "./services/mpvRuntime";
 import { SecureSessionStore } from "./services/secureSession";
 import { logger } from "./services/logger";
@@ -59,6 +59,8 @@ import { LibMpvHost } from "./services/libMpvHost";
 import { ElectronLibMpvBridge } from "./services/libMpvElectronBridge";
 import { PlayerControllerRouter, type PlayerControllerRoute } from "./services/playerControllerRouter";
 import { persistPlayerEngineDiagnostics } from "./services/playerEngineDiagnostics";
+import { TrailerWindowService } from "./services/trailerWindow";
+import { SmartDownloadService } from "./services/smartDownloads";
 import {
   CleanMachineDiagnosticsService,
   formatCleanMachineDiagnostics,
@@ -69,11 +71,10 @@ registerPrivilegedSchemes();
 app.enableSandbox();
 const internalLibMpvAcceptanceBuild = app.isPackaged
   && existsSync(join(process.resourcesPath, "libmpv", "INTERNAL_TESTING_ONLY.md"));
-app.setAppUserModelId(
-  internalLibMpvAcceptanceBuild
-    ? "app.seeingstone.client.libmpv-test"
-    : "app.seeingstone.client",
-);
+const applicationId = internalLibMpvAcceptanceBuild
+  ? "app.seeingstone.client.libmpv-test"
+  : "app.seeingstone.client";
+app.setAppUserModelId(applicationId);
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
@@ -83,6 +84,7 @@ let activeSyncPlay: SyncPlayService | null = null;
 let activePlayback: PlayerController | null = null;
 let activeVideoHost: EmbeddedVideoHost | null = null;
 let activeCompanion: CompanionRemoteManager | null = null;
+let activeSmartDownloads: SmartDownloadService | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -98,6 +100,7 @@ app.on("before-quit", (event) => {
   const playback = activePlayback;
   const videoHost = activeVideoHost;
   const companion = activeCompanion;
+  const smartDownloads = activeSmartDownloads;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
@@ -105,7 +108,9 @@ app.on("before-quit", (event) => {
   activePlayback = null;
   activeVideoHost = null;
   activeCompanion = null;
-  const stopDownloads = activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : Promise.resolve();
+  activeSmartDownloads = null;
+  const stopDownloads = (smartDownloads ? smartDownloads.shutdown().catch(() => undefined) : Promise.resolve())
+    .then(() => activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : undefined);
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
   const stopPlayback = playback ? playback.clear().catch(() => undefined) : Promise.resolve();
@@ -131,7 +136,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   persistence = new SqlitePersistenceService(app.getPath("userData"), persistenceWorkerPath);
   await persistence.open();
   const applicationPreferences = new ApplicationPreferencesService(persistence);
-  const rendererSession = hardenSession();
+  const rendererSession = hardenSession(applicationId);
   const identity = await new DeviceIdentityService(
     app.getPath("userData"),
     `Windows Desktop (${hostname()})`,
@@ -153,6 +158,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     try { return await artwork.handle(request); } catch { return new Response(null, { status: 502 }); }
   });
   mainWindow = createWindow();
+  const trailerWindow = new TrailerWindowService();
   const runtime = await resolveMpvRuntime({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -163,13 +169,6 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const downloadLocation = new DownloadLocationService(app.getPath("userData"), defaultDownloadStorageRoot);
   const downloadStorageRoot = await downloadLocation.getActiveRoot();
   const downloadStorageRoots = await downloadLocation.getAuthorizedRoots();
-  const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, downloadStorageRoots);
-  const playbackQueue = new PlaybackQueueStore();
-  const playbackContinuation = new DefaultPlaybackContinuationResolver(playbackQueue, api);
-  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence, playbackContinuation);
-  offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
-  offlineSynchronization.activate();
-  const playbackReporting = new PlaybackReportingService(api, offlineSynchronization, logger);
   downloadManager = new DownloadManager(
     api,
     persistence,
@@ -178,6 +177,47 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     logger,
     { authorizedRoots: downloadStorageRoots },
   );
+  const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, downloadStorageRoots);
+  const playbackQueue = new PlaybackQueueStore();
+  const playbackContinuation = new DefaultPlaybackContinuationResolver(playbackQueue, api);
+  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence, playbackContinuation, downloadManager);
+  offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
+  offlineSynchronization.activate();
+  const playbackReporting = new PlaybackReportingService(api, offlineSynchronization, logger);
+  const configureProgressiveFallback = <T extends MpvPlayerService>(controller: T): T => {
+    controller.setProgressiveFallbackDecider(async (reason) => {
+      const connection = api.getConnectionDiagnostics().state;
+      const offline = connection === "offline" || connection === "reconnecting";
+      const detail = reason === "probe-failed"
+        ? "The completed download failed media validation."
+        : "This video cannot be opened progressively.";
+      if (offline) {
+        await dialog.showMessageBox(mainWindow!, {
+          type: "info",
+          title: "Wait for download",
+          message: detail,
+          detail: "Jellyfin is offline, so server streaming is unavailable.",
+          buttons: ["Wait for download"],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        return "wait";
+      }
+      const result = await dialog.showMessageBox(mainWindow!, {
+        type: "question",
+        title: "Progressive playback unavailable",
+        message: detail,
+        detail: "Stream from Jellyfin now, or wait for the download to finish.",
+        buttons: ["Stream from Jellyfin", "Wait for download"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      });
+      return result.response === 0 ? "stream" : "wait";
+    });
+    return controller;
+  };
   downloadManager.onChanged((downloads) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
   });
@@ -200,7 +240,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     activeVideoHost = null;
     return {
       mode: "legacy",
-      controller: new LegacyExternalMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime),
+      controller: configureProgressiveFallback(new LegacyExternalMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime)),
     };
   };
   const createEmbeddedRoute = (): PlayerControllerRoute => {
@@ -208,7 +248,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     activeVideoHost = host;
     return {
       mode: "embedded",
-      controller: new EmbeddedMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime, host),
+      controller: configureProgressiveFallback(new EmbeddedMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime, host)),
       updateViewport: (viewport) => host.updateViewport(viewport),
       dispose: () => {
         host.destroy();
@@ -229,7 +269,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       const host = new LibMpvHost(libmpvCapability, bridge);
       initialRoute = {
         mode: "libmpv",
-        controller: new LibMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, host),
+        controller: configureProgressiveFallback(new LibMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, host)),
         updateViewport: (viewport) => bridge.updateViewport({
           width: viewport.width,
           height: viewport.height,
@@ -309,8 +349,24 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     },
   };
   activePlayback = playback;
+  activeSmartDownloads = new SmartDownloadService(
+    api,
+    persistence,
+    downloadManager,
+    (itemId) => playback.getState().itemId === itemId,
+    logger,
+  );
+  activeSmartDownloads.onChanged((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.smartDownloadsChanged, state);
+  });
+  let previousPlaybackItemId = playback.getState().itemId;
   playback.onState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
+    if (previousPlaybackItemId && previousPlaybackItemId !== state.itemId) activeSmartDownloads?.notifyPlaybackStopped();
+    previousPlaybackItemId = state.itemId;
+  });
+  playback.onEvent((event) => {
+    if (event.action === "completed" && event.state.itemId) void activeSmartDownloads?.notifyWatchedItem(event.state.itemId);
   });
   soloSessionDiagnostics.onState((snapshot) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.sessionPanelSoloChanged, snapshot);
@@ -324,6 +380,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     api,
     () => activeSyncPlay?.isJoined() ?? false,
     liveTvContext,
+    () => activeSyncPlay?.getState() ?? null,
   );
   const companionCredentials = new CompanionCredentialStore(app.getPath("userData"), sessionProtector);
   const companionArtwork = new CompanionArtworkService(api, companionState);
@@ -395,6 +452,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     cleanMachineDiagnostics,
     activeCompanion,
     playbackCommands,
+    trailerWindow,
+    activeSmartDownloads,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the

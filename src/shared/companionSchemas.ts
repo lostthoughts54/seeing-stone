@@ -26,7 +26,7 @@ export const companionTrackSchema = z.object({
 }).strict();
 
 export const companionPlayerStateSchema = z.object({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   sentAtUnixMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   playbackId: z.string().uuid().nullable(),
@@ -46,6 +46,7 @@ export const companionPlayerStateSchema = z.object({
   paused: z.boolean(),
   buffering: z.boolean(),
   seekable: z.boolean(),
+  seekableUntilTicks: ticks.nullable(),
   volume: z.number().int().min(0).max(100),
   muted: z.boolean(),
   audioTracks: z.array(companionTrackSchema).max(128),
@@ -74,10 +75,45 @@ export const companionQueueStateSchema = z.object({
   }).strict()).max(200),
 }).strict();
 
+export const companionWatchPartyStateSchema = z.object({
+  joined: z.boolean(),
+  phase: z.enum(["idle", "waiting-for-participant", "preparing", "ready", "starting", "playing", "error"]),
+  participantCount: z.number().int().min(0).max(128),
+  minimumParticipants: z.literal(2),
+  localSyncOffsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
+  scheduledStartAtUnixMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+}).strict();
+
 export const companionLibraryPageSchema = z.object({
   revision: safeText(128),
   items: z.array(companionMediaSummarySchema).max(50),
   nextOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+}).strict();
+
+export const companionLibrarySortSchema = z.enum(["recently-added", "release-date", "alphabetical"]);
+
+export const companionLibrarySummarySchema = z.object({
+  itemRef: opaqueRef,
+  name: safeText(1024),
+  collectionType: safeText(128).nullable(),
+}).strict();
+
+export const companionLiveTvGuideSchema = z.object({
+  availability: z.enum(["available", "not-configured", "forbidden", "offline"]),
+  message: safeText(1024).nullable(),
+  generatedAtUnixMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  channels: z.array(z.object({
+    channelRef: opaqueRef,
+    name: safeText(1024),
+    number: safeText(64).nullable(),
+    isPlaying: z.boolean(),
+    programs: z.array(z.object({
+      name: safeText(1024),
+      startUtc: z.string().datetime(),
+      endUtc: z.string().datetime(),
+      isLive: z.boolean(),
+    }).strict()).max(24),
+  }).strict()).max(5000),
 }).strict();
 
 const commandSchema = z.discriminatedUnion("type", [
@@ -92,8 +128,13 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("go-live") }).strict(),
   z.object({ type: z.literal("previous-channel") }).strict(),
   z.object({ type: z.literal("next-channel") }).strict(),
+  z.object({ type: z.literal("start-live"), channelRef: opaqueRef }).strict(),
   z.object({ type: z.literal("select-audio"), trackId: z.number().int().min(0).max(100000) }).strict(),
   z.object({ type: z.literal("select-subtitle"), trackId: z.number().int().min(0).max(100000).nullable() }).strict(),
+  z.object({
+    type: z.literal("set-watchparty-sync-offset"),
+    offsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
+  }).strict(),
   z.object({
     type: z.literal("send-item"),
     itemRef: opaqueRef,

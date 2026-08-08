@@ -90,9 +90,9 @@ export class CompanionAuthenticationService {
 
   consumeWebSocketTicket(deviceId: string, protocolHeader: string | undefined): boolean {
     const protocols = String(protocolHeader ?? "").split(",").map((entry) => entry.trim());
-    const value = protocols.find((entry) => entry.startsWith("seeing-stone.v1."));
+    const value = protocols.find((entry) => entry.startsWith("seeing-stone.v2."));
     if (!value) return false;
-    const ticket = value.slice("seeing-stone.v1.".length);
+    const ticket = value.slice("seeing-stone.v2.".length);
     const record = this.webSocketTickets.get(ticket);
     this.webSocketTickets.delete(ticket);
     return Boolean(record && record.deviceId === deviceId && record.expiresAt > Date.now());

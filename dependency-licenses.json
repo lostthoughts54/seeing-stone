@@ -9,7 +9,7 @@
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
@@ -26,6 +26,10 @@
         {
           "path": "assets/mpv/input.conf",
           "sha256": "55e262a81edc829282a454dfaa1604f7364b5ef37cfaf68258306a98ff813d8f"
+        },
+        {
+          "path": "assets/mpv/progressive-input.conf",
+          "sha256": "387330a1bd5e01fad42cd0b22216234b03c18737cd7ac04bab2acc8ef76ba6a1"
         },
         {
           "path": "assets/mpv/NOTICE.md",

@@ -160,6 +160,7 @@ function harness(options: { nextId?: string | null; failNextStart?: boolean; loc
     paused: false,
     buffering: false,
     seekable: true,
+    seekableUntilTicks: null,
     volume: 100,
     fullscreen: false,
     audioTracks: [],
@@ -889,5 +890,23 @@ describe("MpvPlayerService natural completion", () => {
 
     expect(h.commands.some((command) => command[0] === "loadfile")).toBe(false);
     expect(h.reports).toEqual([{ kind: "stop", itemId: "episode-1" }]);
+  });
+
+  it("enforces null, zero, and positive progressive seek-frontier semantics in main", async () => {
+    const h = harness();
+    const playbackState = h.internals.state as Record<string, unknown>;
+
+    playbackState.seekableUntilTicks = 0;
+    await expect(h.player.seek("playback-1", ticks)).rejects.toMatchObject({ code: "SEEK_NOT_DOWNLOADED" });
+    expect(h.commands.some((command) => command[0] === "seek")).toBe(false);
+
+    playbackState.seekableUntilTicks = 5 * ticks;
+    await expect(h.player.seek("playback-1", 6 * ticks)).rejects.toMatchObject({ code: "SEEK_NOT_DOWNLOADED" });
+    await h.player.seek("playback-1", 5 * ticks);
+    expect(h.commands).toContainEqual(["seek", 5, "absolute+exact"]);
+
+    (h.internals.state as Record<string, unknown>).seekableUntilTicks = null;
+    await h.player.seek("playback-1", 20 * ticks);
+    expect(h.commands).toContainEqual(["seek", 20, "absolute+exact"]);
   });
 });

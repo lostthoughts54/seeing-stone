@@ -4,6 +4,7 @@ import {
   cachedPlaybackDiagnosticsSchema,
   downloadIdSchema,
   downloadStartSchema,
+  libraryItemsSchema,
   loginSchema,
   liveTvCreateRecordingSchema,
   liveTvGuideSchema,
@@ -12,6 +13,8 @@ import {
   playbackStartSchema,
   playbackVolumeSchema,
   searchSchema,
+  smartDownloadFollowSchema,
+  smartDownloadUnfollowSchema,
   watchedStateSchema,
 } from "../src/shared/schemas";
 
@@ -32,7 +35,18 @@ describe("IPC input schemas", () => {
       remember: true,
     })).toThrow();
     expect(() => searchSchema.strict().parse({ query: "movie", path: "D:\\Sensitive" })).toThrow();
+    expect(libraryItemsSchema.strict().parse({ libraryId: "mixed-library", type: "Mixed", limit: 100 })).toEqual({
+      libraryId: "mixed-library",
+      type: "Mixed",
+      limit: 100,
+    });
     expect(() => playbackStartSchema.strict().parse({ itemId: "item", resumeMode: "resume", args: ["--script"] })).toThrow();
+    expect(playbackStartSchema.strict().parse({ itemId: "item", resumeMode: "resume", progressiveOnly: true })).toEqual({
+      itemId: "item",
+      resumeMode: "resume",
+      progressiveOnly: true,
+    });
+    expect(() => playbackStartSchema.strict().parse({ itemId: "item", resumeMode: "resume", progressiveOnly: "yes" })).toThrow();
     const playbackId = "55555555-5555-4555-8555-555555555555";
     expect(playbackRateSchema.strict().parse({ playbackId, rate: 1.5 })).toEqual({ playbackId, rate: 1.5 });
     expect(() => playbackRateSchema.strict().parse({ playbackId, rate: 4.01 })).toThrow();
@@ -41,6 +55,18 @@ describe("IPC input schemas", () => {
     expect(() => downloadStartSchema.strict().parse({ itemId: "item", url: "http://server/media", path: "D:\\Sensitive" })).toThrow();
     expect(() => watchedStateSchema.strict().parse({ itemId: "item", watched: true, positionTicks: 50 })).toThrow();
     expect(() => downloadIdSchema.strict().parse({ downloadId: "not-an-opaque-id" })).toThrow();
+    expect(smartDownloadFollowSchema.strict().parse({ seriesId: "series-1", episodeLimit: 5 })).toEqual({
+      seriesId: "series-1",
+      episodeLimit: 5,
+    });
+    expect(() => smartDownloadFollowSchema.strict().parse({ seriesId: "series-1", episodeLimit: 0 })).toThrow();
+    expect(() => smartDownloadFollowSchema.strict().parse({ seriesId: "series-1", episodeLimit: 6 })).toThrow();
+    expect(() => smartDownloadFollowSchema.strict().parse({ seriesId: "series-1", episodeLimit: 3, serverId: "server-1" })).toThrow();
+    expect(smartDownloadUnfollowSchema.strict().parse({ seriesId: "series-1", disposition: "remove" })).toEqual({
+      seriesId: "series-1",
+      disposition: "remove",
+    });
+    expect(() => smartDownloadUnfollowSchema.strict().parse({ seriesId: "series-1", disposition: "delete-everything" })).toThrow();
   });
 
   it("strictly bounds Live TV guide, playback, and recording mutations", () => {

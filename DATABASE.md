@@ -1,6 +1,6 @@
 # SQLite persistence model
 
-Milestone 4 established the local data boundary. The database is now schema version 5. Every change remains additive so existing catalog, download, local-version, and playback rows survive upgrades.
+Milestone 4 established the local data boundary. The database is now schema version 8. Every change preserves existing catalog, download, local-version, playback, preference, and Smart Download rows across upgrades.
 
 ## Process boundary
 
@@ -30,7 +30,7 @@ Every download, local version, and progress revision is scoped by server, user, 
 - A job left `downloading` by a process exit is changed to `paused` with the `INTERRUPTED` reason on the next startup.
 - Terminal completed jobs are retained as history; later manual deletion can mark the associated local version missing and permit a deliberate replacement download.
 
-Milestone 5 never automatically removes media. Insufficient storage pauses a job with an actionable error; cleanup remains manual in V1.
+Insufficient storage pauses a job with an actionable error and never triggers arbitrary cleanup. Automatic rotation is limited to version-8 Smart Download rules and only selects unkept, non-playing records whose `smart_managed` flag remains set after a complete series enumeration.
 
 ### Local versions
 
@@ -52,13 +52,18 @@ Milestone 6 playback resolution additionally confirms the configured authorized 
 
 Milestone 7 coalesces redundant automatic progress while retaining completion and explicit actions. Failed attempts stay retryable with a bounded safe error code; superseded revisions remain in the journal for ordering evidence. Successful revisions advance the stored head transactionally, and older late results cannot move it backward.
 
-## Additive schema versions 2 through 5
+## Additive schema versions 2 through 8
 
 - Version 2 adds durable Jellyfin playback-report fields to each revision.
 - Version 3 records whether a report is automatic or an explicit local action for conflict resolution.
+- Version 6 expands application preferences for Companion Remote settings.
+- Version 7 expands application preferences for the saved per-computer watch-party timing adjustment.
 - Version 4 adds bounded application preferences for adapter selection and watchparty buffering policy. The legacy global diagnostics preference remains readable for compatibility but is not used by Gate 6.
 - Version 5 adds bounded nullable `metadata_json` and `next_up_json` fields per server/user/item, plus `diagnostics_json` per exact media source. Strict main-process validation rejects unknown or privileged fields before storage and discards malformed cached values after retrieval.
 - Version 5 also adds an identity-scoped partial index for verified local playback discovery. The renderer receives only sanitized item metadata and resume state; local roots, paths, local-version IDs, media-source IDs, stream URLs, and credentials remain main-only.
+- Version 8 adds `smart_series_rules` keyed by server, user, and series, with a checked limit of one through five, nullable last-success timestamp, and nullable sanitized error fields. It also adds `smart_episode_skips`, whose rows cascade when the follow rule is deleted.
+- Transient Smart Download states are not database columns. `checking` is owned by the active main-process service and `offline` comes from current Jellyfin connection diagnostics.
+- Updating `smart_managed` for a download changes both the job and its associated local version in one transaction. Local **Keep copies** unfollow also unmanages every associated job/local-version pair and removes the rule and skips transactionally. `origin` is never rewritten.
 
 Older rows with no version-5 cache remain valid and materialize as minimal safe item metadata until a successful Jellyfin request refreshes them.
 

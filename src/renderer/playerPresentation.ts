@@ -29,6 +29,7 @@ export function sourceKindLabel(kind: PlaybackSourceKind | null | undefined): st
   switch (kind) {
     case "matched-local": return "Matched Local";
     case "downloaded": return "Downloaded";
+    case "downloading": return "Downloading";
     case "direct-play": return "Direct Play";
     case "direct-stream": return "Direct Stream";
     case "transcode": return "Transcode";

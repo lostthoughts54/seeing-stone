@@ -51,7 +51,7 @@ async function main() {
     assert.ok(duration >= 11 && duration <= 13, `Unexpected duration: ${duration}`);
 
     await ipc.command(["seek", 5, "absolute+exact"]);
-    const position = Number(await waitForProperty(ipc, "time-pos"));
+    const position = Number(await waitForPropertyValue(ipc, "time-pos", (value) => Math.abs(Number(value) - 5) < 0.25));
     assert.ok(Math.abs(position - 5) < 0.25, `Unexpected seek position: ${position}`);
 
     await ipc.command(["set_property", "pause", false]);
@@ -100,6 +100,16 @@ async function waitForProperty(ipc, property) {
     await delay(50);
   }
   throw new Error(`Timed out reading mpv property ${property}.`);
+}
+
+async function waitForPropertyValue(ipc, property, predicate) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const value = await ipc.command(["get_property", property]).catch(() => null);
+    if (value !== null && value !== undefined && predicate(value)) return value;
+    await delay(50);
+  }
+  throw new Error(`Timed out waiting for mpv property ${property}.`);
 }
 
 function delay(milliseconds) {

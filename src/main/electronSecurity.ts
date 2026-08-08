@@ -42,7 +42,7 @@ export function appContentSecurityPolicy(): string {
     "connect-src 'none'",
     "font-src 'self'",
     "object-src 'none'",
-    "frame-src 'none'",
+    "frame-src https://www.youtube.com",
     "worker-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -83,14 +83,49 @@ export function createSafeStorageProtector(): SessionProtector {
   };
 }
 
-export function hardenSession(): Electron.Session {
+function isYouTubeRuntimeHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return ["youtube.com", "youtube-nocookie.com", "ytimg.com", "googlevideo.com", "ggpht.com"].some(
+    (domain) => host === domain || host.endsWith(`.${domain}`),
+  );
+}
+
+export function isAllowedTrailerRequest(details: { url: string; resourceType: string; initiator?: string }): boolean {
+  try {
+    const requested = new URL(details.url);
+    if (requested.protocol !== "https:") return false;
+    if (details.resourceType === "subFrame") {
+      return requested.hostname === "www.youtube.com"
+        && /^\/embed\/[A-Za-z0-9_-]{11}$/.test(requested.pathname);
+    }
+    if (details.resourceType === "mainFrame") return false;
+    if (details.initiator) {
+      const initiator = new URL(details.initiator);
+      if (!isYouTubeRuntimeHost(initiator.hostname)) return false;
+    }
+    return isYouTubeRuntimeHost(requested.hostname) || requested.hostname === "fonts.gstatic.com";
+  } catch {
+    return false;
+  }
+}
+
+export function hardenSession(applicationId = "app.seeingstone.client"): Electron.Session {
   const rendererSession = session.fromPartition(RENDERER_PARTITION);
   rendererSession.setPermissionCheckHandler(() => false);
   rendererSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   rendererSession.on("will-download", (event) => event.preventDefault());
   rendererSession.webRequest.onBeforeRequest(
     { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
-    (_details, callback) => callback({ cancel: true }),
+    (details, callback) => callback({ cancel: !isAllowedTrailerRequest(details) }),
+  );
+  rendererSession.webRequest.onBeforeSendHeaders(
+    { urls: ["https://www.youtube.com/embed/*"] },
+    (details, callback) => callback({
+      requestHeaders: {
+        ...details.requestHeaders,
+        Referer: `https://${applicationId.toLowerCase()}/`,
+      },
+    }),
   );
   return rendererSession;
 }

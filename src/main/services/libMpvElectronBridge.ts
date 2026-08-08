@@ -1,6 +1,7 @@
 import { dirname } from "node:path";
 import { BrowserWindow, type IpcMain, sharedTexture } from "electron";
 import { AppError } from "./errors";
+import { isStrictlyNewerFrameSequence } from "./libMpvFrameOrder";
 import type {
   LibMpvGeneration,
   LibMpvHostCommand,
@@ -100,6 +101,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   private presentationTimer: ReturnType<typeof setTimeout> | null = null;
   private surfaceEpoch = 0;
   private pendingOpen: PendingOpen | null = null;
+  private lastTransferredSequence = 0;
 
   private readonly onListenerReady = (event: Electron.IpcMainEvent): void => {
     if (!this.authorized(event)) return;
@@ -188,6 +190,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.generation = { ...generation };
     this.stopped = false;
     this.presenterReady = false;
+    this.lastTransferredSequence = 0;
     try {
       this.producer = new this.addon.LibMpvVideoProducer({
         libraryPath: this.libraryPath,
@@ -210,7 +213,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         if (this.pendingOpen?.timer !== timer) return;
         this.pendingOpen = null;
         reject(new AppError("LIBMPV_FIRST_FRAME_TIMEOUT", "The experimental player did not present its first frame.", 503));
-      }, 10_000);
+      }, Math.max(1_000, Math.min(30_000, source.startupTimeoutMilliseconds ?? 10_000)));
       this.pendingOpen = { resolve, reject, timer, firstFramePresented: false };
     });
     if (this.listenerReady) this.startPresenter();
@@ -330,6 +333,12 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       this.schedulePump();
       return;
     }
+    if (!isStrictlyNewerFrameSequence(this.lastTransferredSequence, frame.sequence)) {
+      producer.releaseFrame(frame.slot, frame.sequence);
+      this.schedulePump();
+      return;
+    }
+    this.lastTransferredSequence = frame.sequence;
     this.pumping = true;
     this.awaitingPresentedSequence = frame.sequence;
     this.presentationTimer = setTimeout(() => {
@@ -418,5 +427,6 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       producer.destroy();
     }
     this.generation = null;
+    this.lastTransferredSequence = 0;
   }
 }

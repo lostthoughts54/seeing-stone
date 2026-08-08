@@ -4,7 +4,7 @@ import { extname, resolve, sep } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { CompanionCommand, CompanionCommandEnvelope } from "../../shared/companionContracts";
 import { COMPANION_PROTOCOL_VERSION } from "../../shared/companionContracts";
-import { assertNoCompanionForbiddenFields, companionCommandEnvelopeSchema, companionPairRequestSchema } from "../../shared/companionSchemas";
+import { assertNoCompanionForbiddenFields, companionCommandEnvelopeSchema, companionLibrarySortSchema, companionPairRequestSchema } from "../../shared/companionSchemas";
 import { toPublicError, AppError } from "./errors";
 import { CompanionAuthenticationService } from "./companionAuthentication";
 import type { CompanionCredentialStore } from "./companionCredentialStore";
@@ -254,11 +254,15 @@ export class CompanionServer {
       if (request.method === "GET" && url.pathname === "/api/v1/libraries") {
         return this.json(response, 200, await this.options.state.getLibraries());
       }
+      if (request.method === "GET" && url.pathname === "/api/v1/live-tv/guide") {
+        return this.json(response, 200, await this.options.state.getLiveTvGuide());
+      }
       if (request.method === "GET" && url.pathname.startsWith("/api/v1/library/")) {
         return this.json(response, 200, await this.options.state.getLibraryPage(
           url.pathname.slice("/api/v1/library/".length),
           Number(url.searchParams.get("offset") ?? 0),
           Number(url.searchParams.get("limit") ?? 30),
+          companionLibrarySortSchema.parse(url.searchParams.get("sort") ?? "recently-added"),
         ));
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/v1/series/")) {
@@ -306,7 +310,7 @@ export class CompanionServer {
   private async execute(envelope: CompanionCommandEnvelope): Promise<void> {
     const state = this.options.commands.getState();
     const command = envelope.command;
-    if (!["send-item", "queue-remove", "queue-move", "queue-clear-upcoming", "queue-play-now"].includes(command.type)
+    if (!["send-item", "start-live", "queue-remove", "queue-move", "queue-clear-upcoming", "queue-play-now", "set-watchparty-sync-offset"].includes(command.type)
       && (!envelope.playbackId || envelope.playbackId !== state.playbackId)) {
       throw new AppError("PLAYBACK_STALE", "Playback changed. Refresh the Companion state.", 409);
     }
@@ -320,6 +324,7 @@ export class CompanionServer {
       case "toggle-mute": await this.options.commands.setMuted(playbackId, state.volume > 0); break;
       case "select-audio": await this.options.commands.selectAudio(playbackId, command.trackId); break;
       case "select-subtitle": await this.options.commands.selectSubtitle(playbackId, command.trackId); break;
+      case "set-watchparty-sync-offset": await this.options.commands.setWatchPartySyncOffset(command.offsetMilliseconds); break;
       case "next": {
         const next = this.options.queue.peekNext();
         if (next) await this.options.commands.playQueueEntry(next.queueEntryId);
@@ -344,6 +349,7 @@ export class CompanionServer {
       case "go-live": await this.options.commands.goLive(); break;
       case "previous-channel": await this.options.commands.navigateLive(-1); break;
       case "next-channel": await this.options.commands.navigateLive(1); break;
+      case "start-live": await this.options.commands.startLive(this.options.state.resolveItemRef(command.channelRef)); break;
     }
   }
 
@@ -403,13 +409,13 @@ export class CompanionServer {
         this.reportConnections();
       });
       void this.options.state.bootstrap().then((bootstrap) => {
-        webSocket.send(JSON.stringify({ protocolVersion: 1, revision: ++this.envelopeRevision, topic: "server", payload: bootstrap }));
+        webSocket.send(JSON.stringify({ protocolVersion: COMPANION_PROTOCOL_VERSION, revision: ++this.envelopeRevision, topic: "server", payload: bootstrap }));
       });
     });
   }
 
   private broadcast(topic: string, payload: unknown): void {
-    const message = JSON.stringify({ protocolVersion: 1, revision: ++this.envelopeRevision, topic, payload });
+    const message = JSON.stringify({ protocolVersion: COMPANION_PROTOCOL_VERSION, revision: ++this.envelopeRevision, topic, payload });
     for (const sockets of this.socketsByDevice.values()) {
       for (const socket of sockets) if (socket.readyState === WebSocket.OPEN) socket.send(message);
     }

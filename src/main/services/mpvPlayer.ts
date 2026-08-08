@@ -12,6 +12,7 @@ import { MpvIpcClient, type MpvCommandClient, type MpvMessage } from "./mpvIpc";
 import { LibMpvCommandClient } from "./libMpvIpc";
 import type { LibMpvHost } from "./libMpvHost";
 import type { MpvRuntimePaths } from "./mpvRuntime";
+import type { ProgressiveLeaseInvalidationReason } from "./progressiveDownload";
 import { PlaybackCompletionCoordinator } from "./playbackCompletion";
 import { PlaybackProxy, type PlaybackTargets } from "./playbackProxy";
 import type { PlayerPreferencesStore } from "./playerPreferences";
@@ -94,6 +95,7 @@ function emptyState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     paused: false,
     buffering: false,
     seekable: false,
+    seekableUntilTicks: null,
     volume: 100,
     fullscreen: false,
     audioTracks: [],
@@ -132,6 +134,30 @@ export function parsePlaybackTracks(value: unknown): { audioTracks: PlaybackTrac
   return { audioTracks, subtitleTracks };
 }
 
+export function confirmedProgressiveRangeEndTicks(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const state = value as { "bof-cached"?: unknown; "seekable-ranges"?: unknown };
+  if (state["bof-cached"] !== true || !Array.isArray(state["seekable-ranges"])) return null;
+  const ranges = state["seekable-ranges"]
+    .map((entry) => entry && typeof entry === "object" ? entry as { start?: unknown; end?: unknown } : null)
+    .filter((entry): entry is { start: number; end: number } => Boolean(entry
+      && typeof entry.start === "number" && Number.isFinite(entry.start)
+      && typeof entry.end === "number" && Number.isFinite(entry.end)
+      && entry.end >= entry.start))
+    .sort((left, right) => left.start - right.start);
+  let end = 0;
+  let found = false;
+  for (const range of ranges) {
+    if (!found && range.start <= 0.001) {
+      end = Math.max(0, range.end);
+      found = true;
+    } else if (found && range.start <= end + 0.001) {
+      end = Math.max(end, range.end);
+    }
+  }
+  return found ? Math.max(0, Math.floor(end * TICKS_PER_SECOND)) : null;
+}
+
 export class MpvPlayerService implements PlayerController {
   private state = emptyState();
   private process: ChildProcess | null = null;
@@ -163,6 +189,10 @@ export class MpvPlayerService implements PlayerController {
   private demuxerCacheTimeSeconds: number | null = null;
   private activeRenderProfile: MpvRenderProfile = "legacy";
   private readonly externalSubtitleStreamByTrackId = new Map<number, number>();
+  private removeProgressiveListener: (() => void) | null = null;
+  private progressiveFallbackDecider: (
+    reason: "open-failed" | "probe-failed",
+  ) => Promise<"stream" | "wait"> = async () => "wait";
 
   constructor(
     private readonly mainWindow: BrowserWindow,
@@ -174,6 +204,12 @@ export class MpvPlayerService implements PlayerController {
     private readonly libMpvHost?: LibMpvHost,
   ) {
     this.proxy = new PlaybackProxy(playback);
+  }
+
+  setProgressiveFallbackDecider(
+    decider: (reason: "open-failed" | "probe-failed") => Promise<"stream" | "wait">,
+  ): void {
+    this.progressiveFallbackDecider = decider;
   }
 
   onState(listener: (state: PlaybackState) => void): () => void {
@@ -260,7 +296,10 @@ export class MpvPlayerService implements PlayerController {
     this.update(emptyState({ itemId, phase: "resolving" }));
     let source: ResolvedPlaybackSource;
     try {
-      source = await this.playback.start(itemId, resumeMode);
+      source = await this.playback.start(itemId, resumeMode, {
+        skipProgressive: context.origin === "remote-sync",
+        requireProgressive: context.requireProgressive === true,
+      });
     } catch (error) {
       if (revision === this.playbackRevision) {
         const message = error instanceof AppError ? error.message : "Playback could not be resolved.";
@@ -274,12 +313,14 @@ export class MpvPlayerService implements PlayerController {
       try {
         const playbackTargets = await this.openPlaybackTarget(source);
         this.playbackTarget = playbackTargets;
+        const progressive = source.sourceKind === "downloading" && Boolean(source.progressiveLease);
         await this.launchProcess(
           playbackTargets,
-          source.usesServerTimelineOffset ? 0 : source.resumePositionTicks,
-          false,
+          progressive ? 0 : source.usesServerTimelineOffset ? 0 : source.resumePositionTicks,
+          progressive,
           this.windowMaximized,
         );
+        if (progressive) await this.finishProgressiveStartup(source);
         break;
       } catch (error) {
         if (source.source !== "local") {
@@ -287,6 +328,14 @@ export class MpvPlayerService implements PlayerController {
           throw error;
         }
         await this.discardLaunchAttempt();
+        if (source.sourceKind === "downloading") {
+          source.progressiveLease?.endMetadataAllowance();
+          const decision = await this.progressiveFallbackDecider("open-failed");
+          if (decision !== "stream") {
+            try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
+            throw new AppError("PROGRESSIVE_PLAYBACK_WAITING", "Playback will be available when more of the download is ready.", 409);
+          }
+        }
         try {
           source = await this.playback.retryAfterLocalFailure(source.playbackId, resumeMode);
         } catch (fallbackError) {
@@ -311,6 +360,7 @@ export class MpvPlayerService implements PlayerController {
         durationTicks: source.durationTicks,
         source: source.source,
         sourceKind: source.sourceKind,
+        ...(source.notice ? { notice: source.notice } : {}),
       };
     } catch (error) {
       if (this.isCurrent(revision, source)) await this.failAndClean(error);
@@ -341,6 +391,9 @@ export class MpvPlayerService implements PlayerController {
     context: PlayerCommandContext = { origin: "local-user" },
   ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
+    if (this.state.seekableUntilTicks !== null && positionTicks > this.state.seekableUntilTicks) {
+      throw new AppError("SEEK_NOT_DOWNLOADED", "That position has not downloaded yet.", 409);
+    }
     const bounded = Math.max(0, Math.min(positionTicks, this.state.durationTicks || positionTicks));
     this.pendingSeek = { positionTicks: bounded, expiresAt: performance.now() + 5000 };
     if (this.source?.usesServerTimelineOffset) {
@@ -502,6 +555,8 @@ export class MpvPlayerService implements PlayerController {
       this.videoHost?.detachWindow();
       this.playbackTarget = null;
       try { this.playback.stop(playbackId); } catch { /* Already cleared. */ }
+      this.removeProgressiveListener?.();
+      this.removeProgressiveListener = null;
       this.source = null;
       this.timelineBaseTicks = 0;
       this.rawTimePositionSeconds = 0;
@@ -530,6 +585,8 @@ export class MpvPlayerService implements PlayerController {
       this.playbackRevision += 1;
       this.exitIntegratedFullscreen();
       this.playback.clear();
+      this.removeProgressiveListener?.();
+      this.removeProgressiveListener = null;
       this.playbackRate = 1;
       this.timelineBaseTicks = 0;
       this.rawTimePositionSeconds = 0;
@@ -558,6 +615,8 @@ export class MpvPlayerService implements PlayerController {
     this.videoHost?.detachWindow();
     this.playbackTarget = null;
     try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
+    this.removeProgressiveListener?.();
+    this.removeProgressiveListener = null;
     this.source = null;
     this.timelineBaseTicks = 0;
     this.rawTimePositionSeconds = 0;
@@ -586,6 +645,8 @@ export class MpvPlayerService implements PlayerController {
     context: PlayerCommandContext = { origin: "system" },
     retained: { volume?: number; fullscreen?: boolean } = {},
   ): void {
+    this.removeProgressiveListener?.();
+    this.removeProgressiveListener = null;
     this.source = source;
     this.timelineBaseTicks = source.usesServerTimelineOffset ? source.resumePositionTicks : 0;
     this.update(emptyState({
@@ -600,10 +661,28 @@ export class MpvPlayerService implements PlayerController {
       positionTicks: source.resumePositionTicks,
       durationTicks: source.durationTicks,
       seekable: source.usesServerTimelineOffset && source.contentKind !== "live-tv",
+      seekableUntilTicks: source.sourceKind === "downloading" ? 0 : null,
       volume: retained.volume ?? 100,
       fullscreen: retained.fullscreen ?? false,
       contentKind: source.contentKind ?? "on-demand",
     }), action, context);
+    if (source.progressiveLease) {
+      this.removeProgressiveListener = source.progressiveLease.onEvent((event) => {
+        if (this.source !== source) return;
+        if (event.type === "completed") {
+          source.sourceKind = "downloaded";
+          source.notice = null;
+          this.update({
+            ...this.state,
+            seekableUntilTicks: null,
+            seekable: true,
+            diagnostics: { ...this.state.diagnostics!, sourceKind: "downloaded" },
+          });
+        } else if (event.type === "invalidated") {
+          void this.handleProgressiveInvalidation(source, event.reason);
+        }
+      });
+    }
   }
 
   private async discardLaunchAttempt(): Promise<void> {
@@ -611,6 +690,8 @@ export class MpvPlayerService implements PlayerController {
     await this.proxy.close().catch(() => undefined);
     this.playbackTarget = null;
     this.source = null;
+    this.removeProgressiveListener?.();
+    this.removeProgressiveListener = null;
     this.timelineBaseTicks = 0;
     this.rawTimePositionSeconds = 0;
     this.demuxerCacheTimeSeconds = null;
@@ -629,7 +710,7 @@ export class MpvPlayerService implements PlayerController {
 
   private async openPlaybackTarget(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
     await this.proxy.close();
-    if (source.source === "local" && (source.externalSubtitles?.length ?? 0) === 0) {
+    if (source.source === "local" && !source.progressiveLease && (source.externalSubtitles?.length ?? 0) === 0) {
       return { media: source.mediaUrl, subtitles: [] };
     }
     return this.proxy.open(source);
@@ -693,7 +774,10 @@ export class MpvPlayerService implements PlayerController {
     this.rawTimePositionSeconds = 0;
     this.demuxerCacheTimeSeconds = null;
     this.activeRenderProfile = "libmpv-opengl-angle";
-    const session = await this.libMpvHost.open({ location: playbackTargets.media }, positionTicks);
+    const session = await this.libMpvHost.open({
+      location: playbackTargets.media,
+      ...(this.source?.contentKind === "live-tv" ? { startupTimeoutMilliseconds: 25_000 } : {}),
+    }, positionTicks);
     const ipc = new LibMpvCommandClient(session, (listener) => this.libMpvHost!.onEvent(listener));
     this.ipc = ipc;
     ipc.onMessage((message) => { if (this.ipc === ipc) this.handleMessage(message); });
@@ -716,6 +800,7 @@ export class MpvPlayerService implements PlayerController {
         ipc.observe(15, "hwdec-current"),
         ipc.observe(16, "vo-configured"),
         ipc.observe(17, "seeing-stone-frame-stats"),
+        ipc.observe(18, "demuxer-cache-state"),
       ]);
       if (paused) await ipc.command(["set_property", "pause", true]);
       const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
@@ -765,13 +850,15 @@ export class MpvPlayerService implements PlayerController {
       "--force-window=immediate",
       "--keep-open=yes",
       ...(profile === "legacy" ? ["--hwdec=auto-safe"] : embeddedRenderProfileArgs(profile)),
-      `--osc=${this.videoHost ? "no" : "yes"}`,
-      `--input-default-bindings=${this.videoHost ? "no" : "yes"}`,
+      `--osc=${this.videoHost || this.source?.sourceKind === "downloading" ? "no" : "yes"}`,
+      `--input-default-bindings=${this.videoHost || this.source?.sourceKind === "downloading" ? "no" : "yes"}`,
       `--input-vo-keyboard=${this.videoHost ? "no" : "yes"}`,
       ...(this.videoHost
         ? embeddedVideoWindowArgs(windowTitle)
         : ["--title=Seeing Stone Player", "--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
-      `--input-conf=${this.runtime.inputConfig}`,
+      `--input-conf=${this.source?.sourceKind === "downloading"
+        ? this.runtime.progressiveInputConfig ?? this.runtime.inputConfig
+        : this.runtime.inputConfig}`,
       `--input-ipc-server=${pipePath}`,
       `--start=${positionTicks / TICKS_PER_SECOND}`,
       ...(paused ? ["--pause=yes"] : []),
@@ -823,6 +910,7 @@ export class MpvPlayerService implements PlayerController {
         ipc.observe(14, "video-format"),
         ipc.observe(15, "hwdec-current"),
         ipc.observe(16, "vo-configured"),
+        ipc.observe(18, "demuxer-cache-state"),
       ]);
       const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
       const rawPositionTicks = Math.max(0, Math.round(authoritativePosition * TICKS_PER_SECOND));
@@ -1363,6 +1451,15 @@ export class MpvPlayerService implements PlayerController {
       this.emitEvent("resync-request", { origin: "local-user" });
       return;
     }
+    if (message.event === "client-message" && message.args?.[0] === "jellyfin-seek-relative" && this.source) {
+      const seconds = Number(message.args[1]);
+      if (Number.isFinite(seconds)) {
+        const target = Math.max(0, this.state.positionTicks + seconds * TICKS_PER_SECOND);
+        void this.seek(this.source.playbackId, target, { origin: "local-user" })
+          .catch(() => this.command(["show-text", "That position has not downloaded yet.", 2000]).catch(() => undefined));
+      }
+      return;
+    }
     if (message.event === "end-file" && this.source) {
       if (this.replacingFile) return;
       if (message.reason === "eof") {
@@ -1451,6 +1548,13 @@ export class MpvPlayerService implements PlayerController {
         next.diagnostics = { ...next.diagnostics!, bufferAheadTicks: Math.max(0, Math.round(message.data * TICKS_PER_SECOND)) };
       }
     }
+    if (message.name === "demuxer-cache-state" && this.source?.sourceKind === "downloading") {
+      const confirmed = this.confirmedProgressiveRangeEnd(message.data);
+      if (confirmed !== null) {
+        next.seekableUntilTicks = Math.max(next.seekableUntilTicks ?? 0, confirmed);
+        next.seekable = next.seekableUntilTicks > 0;
+      }
+    }
     if (this.activeRenderProfile !== "legacy" && message.name === "current-vo" && typeof message.data === "string") {
       next.diagnostics = {
         ...next.diagnostics!,
@@ -1509,6 +1613,50 @@ export class MpvPlayerService implements PlayerController {
   private async command(command: unknown[]): Promise<void> {
     if (!this.ipc) throw new AppError("PLAYER_UNAVAILABLE", "The player is unavailable.", 409);
     await this.ipc.command(command);
+  }
+
+  private confirmedProgressiveRangeEnd(value: unknown): number | null {
+    return confirmedProgressiveRangeEndTicks(value);
+  }
+
+  private async finishProgressiveStartup(source: ResolvedPlaybackSource): Promise<void> {
+    const deadline = Date.now() + 15_000;
+    try {
+      while (Date.now() < deadline && this.source === source) {
+        const limit = this.state.seekableUntilTicks;
+        if (limit !== null && limit > 0) {
+          const preferred = source.preferredResumePositionTicks ?? 0;
+          if (preferred > 0 && preferred <= limit) {
+            await this.command(["seek", preferred / TICKS_PER_SECOND, "absolute+exact"]);
+            source.resumePositionTicks = preferred;
+            this.update({ ...this.state, positionTicks: preferred });
+          } else if (preferred > limit) {
+            source.notice = "Your saved position hasn’t downloaded yet, so playback started from the beginning.";
+          }
+          await this.command(["set_property", "pause", false]);
+          this.update({ ...this.state, paused: false });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new AppError("PROGRESSIVE_PLAYBACK_UNAVAILABLE", "This video could not be opened progressively.", 422);
+    } finally {
+      source.progressiveLease?.endMetadataAllowance();
+    }
+  }
+
+  private async handleProgressiveInvalidation(
+    source: ResolvedPlaybackSource,
+    reason: ProgressiveLeaseInvalidationReason,
+  ): Promise<void> {
+    if (this.source !== source || this.stopping) return;
+    const itemId = source.itemId;
+    await this.stop(source.playbackId, "stopped", { origin: "system" }).catch(() => undefined);
+    if (reason !== "probe-failed") return;
+    const decision = await this.progressiveFallbackDecider("probe-failed");
+    if (decision !== "stream") return;
+    this.playback.skipProgressiveOnce(itemId);
+    await this.start(itemId, "resume", { origin: "system" }).catch(() => undefined);
   }
 
   private assertPlayback(playbackId: string): void {

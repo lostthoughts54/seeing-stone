@@ -39,9 +39,13 @@ import {
   bufferingPolicyPreferenceSchema,
   searchSchema,
   serverUrlSchema,
+  smartDownloadFollowSchema,
+  smartDownloadUnfollowSchema,
+  trailerOpenSchema,
   watchedStateSchema,
   watchPartyCreateSchema,
   watchPartyGroupSchema,
+  watchPartySyncOffsetSchema,
   watchPartyVisibilitySchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
@@ -57,6 +61,8 @@ import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
 import type { CompanionSettingsBridge } from "../shared/companionContracts";
 import type { PlaybackCommandService } from "./services/playbackCommandService";
+import type { TrailerWindowController } from "./services/trailerWindow";
+import type { SmartDownloadService } from "./services/smartDownloads";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
 
@@ -136,6 +142,8 @@ export function registerIpcHandlers(
   cleanMachineDiagnostics?: CleanMachineDiagnosticsProvider,
   companion?: CompanionController,
   playbackCommands?: PlaybackCommandService,
+  trailerWindow?: TrailerWindowController,
+  smartDownloads?: SmartDownloadService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -163,11 +171,13 @@ export function registerIpcHandlers(
     await syncPlay?.deactivate();
     artwork.clear();
     await playback.clear();
+    await smartDownloads?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
     await companion?.stopForSessionChange?.();
     const session = await api.login(value.connectionId, value.username, value.password, value.remember);
     await downloads.activate();
+    await smartDownloads?.activate();
     synchronization.activate();
     await syncPlay?.activate();
     await companion?.activateAfterLogin?.();
@@ -175,6 +185,7 @@ export function registerIpcHandlers(
   });
   register(IPC.sessionRestore, async () => {
     await syncPlay?.deactivate();
+    await smartDownloads?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
     await companion?.stopForSessionChange?.();
@@ -183,6 +194,7 @@ export function registerIpcHandlers(
     await playback.clear();
     if (session.authenticated) {
       await downloads.activate();
+      await smartDownloads?.activate();
       synchronization.activate();
       await syncPlay?.activate();
       await companion?.activateAfterLogin?.();
@@ -195,6 +207,7 @@ export function registerIpcHandlers(
     await syncPlay?.deactivate();
     artwork.clear();
     await playback.clear();
+    await smartDownloads?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
     return api.logout();
@@ -207,10 +220,21 @@ export function registerIpcHandlers(
   });
   register(IPC.searchQuery, (input) => api.search(searchSchema.strict().parse(input).query));
   register(IPC.itemsGetDetails, (input) => api.getDetails(itemIdSchema.strict().parse(input).itemId));
-  register(IPC.itemsOpenTrailer, async (input) => ({ opened: await api.openTrailer(itemIdSchema.strict().parse(input).itemId) }));
-  register(IPC.itemsSetWatched, (input) => {
+  register(IPC.itemsOpenTrailer, async (input) => {
+    const value = trailerOpenSchema.strict().parse(input);
+    if (!trailerWindow) {
+      return { opened: await api.openTrailer(value.itemId), mode: "external" as const, embedUrl: null };
+    }
+    const url = await api.getTrailerUrl(value.itemId);
+    if (!url) return { opened: false, mode: null, embedUrl: null };
+    const result = await trailerWindow.open(url, value.openExternally);
+    return { opened: true, ...result };
+  });
+  register(IPC.itemsSetWatched, async (input) => {
     const value = watchedStateSchema.strict().parse(input);
-    return synchronization.setWatched(value.itemId, value.watched);
+    const result = await synchronization.setWatched(value.itemId, value.watched);
+    if (value.watched) void smartDownloads?.notifyWatchedItem(value.itemId);
+    return result;
   });
   register(IPC.showsGetSeasons, (input) => api.getSeasons(itemIdSchema.strict().parse(input).itemId));
   register(IPC.showsGetEpisodes, (input) => {
@@ -292,11 +316,45 @@ export function registerIpcHandlers(
     const value = downloadKeepSchema.strict().parse(input);
     return downloads.setKeep(value.downloadId, value.keepDownloaded);
   });
+  register(IPC.smartDownloadsGetState, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    return smartDownloads.getState();
+  });
+  register(IPC.smartDownloadsFollow, (input) => {
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    const value = smartDownloadFollowSchema.strict().parse(input);
+    return smartDownloads.follow(value.seriesId, value.episodeLimit);
+  });
+  register(IPC.smartDownloadsSetLimit, (input) => {
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    const value = smartDownloadFollowSchema.strict().parse(input);
+    return smartDownloads.setLimit(value.seriesId, value.episodeLimit);
+  });
+  register(IPC.smartDownloadsCheckNow, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    return smartDownloads.checkNow();
+  });
+  register(IPC.smartDownloadsUnfollow, (input) => {
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    const value = smartDownloadUnfollowSchema.strict().parse(input);
+    return smartDownloads.unfollow(value.seriesId, value.disposition);
+  });
+  register(IPC.smartDownloadsSkip, (input) => {
+    if (!smartDownloads) throw new AppError("SMART_DOWNLOADS_UNAVAILABLE", "Smart Downloads are unavailable.", 503);
+    return smartDownloads.skip(downloadIdSchema.strict().parse(input).downloadId);
+  });
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
-    if (playbackCommands) return playbackCommands.start(value.itemId, value.resumeMode, false, "local-user");
+    if (playbackCommands) return playbackCommands.start(value.itemId, value.resumeMode, false, "local-user", value.progressiveOnly === true);
+    if (value.progressiveOnly && syncPlay?.isJoined()) {
+      throw new AppError("PROGRESSIVE_SYNCPLAY_UNAVAILABLE", "Watch while downloading is unavailable in a watch party.", 409);
+    }
     if (syncPlay?.isJoined()) return syncPlay.selectItem(value.itemId, value.resumeMode);
-    return playback.loadItem(value.itemId, value.resumeMode, { origin: "local-user" });
+    return playback.loadItem(value.itemId, value.resumeMode, value.progressiveOnly
+      ? { origin: "local-user", requireProgressive: true }
+      : { origin: "local-user" });
   });
   register(IPC.playbackStartLive, (input) => {
     const value = liveTvPlaybackSchema.parse(input);
@@ -474,6 +532,9 @@ export function registerIpcHandlers(
     emptySchema.strict().parse(input ?? {});
     return requireSyncPlay().resyncGroup();
   });
+  register(IPC.watchPartiesSetLocalSyncOffset, (input) => requireSyncPlay().setLocalSyncOffset(
+    watchPartySyncOffsetSchema.strict().parse(input).offsetMilliseconds,
+  ));
   register(IPC.watchPartiesSetBufferingPolicy, (input) => requireSyncPlay().setBufferingPolicy(
     bufferingPolicyPreferenceSchema.strict().parse(input).mode,
   ));

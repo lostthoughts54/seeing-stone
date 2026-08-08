@@ -1,12 +1,12 @@
 # Seeing Stone — Companion Remote (Beta)
 
-Companion Remote is an opt-in feature in Seeing Stone `0.6.0 Beta`. It serves a
+Companion Remote is an opt-in feature in Seeing Stone `0.7.0 Beta`. It serves a
 phone-friendly remote from the desktop over one explicitly selected RFC1918
 IPv4 network. The desktop must be running and signed in.
 
 ## Enable and pair
 
-1. Open the profile menu and choose **Companion Remote (Beta)**.
+1. Choose **Phone Remote** in the primary navigation.
 2. Select the trusted private network used by the phone.
 3. Enable Companion Remote.
 4. Choose **Pair a phone**, then scan the QR code or enter the eight-digit code.
@@ -20,6 +20,15 @@ Pairing is single-use and expires after five minutes. Paired phones receive an
 HttpOnly, SameSite=Strict device cookie. Device verifiers are scoped to the
 current Jellyfin server and user and are kept in Windows protected storage.
 They never cross Electron IPC.
+
+## Browse on the phone
+
+Browse is divided into the movie, TV, Anime, and other supported video
+libraries configured in Jellyfin. Each library can be sorted by recently
+added, release date, or alphabetical title. The phone requests 30 items at a
+time and exposes **Load more**, so a large library is not downloaded as one
+long list. TV-style libraries open at the series level; choose **Episodes** to
+drill into a show. Search continues to work across all libraries.
 
 ## Network and security boundaries
 
@@ -48,6 +57,10 @@ At natural completion, Seeing Stone first finalizes reporting and closes the
 old playback source. It checks whether automatic transitions are enabled before
 consulting the continuation resolver. This prevents local queue or Next Up
 activity during SyncPlay.
+
+While the desktop is in a watch party, the phone also shows preparation status
+and can move that desktop's playback timing earlier or later in 100 ms steps.
+The saved adjustment is local to that computer and is applied gradually.
 
 When automatic transitions are enabled, the explicit queue is checked after
 movies, episodes, and videos. An exact queue entry is reserved for the

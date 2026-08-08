@@ -16,6 +16,7 @@ import {
   type PersistenceResponse,
   type PlaybackHeadRecord,
   type PlaybackRevisionRecord,
+  type SmartSeriesRecord,
 } from "./persistenceTypes";
 
 const port = parentPort;
@@ -240,6 +241,56 @@ INSERT INTO application_preferences(preference_key, value_json, updated_at)
 DROP TABLE application_preferences_v5;
 `;
 
+const MIGRATION_7 = `
+ALTER TABLE application_preferences RENAME TO application_preferences_v6;
+CREATE TABLE application_preferences (
+  preference_key TEXT PRIMARY KEY
+    CHECK (preference_key IN (
+      'player.adapter-mode',
+      'watchparty.buffering-policy',
+      'watchparty.sync-offset',
+      'player.cached-diagnostics',
+      'companion.settings'
+    )),
+  value_json TEXT NOT NULL CHECK (length(value_json) BETWEEN 1 AND 16384),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= 0)
+) STRICT, WITHOUT ROWID;
+INSERT INTO application_preferences(preference_key, value_json, updated_at)
+  SELECT preference_key, value_json, updated_at FROM application_preferences_v6;
+DROP TABLE application_preferences_v6;
+`;
+
+const MIGRATION_8 = `
+CREATE TABLE smart_series_rules (
+  server_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  series_id TEXT NOT NULL,
+  series_name TEXT NOT NULL CHECK (length(series_name) BETWEEN 1 AND 1024),
+  episode_limit INTEGER NOT NULL CHECK (episode_limit BETWEEN 1 AND 5),
+  last_successful_check INTEGER CHECK (last_successful_check IS NULL OR last_successful_check >= 0),
+  last_error_code TEXT CHECK (last_error_code IS NULL OR length(last_error_code) BETWEEN 1 AND 128),
+  last_error_message TEXT CHECK (last_error_message IS NULL OR length(last_error_message) BETWEEN 1 AND 2048),
+  last_error_at INTEGER CHECK (last_error_at IS NULL OR last_error_at >= 0),
+  created_at INTEGER NOT NULL CHECK (created_at >= 0),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+  PRIMARY KEY (server_id, user_id, series_id),
+  FOREIGN KEY (server_id, user_id) REFERENCES profiles(server_id, user_id) ON DELETE CASCADE,
+  CHECK ((last_error_code IS NULL AND last_error_message IS NULL AND last_error_at IS NULL)
+    OR (last_error_code IS NOT NULL AND last_error_message IS NOT NULL AND last_error_at IS NOT NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE smart_episode_skips (
+  server_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  series_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL CHECK (created_at >= 0),
+  PRIMARY KEY (server_id, user_id, series_id, item_id),
+  FOREIGN KEY (server_id, user_id, series_id)
+    REFERENCES smart_series_rules(server_id, user_id, series_id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -315,6 +366,18 @@ function initialize(): PersistenceHealth {
       transaction(() => {
         db().exec(MIGRATION_6);
         db().exec("PRAGMA user_version = 6");
+      });
+    }
+    if (version < 7) {
+      transaction(() => {
+        db().exec(MIGRATION_7);
+        db().exec("PRAGMA user_version = 7");
+      });
+    }
+    if (version < 8) {
+      transaction(() => {
+        db().exec(MIGRATION_8);
+        db().exec("PRAGMA user_version = 8");
       });
     }
     const now = Date.now();
@@ -636,6 +699,20 @@ function setDownloadKeep(downloadId: string, keepDownloaded: boolean): DownloadB
   });
 }
 
+function setDownloadSmartManaged(downloadId: string, smartManaged: boolean): DownloadBundleRecord {
+  return transaction(() => {
+    const current = getDownloadBundle(downloadId);
+    if (!current) throw new PersistenceWorkerError("DOWNLOAD_NOT_FOUND", "The download no longer exists.");
+    const managed = smartManaged ? 1 : 0;
+    const now = Date.now();
+    db().prepare("UPDATE download_jobs SET smart_managed = ?, updated_at = ? WHERE download_id = ?")
+      .run(managed, now, downloadId);
+    db().prepare("UPDATE local_versions SET smart_managed = ?, updated_at = ? WHERE download_id = ?")
+      .run(managed, now, downloadId);
+    return getDownloadBundle(downloadId)!;
+  });
+}
+
 function setDownloadExpectedSize(downloadId: string, expectedSize: number): DownloadBundleRecord {
   return transaction(() => {
     const current = getDownloadBundle(downloadId);
@@ -666,6 +743,120 @@ function listLocalVersions(serverId: string, userId: string, itemId: string): Lo
   return (db().prepare(`
     SELECT * FROM local_versions WHERE server_id = ? AND user_id = ? AND item_id = ? ORDER BY created_at, local_version_id
   `).all(serverId, userId, itemId) as Record<string, unknown>[]).map(localVersionRow);
+}
+
+function smartSeriesRow(row: Record<string, unknown> | undefined): SmartSeriesRecord | null {
+  if (!row) return null;
+  return {
+    serverId: String(row.server_id),
+    userId: String(row.user_id),
+    seriesId: String(row.series_id),
+    seriesName: String(row.series_name),
+    episodeLimit: Number(row.episode_limit),
+    lastSuccessfulCheck: row.last_successful_check === null ? null : Number(row.last_successful_check),
+    lastErrorCode: row.last_error_code === null ? null : String(row.last_error_code),
+    lastErrorMessage: row.last_error_message === null ? null : String(row.last_error_message),
+    lastErrorAt: row.last_error_at === null ? null : Number(row.last_error_at),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function upsertSmartSeries(input: Extract<PersistenceOperation, { kind: "upsertSmartSeries" }>["input"]): SmartSeriesRecord {
+  const now = Date.now();
+  db().prepare(`
+    INSERT INTO smart_series_rules(
+      server_id, user_id, series_id, series_name, episode_limit,
+      last_successful_check, last_error_code, last_error_message, last_error_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+    ON CONFLICT(server_id, user_id, series_id) DO UPDATE SET
+      series_name = excluded.series_name,
+      episode_limit = excluded.episode_limit,
+      updated_at = excluded.updated_at
+  `).run(input.serverId, input.userId, input.seriesId, input.seriesName, input.episodeLimit, now, now);
+  return smartSeriesRow(db().prepare(`
+    SELECT * FROM smart_series_rules WHERE server_id = ? AND user_id = ? AND series_id = ?
+  `).get(input.serverId, input.userId, input.seriesId) as Record<string, unknown> | undefined)!;
+}
+
+function listSmartSeries(serverId: string, userId: string): SmartSeriesRecord[] {
+  return (db().prepare(`
+    SELECT * FROM smart_series_rules
+    WHERE server_id = ? AND user_id = ?
+    ORDER BY series_name COLLATE NOCASE, series_id
+  `).all(serverId, userId) as Record<string, unknown>[])
+    .map((row) => smartSeriesRow(row)!)
+    .filter(Boolean);
+}
+
+function recordSmartSeriesCheck(
+  serverId: string,
+  userId: string,
+  seriesId: string,
+  result: Extract<PersistenceOperation, { kind: "recordSmartSeriesCheck" }>["result"],
+): SmartSeriesRecord {
+  const updatedAt = result.success ? result.checkedAt : result.errorAt;
+  const update = result.success
+    ? db().prepare(`
+      UPDATE smart_series_rules
+      SET last_successful_check = ?, last_error_code = NULL, last_error_message = NULL,
+        last_error_at = NULL, updated_at = ?
+      WHERE server_id = ? AND user_id = ? AND series_id = ?
+    `).run(result.checkedAt, updatedAt, serverId, userId, seriesId)
+    : db().prepare(`
+      UPDATE smart_series_rules
+      SET last_error_code = ?, last_error_message = ?, last_error_at = ?, updated_at = ?
+      WHERE server_id = ? AND user_id = ? AND series_id = ?
+    `).run(result.errorCode, result.errorMessage, result.errorAt, updatedAt, serverId, userId, seriesId);
+  if (update.changes !== 1) throw new PersistenceWorkerError("SMART_SERIES_NOT_FOUND", "That followed series no longer exists.");
+  return smartSeriesRow(db().prepare(`
+    SELECT * FROM smart_series_rules WHERE server_id = ? AND user_id = ? AND series_id = ?
+  `).get(serverId, userId, seriesId) as Record<string, unknown> | undefined)!;
+}
+
+function addSmartEpisodeSkip(serverId: string, userId: string, seriesId: string, itemId: string): null {
+  db().prepare(`
+    INSERT INTO smart_episode_skips(server_id, user_id, series_id, item_id, created_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(server_id, user_id, series_id, item_id) DO NOTHING
+  `).run(serverId, userId, seriesId, itemId, Date.now());
+  return null;
+}
+
+function listSmartEpisodeSkips(serverId: string, userId: string, seriesId: string): string[] {
+  return (db().prepare(`
+    SELECT item_id FROM smart_episode_skips
+    WHERE server_id = ? AND user_id = ? AND series_id = ?
+    ORDER BY created_at, item_id
+  `).all(serverId, userId, seriesId) as Array<{ item_id: string }>).map((row) => String(row.item_id));
+}
+
+function deleteSmartSeries(serverId: string, userId: string, seriesId: string): null {
+  db().prepare("DELETE FROM smart_series_rules WHERE server_id = ? AND user_id = ? AND series_id = ?")
+    .run(serverId, userId, seriesId);
+  return null;
+}
+
+function unfollowSmartSeriesKeep(serverId: string, userId: string, seriesId: string): null {
+  return transaction(() => {
+    const now = Date.now();
+    const itemIds = db().prepare(`
+      SELECT item_id FROM media_items WHERE server_id = ? AND user_id = ? AND series_id = ?
+    `).all(serverId, userId, seriesId) as Array<{ item_id: string }>;
+    for (const { item_id: itemId } of itemIds) {
+      db().prepare(`
+        UPDATE download_jobs SET smart_managed = 0, updated_at = ?
+        WHERE server_id = ? AND user_id = ? AND item_id = ? AND smart_managed = 1
+      `).run(now, serverId, userId, itemId);
+      db().prepare(`
+        UPDATE local_versions SET smart_managed = 0, updated_at = ?
+        WHERE server_id = ? AND user_id = ? AND item_id = ? AND smart_managed = 1
+      `).run(now, serverId, userId, itemId);
+    }
+    db().prepare("DELETE FROM smart_series_rules WHERE server_id = ? AND user_id = ? AND series_id = ?")
+      .run(serverId, userId, seriesId);
+    return null;
+  });
 }
 
 function playbackRevisionRow(row: Record<string, unknown>): PlaybackRevisionRecord {
@@ -886,6 +1077,17 @@ function markPlaybackSuperseded(serverId: string, userId: string, itemId: string
   return playbackRevisionRow(result);
 }
 
+function listPlaybackHeadsForSeries(serverId: string, userId: string, seriesId: string): PlaybackHeadRecord[] {
+  return (db().prepare(`
+    SELECT playback_heads.* FROM playback_heads
+    INNER JOIN media_items USING (server_id, user_id, item_id)
+    WHERE playback_heads.server_id = ? AND playback_heads.user_id = ? AND media_items.series_id = ?
+    ORDER BY playback_heads.item_id
+  `).all(serverId, userId, seriesId) as Record<string, unknown>[])
+    .map((row) => playbackHeadRow(row))
+    .filter((head): head is PlaybackHeadRecord => head !== null);
+}
+
 function execute(operation: PersistenceOperation): unknown {
   if (operation.kind === "initialize") return initialize();
   if (operation.kind === "close") {
@@ -911,13 +1113,32 @@ function execute(operation: PersistenceOperation): unknown {
     case "getDownloadBundle": return getDownloadBundle(operation.downloadId);
     case "listDownloadBundles": return listDownloadBundles(operation.serverId, operation.userId);
     case "setDownloadKeep": return setDownloadKeep(operation.downloadId, operation.keepDownloaded);
+    case "setDownloadSmartManaged": return setDownloadSmartManaged(operation.downloadId, operation.smartManaged);
     case "setDownloadExpectedSize": return setDownloadExpectedSize(operation.downloadId, operation.expectedSize);
     case "registerLocalVersion": return registerLocalVersion(operation.input);
     case "updateLocalVersion": return updateLocalVersion(operation.input);
     case "listLocalVersions": return listLocalVersions(operation.serverId, operation.userId, operation.itemId);
     case "listOfflinePlayableItems": return listOfflinePlayableItems(operation.serverId, operation.userId);
+    case "upsertSmartSeries": return upsertSmartSeries(operation.input);
+    case "listSmartSeries": return listSmartSeries(operation.serverId, operation.userId);
+    case "recordSmartSeriesCheck": return recordSmartSeriesCheck(
+      operation.serverId, operation.userId, operation.seriesId, operation.result,
+    );
+    case "addSmartEpisodeSkip": return addSmartEpisodeSkip(
+      operation.serverId, operation.userId, operation.seriesId, operation.itemId,
+    );
+    case "listSmartEpisodeSkips": return listSmartEpisodeSkips(
+      operation.serverId, operation.userId, operation.seriesId,
+    );
+    case "deleteSmartSeries": return deleteSmartSeries(operation.serverId, operation.userId, operation.seriesId);
+    case "unfollowSmartSeriesKeep": return unfollowSmartSeriesKeep(
+      operation.serverId, operation.userId, operation.seriesId,
+    );
     case "recordPlaybackRevision": return recordPlaybackRevision(operation.input);
     case "getPlaybackHead": return getPlaybackHead(operation.serverId, operation.userId, operation.itemId);
+    case "listPlaybackHeadsForSeries": return listPlaybackHeadsForSeries(
+      operation.serverId, operation.userId, operation.seriesId,
+    );
     case "listPendingProgress": return listPendingProgress(operation.limit);
     case "listPendingProgressForIdentity": return listPendingProgressForIdentity(
       operation.serverId, operation.userId, operation.limit,

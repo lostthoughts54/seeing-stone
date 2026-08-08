@@ -111,12 +111,18 @@ const DRIFT_MEDIUM_RATE_TICKS = 4_000_000;
 const DRIFT_HIGH_RATE_TICKS = 16_000_000;
 const DRIFT_SEEK_TICKS = 30_000_000;
 
-const emptyState = (): WatchPartyViewState => ({
+const emptyState = (localSyncOffsetMilliseconds = 0): WatchPartyViewState => ({
   availability: "signed-out",
   connection: "disconnected",
   groups: [],
   joinedGroup: null,
   sharedControls: true,
+  preparation: {
+    phase: "idle",
+    minimumParticipants: 2,
+    localSyncOffsetMilliseconds,
+    scheduledStartAtUnixMs: null,
+  },
   sync: {
     serverLatencyMs: null,
     localDriftTicks: null,
@@ -183,6 +189,10 @@ export class SyncPlayService {
   private localResyncInFlight: Promise<PlaybackState> | null = null;
   private lastDriftTicks: number | null = null;
   private driftMeasuredAtUnixMs: number | null = null;
+  private localSyncOffsetMilliseconds = 0;
+  private localItemPrepared = false;
+  private readyReported = false;
+  private currentItemStarted = false;
   private readonly telemetry: ParticipantTelemetryCoordinator;
 
   constructor(
@@ -190,7 +200,8 @@ export class SyncPlayService {
     private readonly player: PlayerController,
     private readonly logger: AppLogger,
     private readonly refreshIntervalMs = 5000,
-    private readonly preferences?: Pick<ApplicationPreferences, "getBufferingPolicy" | "setBufferingPolicy">,
+    private readonly preferences?: Pick<ApplicationPreferences, "getBufferingPolicy" | "setBufferingPolicy">
+      & Partial<Pick<ApplicationPreferences, "getWatchPartySyncOffset" | "setWatchPartySyncOffset">>,
     telemetryTransport: ParticipantTelemetryTransport = new DisabledParticipantTelemetryTransport(),
   ) {
     this.telemetry = new ParticipantTelemetryCoordinator(
@@ -238,25 +249,26 @@ export class SyncPlayService {
 
   async activate(): Promise<WatchPartyViewState> {
     await this.deactivate(false);
+    this.localSyncOffsetMilliseconds = await this.preferences?.getWatchPartySyncOffset?.().catch(() => 0) ?? 0;
     const policy = await this.preferences?.getBufferingPolicy().catch(() => "wait-for-all" as const) ?? "wait-for-all";
     this.telemetry.setPolicy(policy);
     const revision = ++this.activationRevision;
     let context;
     try { context = this.api.getAuthenticatedSocketContext(); }
     catch {
-      this.setState(emptyState());
+      this.setState(emptyState(this.localSyncOffsetMilliseconds));
       return this.getState();
     }
     if (context.serverVersion !== "10.11.11") {
       this.setState({
-        ...emptyState(),
+        ...emptyState(this.localSyncOffsetMilliseconds),
         availability: "unsupported",
         error: { code: "SYNCPLAY_VERSION_UNSUPPORTED", message: `Watch parties require the tested Jellyfin 10.11.11 server (this server reports ${context.serverVersion || "an unknown version"}).` },
       });
       return this.getState();
     }
     this.currentUserName = context.userName;
-    this.setState({ ...emptyState(), availability: "connecting", connection: "connecting" });
+    this.setState({ ...emptyState(this.localSyncOffsetMilliseconds), availability: "connecting", connection: "connecting" });
     this.reconciling = true;
     try {
       await this.openSocket(revision);
@@ -301,6 +313,9 @@ export class SyncPlayService {
     this.syncAnchor = null;
     this.lastDriftTicks = null;
     this.driftMeasuredAtUnixMs = null;
+    this.localItemPrepared = false;
+    this.readyReported = false;
+    this.currentItemStarted = false;
     this.timeMeasurements = [];
     this.serverTimeOffsetMs = 0;
     this.latencyMs = 0;
@@ -311,7 +326,7 @@ export class SyncPlayService {
     await this.telemetry.stop();
     await this.restoreNormalRate().catch(() => undefined);
     this.player.setAutomaticTransitionsEnabled(true);
-    this.setState(emptyState());
+    this.setState(emptyState(this.localSyncOffsetMilliseconds));
   }
 
   async list(): Promise<WatchPartyViewState> {
@@ -389,8 +404,22 @@ export class SyncPlayService {
 
   async requestPaused(paused: boolean): Promise<PlaybackState> {
     this.requireJoined();
+    if (!paused && this.isInitialStartGated()) {
+      throw new AppError("SYNCPLAY_WAITING_FOR_PARTICIPANT", "Waiting for another participant. Leave the party to watch solo.", 409);
+    }
     await this.api.syncPlayRequest(paused ? "/SyncPlay/Pause" : "/SyncPlay/Unpause", {}, "POST");
     return this.player.getState();
+  }
+
+  async setLocalSyncOffset(offsetMilliseconds: number): Promise<WatchPartyViewState> {
+    if (!Number.isInteger(offsetMilliseconds) || offsetMilliseconds < -2000 || offsetMilliseconds > 2000 || offsetMilliseconds % 100 !== 0) {
+      throw new AppError("SYNCPLAY_OFFSET_INVALID", "Timing adjustment must be between 2 seconds later and 2 seconds earlier in 100 ms steps.", 422);
+    }
+    await this.preferences?.setWatchPartySyncOffset?.(offsetMilliseconds);
+    this.localSyncOffsetMilliseconds = offsetMilliseconds;
+    this.setPreparation({ localSyncOffsetMilliseconds: offsetMilliseconds });
+    await this.correctDrift().catch((error) => this.handleBackgroundFailure(error));
+    return this.getState();
   }
 
   async requestSeek(positionTicks: number): Promise<PlaybackState> {
@@ -469,7 +498,10 @@ export class SyncPlayService {
     }
     const playbackId = state.playbackId;
     const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
-    const targetTicks = Math.min(state.durationTicks || Number.MAX_SAFE_INTEGER, Math.max(0, anchor.positionTicks + elapsedTicks));
+    const targetTicks = Math.min(
+      state.durationTicks || Number.MAX_SAFE_INTEGER,
+      Math.max(0, anchor.positionTicks + elapsedTicks + this.localSyncOffsetMilliseconds * 10_000),
+    );
     if (this.player.getPlaybackRate() !== 1) state = await this.player.setPlaybackRate(playbackId, 1, context);
     if (!state.paused) state = await this.player.setPaused(playbackId, true, context);
     state = await this.player.seek(playbackId, targetTicks, context);
@@ -570,9 +602,15 @@ export class SyncPlayService {
     if (update.Type === "UserJoined" && typeof update.Data === "string") {
       const participants = [...new Set([...joined.participants, update.Data])];
       this.setJoined({ ...joined, participants, participantCount: participants.length });
+      void this.maybeReportReady().catch((error) => this.handleBackgroundFailure(error));
     } else if (update.Type === "UserLeft" && typeof update.Data === "string") {
       const participants = joined.participants.filter((name) => name !== update.Data);
       this.setJoined({ ...joined, participants, participantCount: participants.length });
+      if (!this.currentItemStarted && participants.length < 2 && this.localItemPrepared) {
+        this.readyReported = false;
+        this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
+        void this.sendBuffering(true).catch((error) => this.handleBackgroundFailure(error));
+      }
     } else if (update.Type === "StateUpdate") {
       const value = stateUpdateSchema.safeParse(update.Data);
       if (value.success) this.setJoined({ ...joined, playbackState: value.data.State as WatchPartyPlaybackState });
@@ -589,6 +627,7 @@ export class SyncPlayService {
       const membershipRevision = this.membershipRevision;
       this.queueTask = this.queueTask.then(() => this.applyPlayQueue(queue.data, membershipRevision)).catch((error) => {
         this.logger.warn("SyncPlay queue application failed.", { code: error instanceof AppError ? error.code : "SYNCPLAY_QUEUE_FAILED" });
+        this.setPreparation({ phase: "error", scheduledStartAtUnixMs: null });
         this.setState({ ...this.state, error: publicError(error) });
       });
     }
@@ -601,6 +640,10 @@ export class SyncPlayService {
     this.lastDriftTicks = null;
     this.driftMeasuredAtUnixMs = null;
     this.currentPlaylistItemId = selected.PlaylistItemId;
+    this.localItemPrepared = false;
+    this.readyReported = false;
+    this.currentItemStarted = false;
+    this.setPreparation({ phase: "preparing", scheduledStartAtUnixMs: null });
     if (this.lastPublishedTransitionItemId !== selected.ItemId) this.lastPublishedTransitionItemId = null;
     this.setJoined({ ...joined, currentItemId: selected.ItemId, playlistItemId: selected.PlaylistItemId });
     this.syncAnchor = {
@@ -611,7 +654,7 @@ export class SyncPlayService {
       monotonicTimestampMs: performance.now(),
     };
     const state = this.player.getState();
-    if (state.itemId !== selected.ItemId || !state.playbackId) {
+    if (state.itemId !== selected.ItemId || !state.playbackId || state.diagnostics?.sourceKind === "downloading") {
       await this.player.loadItem(selected.ItemId, "start-over", {
         origin: "remote-sync",
         commandRevision: ++this.commandRevision,
@@ -638,7 +681,8 @@ export class SyncPlayService {
     if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) return;
     loaded = await this.waitForPlayerTarget(selected.ItemId, queue.StartPositionTicks, true, 15000);
     if (!loaded.playbackId) return;
-    await this.sendReady(false);
+    this.localItemPrepared = true;
+    await this.maybeReportReady();
   }
 
   private async handleCommand(messageId: string, command: Command): Promise<void> {
@@ -651,6 +695,19 @@ export class SyncPlayService {
     if (!this.timeSyncReady) return;
     const localCommandTime = Date.parse(command.When) - this.serverTimeOffsetMs;
     const delay = Math.max(0, Math.min(2000, localCommandTime - Date.now()));
+    if (command.Command === "Unpause" && !this.currentItemStarted) {
+      if (this.isInitialStartGated()) {
+        this.readyReported = false;
+        this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
+        await this.sendBuffering(true).catch(() => undefined);
+        return;
+      }
+      this.setPreparation({ phase: "starting", scheduledStartAtUnixMs: Date.now() + delay });
+      const current = this.player.getState();
+      if (current.playbackId) {
+        await this.player.showMessage(current.playbackId, "Starting…", Math.max(500, delay)).catch(() => undefined);
+      }
+    }
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     if (!this.state.joinedGroup || this.state.joinedGroup.groupId !== command.GroupId || membershipRevision !== this.membershipRevision) return;
     if (command.Command !== "Stop" && command.PlaylistItemId !== this.currentPlaylistItemId) return;
@@ -674,6 +731,8 @@ export class SyncPlayService {
       }
       await this.player.setPaused(state.playbackId, false, context);
       this.setSyncAnchor(targetPosition, true);
+      this.currentItemStarted = true;
+      this.setPreparation({ phase: "playing", scheduledStartAtUnixMs: null });
       await this.correctDrift();
     } else if (command.Command === "Seek" && command.PositionTicks !== null) {
       const sought = await this.player.seek(state.playbackId, command.PositionTicks, context);
@@ -724,7 +783,17 @@ export class SyncPlayService {
     }
     if (event.origin !== "local-user") return;
     if (event.action === "pause") await this.api.syncPlayRequest("/SyncPlay/Pause", {}, "POST");
-    else if (event.action === "play") await this.api.syncPlayRequest("/SyncPlay/Unpause", {}, "POST");
+    else if (event.action === "play") {
+      if (this.isInitialStartGated()) {
+        if (event.state.playbackId && !event.state.paused) {
+          await this.player.setPaused(event.state.playbackId, true, { origin: "system" }).catch(() => undefined);
+          await this.player.showMessage(event.state.playbackId, "Waiting for another participant.", 2500).catch(() => undefined);
+        }
+        this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
+        return;
+      }
+      await this.api.syncPlayRequest("/SyncPlay/Unpause", {}, "POST");
+    }
     else if (event.action === "seek") await this.api.syncPlayRequest("/SyncPlay/Seek", { PositionTicks: event.state.positionTicks }, "POST");
     else if (event.action === "stop") await this.api.syncPlayRequest("/SyncPlay/Stop", {}, "POST");
   }
@@ -738,6 +807,24 @@ export class SyncPlayService {
       IsPlaying: isPlaying,
       PlaylistItemId: this.currentPlaylistItemId,
     }, "POST");
+  }
+
+  private async maybeReportReady(): Promise<void> {
+    const joined = this.state.joinedGroup;
+    if (!joined || !this.currentPlaylistItemId || !this.localItemPrepared || this.currentItemStarted) return;
+    if (joined.participantCount < 2) {
+      this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
+      return;
+    }
+    this.setPreparation({ phase: "ready", scheduledStartAtUnixMs: null });
+    if (this.readyReported) return;
+    this.readyReported = true;
+    try {
+      await this.sendReady(false);
+    } catch (error) {
+      this.readyReported = false;
+      throw error;
+    }
   }
 
   private async sendBuffering(buffering: boolean): Promise<void> {
@@ -816,7 +903,19 @@ export class SyncPlayService {
     this.syncAnchor = null;
     this.lastDriftTicks = null;
     this.driftMeasuredAtUnixMs = null;
-    this.setState({ ...this.state, joinedGroup: null });
+    this.localItemPrepared = false;
+    this.readyReported = false;
+    this.currentItemStarted = false;
+    this.setState({
+      ...this.state,
+      joinedGroup: null,
+      preparation: {
+        phase: "idle",
+        minimumParticipants: 2,
+        localSyncOffsetMilliseconds: this.localSyncOffsetMilliseconds,
+        scheduledStartAtUnixMs: null,
+      },
+    });
     void this.telemetry.stop();
     this.player.setAutomaticTransitionsEnabled(true);
     void this.restoreNormalRate().catch(() => undefined);
@@ -849,15 +948,20 @@ export class SyncPlayService {
     if (anchor.membershipRevision !== this.membershipRevision || anchor.playlistItemId !== this.currentPlaylistItemId) return;
     const elapsedTicks = Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000);
     const expectedTicks = Math.min(state.durationTicks || Number.MAX_SAFE_INTEGER, anchor.positionTicks + elapsedTicks);
-    const driftTicks = expectedTicks - state.positionTicks;
+    const rawDriftTicks = expectedTicks - state.positionTicks;
+    const driftTicks = rawDriftTicks + this.localSyncOffsetMilliseconds * 10_000;
     this.lastDriftTicks = Math.round(driftTicks);
     this.driftMeasuredAtUnixMs = Date.now();
     this.driftCorrectionInFlight = true;
     try {
       const context = { origin: "remote-sync" as const, commandRevision: ++this.commandRevision, commandId: `drift:${anchor.playlistItemId}` };
-      if (Math.abs(driftTicks) >= DRIFT_SEEK_TICKS) {
+      if (Math.abs(rawDriftTicks) >= DRIFT_SEEK_TICKS) {
         if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
-        await this.player.seek(state.playbackId, expectedTicks, context);
+        const adjustedTarget = Math.min(
+          state.durationTicks || Number.MAX_SAFE_INTEGER,
+          Math.max(0, expectedTicks + this.localSyncOffsetMilliseconds * 10_000),
+        );
+        await this.player.seek(state.playbackId, adjustedTarget, context);
       } else if (Math.abs(driftTicks) >= DRIFT_TOLERANCE_TICKS) {
         const magnitude = Math.abs(driftTicks);
         const adjustment = magnitude >= DRIFT_HIGH_RATE_TICKS
@@ -877,6 +981,27 @@ export class SyncPlayService {
     this.state = structuredClone(state);
     const snapshot = this.getState();
     for (const listener of this.listeners) listener(snapshot);
+  }
+
+  private setPreparation(patch: Partial<WatchPartyViewState["preparation"]>): void {
+    const current = this.state.preparation ?? emptyState(this.localSyncOffsetMilliseconds).preparation;
+    this.setState({
+      ...this.state,
+      preparation: {
+        ...current,
+        localSyncOffsetMilliseconds: this.localSyncOffsetMilliseconds,
+        ...patch,
+      },
+    });
+  }
+
+  private isInitialStartGated(): boolean {
+    return Boolean(
+      this.state.joinedGroup
+      && this.currentPlaylistItemId
+      && !this.currentItemStarted
+      && this.state.joinedGroup.participantCount < 2,
+    );
   }
 
   private localTelemetrySnapshot() {

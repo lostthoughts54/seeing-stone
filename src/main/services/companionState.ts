@@ -1,14 +1,18 @@
 import { randomBytes } from "node:crypto";
-import type { HomePayload, MediaItem, PlaybackState } from "../../shared/contracts";
+import type { HomePayload, MediaItem, PlaybackState, WatchPartyViewState } from "../../shared/contracts";
 import {
   COMPANION_PROTOCOL_VERSION,
   type CompanionBootstrap,
   type CompanionLibraryPage,
+  type CompanionLibrarySort,
+  type CompanionLibrarySummary,
+  type CompanionLiveTvGuide,
   type CompanionMediaSummary,
   type CompanionPlayerState,
   type CompanionQueueState,
+  type CompanionWatchPartyState,
 } from "../../shared/companionContracts";
-import { companionLibraryPageSchema, companionPlayerStateSchema, companionQueueStateSchema } from "../../shared/companionSchemas";
+import { companionLibraryPageSchema, companionLibrarySummarySchema, companionLiveTvGuideSchema, companionPlayerStateSchema, companionQueueStateSchema, companionWatchPartyStateSchema } from "../../shared/companionSchemas";
 import { AppError } from "./errors";
 import type { PlaybackQueueStore } from "./playbackQueue";
 import type { PlayerController } from "./playerController";
@@ -25,8 +29,15 @@ interface Capability {
 
 interface CompanionLibraryApi {
   getHome(): Promise<HomePayload>;
-  getLibraries(): Promise<Array<{ id: string; name: string }>>;
+  getLibraries(): Promise<Array<{ id: string; name: string; collectionType: string | null }>>;
   getLibraryItems(libraryId: string, type: "Movie" | "Series", limit: number): Promise<MediaItem[]>;
+  getLibraryItemsPage(
+    libraryId: string,
+    type: "Movie" | "Series",
+    startIndex: number,
+    limit: number,
+    sort: CompanionLibrarySort,
+  ): Promise<{ items: MediaItem[]; totalRecordCount: number }>;
   search(query: string): Promise<MediaItem[]>;
   getDetails(itemId: string): Promise<MediaItem>;
   getSeasons(seriesId: string): Promise<MediaItem[]>;
@@ -93,7 +104,7 @@ export class CompanionStateService {
   private lastPlayerStructure = "";
   private pendingPlayerPush: NodeJS.Timeout | null = null;
   private readonly capabilities = new CompanionCapabilityRegistry();
-  private readonly listeners = new Set<(topic: "player" | "queue", payload: CompanionPlayerState | CompanionQueueState) => void>();
+  private readonly listeners = new Set<(topic: "player" | "queue" | "watchparty", payload: CompanionPlayerState | CompanionQueueState | CompanionWatchPartyState) => void>();
 
   constructor(
     private readonly player: PlayerController,
@@ -102,12 +113,13 @@ export class CompanionStateService {
     private readonly api: CompanionLibraryApi,
     private readonly isWatchPartyJoined: () => boolean,
     private readonly liveTv?: LiveTvContextService,
+    private readonly getWatchPartyState?: () => WatchPartyViewState | null,
   ) {
     player.onState((state) => this.schedulePlayerPush(state));
     queue.onChanged(() => this.pushQueue());
   }
 
-  onState(listener: (topic: "player" | "queue", payload: CompanionPlayerState | CompanionQueueState) => void): () => void {
+  onState(listener: (topic: "player" | "queue" | "watchparty", payload: CompanionPlayerState | CompanionQueueState | CompanionWatchPartyState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -125,6 +137,7 @@ export class CompanionStateService {
 
   notifyWatchPartyChange(): void {
     this.pushQueue();
+    this.pushWatchParty();
   }
 
   async bootstrap(): Promise<CompanionBootstrap> {
@@ -133,6 +146,7 @@ export class CompanionStateService {
       protocolVersion: COMPANION_PROTOCOL_VERSION,
       player,
       queue,
+      watchParty: this.getWatchPartyStateValue(),
       server: { online: (await this.diagnostics.getSnapshot()).connection.state === "connected" },
     });
   }
@@ -158,6 +172,7 @@ export class CompanionStateService {
       paused: state.paused,
       buffering: state.buffering,
       seekable: state.contentKind !== "live-tv" && state.seekable,
+      seekableUntilTicks: state.seekableUntilTicks,
       volume: Math.max(0, Math.min(100, Math.round(state.volume))),
       muted: state.volume === 0,
       audioTracks: state.audioTracks.map((track) => ({
@@ -205,6 +220,18 @@ export class CompanionStateService {
     return freezeDeep(companionQueueStateSchema.parse(value) as CompanionQueueState);
   }
 
+  private getWatchPartyStateValue(): CompanionWatchPartyState {
+    const state = this.getWatchPartyState?.() ?? null;
+    return freezeDeep(companionWatchPartyStateSchema.parse({
+      joined: Boolean(state?.joinedGroup),
+      phase: state?.preparation.phase ?? "idle",
+      participantCount: state?.joinedGroup?.participantCount ?? 0,
+      minimumParticipants: 2,
+      localSyncOffsetMilliseconds: state?.preparation.localSyncOffsetMilliseconds ?? 0,
+      scheduledStartAtUnixMs: state?.preparation.scheduledStartAtUnixMs ?? null,
+    }) as CompanionWatchPartyState);
+  }
+
   async getHomePage(offset = 0, limit = 30): Promise<CompanionLibraryPage> {
     const home = await this.api.getHome();
     const items = [...home.resumeItems, ...home.nextUpItems, ...home.latestRows.flatMap((row) => row.items)];
@@ -218,14 +245,79 @@ export class CompanionStateService {
     return this.page(await this.api.search(normalized), offset, limit);
   }
 
-  async getLibraryPage(libraryRef: string, offset = 0, limit = 30): Promise<CompanionLibraryPage> {
+  async getLibraryPage(
+    libraryRef: string,
+    offset = 0,
+    limit = 30,
+    sort: CompanionLibrarySort = "recently-added",
+  ): Promise<CompanionLibraryPage> {
     const libraryId = this.capabilities.resolve(libraryRef);
-    const items = await this.api.getLibraryItems(libraryId, "Movie", 50);
-    return this.page(items, offset, limit);
+    const library = (await this.api.getLibraries()).find((entry) => entry.id === libraryId);
+    if (!library) throw new AppError("LIBRARY_NOT_FOUND", "That library is no longer available.", 404);
+    const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 30;
+    const type = library.collectionType === "tvshows" ? "Series" : "Movie";
+    const page = await this.api.getLibraryItemsPage(libraryId, type, safeOffset, safeLimit, sort);
+    return freezeDeep(companionLibraryPageSchema.parse({
+      revision: `${Date.now()}-${safeOffset}`,
+      items: page.items.map((item) => this.mapMedia(item)),
+      nextOffset: safeOffset + page.items.length < page.totalRecordCount ? safeOffset + page.items.length : null,
+    }) as CompanionLibraryPage);
   }
 
-  async getLibraries(): Promise<Array<{ itemRef: string; name: string }>> {
-    return (await this.api.getLibraries()).map((library) => ({ itemRef: this.capabilities.issue(library.id), name: library.name }));
+  async getLibraries(): Promise<CompanionLibrarySummary[]> {
+    return (await this.api.getLibraries())
+      .filter((library) => library.collectionType === null
+        || library.collectionType === "movies"
+        || library.collectionType === "tvshows")
+      .map((library) => companionLibrarySummarySchema.parse({
+        itemRef: this.capabilities.issue(library.id),
+        name: library.name,
+        collectionType: library.collectionType,
+      }));
+  }
+
+  async getLiveTvGuide(): Promise<CompanionLiveTvGuide> {
+    if (!this.liveTv) {
+      return freezeDeep(companionLiveTvGuideSchema.parse({
+        availability: "offline",
+        message: "Live TV is unavailable.",
+        generatedAtUnixMs: Date.now(),
+        channels: [],
+      }) as CompanionLiveTvGuide);
+    }
+    const guide = await this.liveTv.getGuide();
+    const now = Date.now();
+    const playerState = this.player.getState();
+    const playingChannelId = playerState.contentKind === "live-tv" ? playerState.itemId : null;
+    const programsByChannel = new Map<string, typeof guide.programs>();
+    for (const program of guide.programs) {
+      const programs = programsByChannel.get(program.channelId);
+      if (programs) programs.push(program);
+      else programsByChannel.set(program.channelId, [program]);
+    }
+    const value: CompanionLiveTvGuide = {
+      availability: guide.status.availability,
+      message: guide.status.message,
+      generatedAtUnixMs: now,
+      channels: guide.channels.slice(0, 5000).map((channel) => ({
+        channelRef: this.capabilities.issue(channel.id),
+        name: channel.name,
+        number: channel.number,
+        isPlaying: channel.id === playingChannelId,
+        programs: (programsByChannel.get(channel.id) ?? [])
+          .filter((program) => Date.parse(program.endUtc) > now)
+          .sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc))
+          .slice(0, 24)
+          .map((program) => ({
+            name: program.name,
+            startUtc: program.startUtc,
+            endUtc: program.endUtc,
+            isLive: Date.parse(program.startUtc) <= now && Date.parse(program.endUtc) > now,
+          })),
+      })),
+    };
+    return freezeDeep(companionLiveTvGuideSchema.parse(value) as CompanionLiveTvGuide);
   }
 
   async getSeriesPage(seriesRef: string, offset = 0, limit = 30): Promise<CompanionLibraryPage> {
@@ -294,6 +386,7 @@ export class CompanionStateService {
       paused: state.paused,
       buffering: state.buffering,
       seekable: state.seekable,
+      seekableUntilTicks: state.seekableUntilTicks,
       volume: state.volume,
       audio: state.audioTracks.map((track) => [track.id, track.selected]),
       subtitles: state.subtitleTracks.map((track) => [track.id, track.selected]),
@@ -314,5 +407,11 @@ export class CompanionStateService {
   private pushQueue(): void {
     const value = this.getQueueState();
     for (const listener of this.listeners) listener("queue", value);
+  }
+
+
+  private pushWatchParty(): void {
+    const value = this.getWatchPartyStateValue();
+    for (const listener of this.listeners) listener("watchparty", value);
   }
 }

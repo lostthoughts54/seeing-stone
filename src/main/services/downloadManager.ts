@@ -8,6 +8,12 @@ import type { AppLogger } from "./logger";
 import type { MediaProbeService } from "./mediaProbe";
 import type { SqlitePersistenceService } from "./persistence";
 import type { DownloadBundleRecord, DownloadJobRecord, LocalVersionRecord } from "./persistenceTypes";
+import {
+  ActiveProgressiveDownloadLease,
+  type ProgressiveDownloadLease,
+  type ProgressiveDownloadProvider,
+  type ProgressiveLeaseInvalidationReason,
+} from "./progressiveDownload";
 
 type DownloadApi = Pick<JellyfinApi,
   "getAuthenticatedContext" | "getDetails" | "getMediaSourceCapabilities" | "fetchStaticStream"
@@ -28,6 +34,14 @@ interface DownloadManagerOptions {
 }
 
 const DEFAULT_STORAGE_RESERVE = 1024 * 1024 * 1024;
+
+export function progressiveStartupThreshold(expectedSize: number, bitrate: number | null): number {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0) return Number.MAX_SAFE_INTEGER;
+  const thirtySecondBytes = bitrate !== null && Number.isFinite(bitrate) && bitrate > 0
+    ? Math.ceil(bitrate * 30 / 8)
+    : 32 * 1024 * 1024;
+  return Math.min(expectedSize, Math.max(8 * 1024 * 1024, thirtySecondBytes));
+}
 
 function safeExpectedSize(value: number | null): number | null {
   return value !== null && Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -73,7 +87,7 @@ function cachedSourceDiagnostics(
   };
 }
 
-export class DownloadManager {
+export class DownloadManager implements ProgressiveDownloadProvider {
   private readonly concurrency: number;
   private readonly storageReserveBytes: number;
   private readonly availableBytes: (storageRoot: string) => Promise<number>;
@@ -84,6 +98,8 @@ export class DownloadManager {
   private readonly transfers = new Map<string, ActiveTransfer>();
   private readonly stopIntents = new Map<string, StopIntent>();
   private readonly listeners = new Set<(downloads: DownloadSummary[]) => void>();
+  private readonly progressiveLeases = new Map<string, Set<ActiveProgressiveDownloadLease>>();
+  private readonly transferBytes = new Map<string, number>();
   private readonly authorizedRoots = new Map<string, string>();
   private storageRoot: string;
 
@@ -149,6 +165,7 @@ export class DownloadManager {
   async deactivate(intent: "session" | "shutdown" = "session"): Promise<void> {
     this.revision += 1;
     this.identity = null;
+    await this.invalidateAllLeases(intent === "shutdown" ? "shutdown" : "session-changed");
     const pending: Promise<void>[] = [];
     for (const [downloadId, transfer] of this.transfers) {
       this.stopIntents.set(downloadId, intent);
@@ -184,7 +201,73 @@ export class DownloadManager {
     });
   }
 
+  async acquireProgressive(itemId: string): Promise<ProgressiveDownloadLease | null> {
+    const identity = this.requireIdentity();
+    const bundles = await this.persistence.listDownloadBundles(identity.serverId, identity.userId);
+    const bundle = bundles.find((candidate) => candidate.job.itemId === itemId);
+    const job = bundle?.job;
+    if (!bundle || !job || !job.mediaSourceId || !job.expectedSize || job.expectedSize <= 0) return null;
+    const candidate = await this.progressiveCandidate(bundle);
+    if (!candidate) return null;
+    const { partialPath, recordedBytes } = candidate;
+    const local = bundle.localVersion!;
+    const item = materializeCachedMediaItem(bundle.item, bundle.playbackHead);
+    const mediaSource = await this.persistence.getMediaSource(
+      identity.serverId,
+      identity.userId,
+      itemId,
+      job.mediaSourceId,
+    ).catch(() => null);
+    const diagnostics: PlaybackDiagnostics = {
+      sourceKind: "downloading",
+      playbackRate: 1,
+      bufferAheadTicks: null,
+      container: mediaSource?.diagnostics?.container ?? local.container,
+      videoCodec: mediaSource?.diagnostics?.videoCodec ?? null,
+      audioCodec: mediaSource?.diagnostics?.audioCodec ?? null,
+      audioChannels: mediaSource?.diagnostics?.audioChannels ?? null,
+      resolution: mediaSource?.diagnostics?.resolution ?? null,
+      bitrate: mediaSource?.diagnostics?.bitrate ?? null,
+      videoRange: mediaSource?.diagnostics?.videoRange ?? null,
+      transcodeReason: null,
+    };
+    let lease!: ActiveProgressiveDownloadLease;
+    lease = new ActiveProgressiveDownloadLease({
+      descriptor: {
+        item,
+        itemId,
+        itemType: bundle.itemType,
+        seriesId: item.seriesId,
+        mediaSourceId: job.mediaSourceId,
+        durationTicks: Math.max(0, item.runTimeTicks),
+        expectedSize: job.expectedSize,
+        container: local.container,
+        diagnostics,
+      },
+      initialPath: partialPath,
+      initialBytes: recordedBytes,
+      fetchMetadataRange: (range, signal) => this.api.fetchStaticStream(itemId, job.mediaSourceId!, range, signal),
+      onRelease: () => {
+        const leases = this.progressiveLeases.get(job.downloadId);
+        leases?.delete(lease);
+        if (leases?.size === 0) this.progressiveLeases.delete(job.downloadId);
+      },
+    });
+    const leases = this.progressiveLeases.get(job.downloadId) ?? new Set<ActiveProgressiveDownloadLease>();
+    leases.add(lease);
+    this.progressiveLeases.set(job.downloadId, leases);
+    return lease;
+  }
+
   async start(itemId: string): Promise<DownloadSummary> {
+    return this.startDownload(itemId, "manual");
+  }
+
+  async startSmart(itemId: string): Promise<DownloadSummary> {
+    return this.startDownload(itemId, "smart");
+  }
+
+  private async startDownload(itemId: string, origin: "manual" | "smart"): Promise<DownloadSummary> {
     const identity = this.requireIdentity();
     const storageRoot = this.storageRoot;
     const existing = (await this.persistence.listDownloadBundles(identity.serverId, identity.userId))
@@ -230,8 +313,8 @@ export class DownloadManager {
       userId: identity.userId,
       itemId: item.id,
       mediaSourceId: source.id,
-      origin: "manual",
-      smartManaged: false,
+      origin,
+      smartManaged: origin === "smart",
       keepDownloaded: false,
       qualityProfile: null,
       expectedSize,
@@ -243,8 +326,8 @@ export class DownloadManager {
       downloadId,
       storageRoot,
       localPath,
-      origin: "manual",
-      smartManaged: false,
+      origin,
+      smartManaged: origin === "smart",
       keepDownloaded: false,
       fileState: "staging",
       probeState: "pending",
@@ -302,6 +385,7 @@ export class DownloadManager {
     if (bundle.job.state === "completed" || bundle.job.state === "cancelled") {
       throw new AppError("DOWNLOAD_NOT_CANCELLABLE", "That download cannot be cancelled.", 409);
     }
+    await this.invalidateLeases(downloadId, "cancelled");
     const transfer = this.transfers.get(downloadId);
     if (transfer && (bundle.job.state === "queued" || bundle.job.state === "downloading")) {
       this.stopIntents.set(downloadId, "cancel");
@@ -327,6 +411,7 @@ export class DownloadManager {
     if (bundle.job.state !== "completed" || !bundle.localVersion) {
       throw new AppError("DOWNLOAD_NOT_DELETABLE", "Only completed downloaded copies can be deleted.", 409);
     }
+    await this.invalidateLeases(downloadId, "deleted");
     await this.cleanup(bundle.localVersion);
     const localVersion = await this.persistence.updateLocalVersion({
       localVersionId: bundle.localVersion.localVersionId,
@@ -344,6 +429,17 @@ export class DownloadManager {
     const bundle = await this.persistence.setDownloadKeep(downloadId, keepDownloaded);
     await this.notify();
     return this.toSummary(bundle);
+  }
+
+  async setSmartManaged(downloadId: string, smartManaged: boolean): Promise<DownloadSummary> {
+    await this.requireBundle(downloadId);
+    const bundle = await this.persistence.setDownloadSmartManaged(downloadId, smartManaged);
+    await this.notify();
+    return this.toSummary(bundle);
+  }
+
+  async refreshSummaries(): Promise<void> {
+    if (this.identity) await this.notify();
   }
 
   private requireIdentity(): AuthenticatedContext {
@@ -418,6 +514,7 @@ export class DownloadManager {
             actualSize: result.actualSize,
           });
           await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
+          this.completeLeases(downloadId, finalPath);
           return;
         }
         await rm(finalPath, { force: true });
@@ -425,13 +522,22 @@ export class DownloadManager {
 
       const partial = await stat(partialPath).catch(() => null);
       let offset = partial?.isFile() ? partial.size : 0;
+      this.transferBytes.set(downloadId, offset);
       if (initial.job.expectedSize !== null && offset > initial.job.expectedSize) {
         await rm(partialPath, { force: true });
         offset = 0;
+        this.transferBytes.set(downloadId, offset);
       }
       if (initial.job.expectedSize !== null && offset === initial.job.expectedSize && offset > 0) {
         await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: offset });
-        await rename(partialPath, finalPath);
+        await this.beginLeaseFinalization(downloadId);
+        try {
+          await rename(partialPath, finalPath);
+          this.publishLeaseRenamed(downloadId, finalPath);
+        } catch (error) {
+          this.endLeaseFinalization(downloadId);
+          throw error;
+        }
         const result = await this.probe.probe(storageRoot, finalPath, signal);
         await this.persistence.updateLocalVersion({
           localVersionId: local.localVersionId,
@@ -440,6 +546,7 @@ export class DownloadManager {
           actualSize: result.actualSize,
         });
         await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
+        this.completeLeases(downloadId, finalPath);
         return;
       }
       await this.assertStorage(storageRoot, initial.job.expectedSize === null ? null : initial.job.expectedSize - offset);
@@ -483,6 +590,8 @@ export class DownloadManager {
           if (signal.aborted) throw new AppError("DOWNLOAD_CANCELLED", "The download was interrupted.", 409);
           await handle.write(chunk.value);
           bytes += chunk.value.byteLength;
+          this.transferBytes.set(downloadId, bytes);
+          this.publishLeaseBytes(downloadId, bytes);
           if (expectedSize !== null && bytes > expectedSize) {
             throw new AppError("DOWNLOAD_SIZE_MISMATCH", "The downloaded file exceeded its expected size.", 422);
           }
@@ -501,7 +610,14 @@ export class DownloadManager {
         throw new AppError("DOWNLOAD_SIZE_MISMATCH", "The downloaded file did not match its expected size.", 422);
       }
       await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: bytes });
-      await rename(partialPath, finalPath);
+      await this.beginLeaseFinalization(downloadId);
+      try {
+        await rename(partialPath, finalPath);
+        this.publishLeaseRenamed(downloadId, finalPath);
+      } catch (error) {
+        this.endLeaseFinalization(downloadId);
+        throw error;
+      }
       const result = await this.probe.probe(storageRoot, finalPath, signal);
       if (result.actualSize !== bytes) throw new AppError("DOWNLOAD_SIZE_MISMATCH", "The finalized file size changed unexpectedly.", 422);
       await this.persistence.updateLocalVersion({
@@ -511,6 +627,7 @@ export class DownloadManager {
         actualSize: result.actualSize,
       });
       await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
+      this.completeLeases(downloadId, finalPath);
     } catch (error) {
       await this.handleTransferError(initial, error);
     }
@@ -522,6 +639,7 @@ export class DownloadManager {
     const current = await this.persistence.getDownloadBundle(downloadId);
     if (!current || current.job.state === "completed" || current.job.state === "cancelled") return;
     if (intent === "cancel") {
+      await this.invalidateLeases(downloadId, "cancelled");
       await this.persistence.transitionDownload({ downloadId, state: "cancelled" });
       await this.cleanup(current.localVersion);
       if (current.localVersion) await this.persistence.updateLocalVersion({
@@ -533,13 +651,18 @@ export class DownloadManager {
       return;
     }
     if (intent) {
-      await this.persistence.transitionDownload({ downloadId, state: "paused" });
+      await this.persistence.transitionDownload({
+        downloadId,
+        state: "paused",
+        bytesDownloaded: this.transferBytes.get(downloadId) ?? current.job.bytesDownloaded,
+      });
       return;
     }
     if (isNoSpaceError(error)) {
       await this.persistence.transitionDownload({
         downloadId,
         state: "paused",
+        bytesDownloaded: this.transferBytes.get(downloadId) ?? current.job.bytesDownloaded,
         errorCode: "STORAGE_LIMIT",
         errorMessage: "Download paused because storage is full. Free space manually, then resume it.",
       });
@@ -549,17 +672,21 @@ export class DownloadManager {
     await this.persistence.transitionDownload({
       downloadId,
       state: safe.code === "STORAGE_LIMIT" ? "paused" : "failed",
+      bytesDownloaded: this.transferBytes.get(downloadId) ?? current.job.bytesDownloaded,
       errorCode: safe.code,
       errorMessage: safe.message,
     });
-    if (current.localVersion && safe.code.startsWith("MEDIA_PROBE")) {
-      const finalFile = await stat(current.localVersion.localPath).catch(() => null);
+    if (current.localVersion && (safe.code.startsWith("MEDIA_PROBE") || safe.code === "DOWNLOAD_SIZE_MISMATCH")) {
+      const finalPath = this.authorizedPath(current.localVersion.storageRoot, current.localVersion.localPath);
+      const finalFile = await stat(finalPath).catch(() => null);
+      if (!finalFile?.isFile()) return;
       await this.persistence.updateLocalVersion({
         localVersionId: current.localVersion.localVersionId,
         fileState: "invalid",
         probeState: "invalid",
-        actualSize: finalFile?.isFile() ? finalFile.size : null,
+        actualSize: finalFile.size,
       });
+      await this.invalidateLeases(downloadId, "probe-failed");
     }
   }
 
@@ -603,10 +730,81 @@ export class DownloadManager {
     await rm(folder, { recursive: true, force: true });
   }
 
+  private partialPath(local: LocalVersionRecord): string {
+    const finalPath = this.authorizedPath(local.storageRoot, local.localPath);
+    return this.authorizedPath(local.storageRoot, join(dirname(finalPath), "media.part"));
+  }
+
+  private progressiveThreshold(bundle: DownloadBundleRecord, bitrate: number | null = null): number {
+    const expectedSize = bundle.job.expectedSize;
+    return expectedSize === null ? Number.MAX_SAFE_INTEGER : progressiveStartupThreshold(expectedSize, bitrate);
+  }
+
+  private async progressiveCandidate(bundle: DownloadBundleRecord): Promise<{
+    partialPath: string;
+    recordedBytes: number;
+  } | null> {
+    const { job, localVersion: local } = bundle;
+    if ((job.state !== "downloading" && job.state !== "paused")
+      || !local || local.fileState !== "staging"
+      || !job.mediaSourceId || !job.expectedSize || job.expectedSize <= 0) return null;
+    let partialPath: string;
+    try {
+      partialPath = this.partialPath(local);
+    } catch {
+      return null;
+    }
+    const file = await stat(partialPath).catch(() => null);
+    const recordedBytes = this.transferBytes.get(job.downloadId) ?? job.bytesDownloaded;
+    const mediaSource = await this.persistence.getMediaSource(
+      job.serverId,
+      job.userId,
+      job.itemId,
+      job.mediaSourceId,
+    ).catch(() => null);
+    const bitrate = mediaSource?.diagnostics?.bitrate ?? null;
+    if (!file?.isFile() || file.size !== recordedBytes || recordedBytes < this.progressiveThreshold(bundle, bitrate)) return null;
+    return { partialPath, recordedBytes };
+  }
+
+  private publishLeaseBytes(downloadId: string, bytes: number): void {
+    for (const lease of this.progressiveLeases.get(downloadId) ?? []) lease.publishBytes(bytes);
+  }
+
+  private async beginLeaseFinalization(downloadId: string): Promise<void> {
+    await Promise.all([...this.progressiveLeases.get(downloadId) ?? []].map((lease) => lease.beginFinalization()));
+  }
+
+  private publishLeaseRenamed(downloadId: string, finalPath: string): void {
+    for (const lease of this.progressiveLeases.get(downloadId) ?? []) lease.publishRenamed(finalPath);
+  }
+
+  private endLeaseFinalization(downloadId: string): void {
+    for (const lease of this.progressiveLeases.get(downloadId) ?? []) lease.endFinalization();
+  }
+
+  private completeLeases(downloadId: string, finalPath: string): void {
+    this.transferBytes.delete(downloadId);
+    for (const lease of this.progressiveLeases.get(downloadId) ?? []) lease.publishCompleted(finalPath);
+  }
+
+  private async invalidateLeases(downloadId: string, reason: ProgressiveLeaseInvalidationReason): Promise<void> {
+    this.transferBytes.delete(downloadId);
+    const leases = [...this.progressiveLeases.get(downloadId) ?? []];
+    for (const lease of leases) lease.publishInvalidated(reason);
+    await Promise.all(leases.map((lease) => lease.drainReads()));
+  }
+
+  private async invalidateAllLeases(reason: ProgressiveLeaseInvalidationReason): Promise<void> {
+    await Promise.all([...this.progressiveLeases.keys()].map((downloadId) => this.invalidateLeases(downloadId, reason)));
+  }
+
   private async listFor(identity: AuthenticatedContext): Promise<DownloadSummary[]> {
     const bundles = await this.persistence.listDownloadBundles(identity.serverId, identity.userId);
     const reconciled = await Promise.all(bundles.map((bundle) => this.reconcileLocalFile(bundle)));
-    return reconciled.filter((bundle) => bundle.job.state !== "cancelled").map((bundle) => this.toSummary(bundle));
+    return Promise.all(reconciled
+      .filter((bundle) => bundle.job.state !== "cancelled")
+      .map(async (bundle) => this.toSummary(bundle, Boolean(await this.progressiveCandidate(bundle)))));
   }
 
   private async reconcileLocalFile(bundle: DownloadBundleRecord): Promise<DownloadBundleRecord> {
@@ -638,7 +836,7 @@ export class DownloadManager {
     for (const listener of this.listeners) listener(downloads);
   }
 
-  private toSummary(bundle: DownloadBundleRecord): DownloadSummary {
+  private toSummary(bundle: DownloadBundleRecord, confirmedProgressiveEligibility?: boolean): DownloadSummary {
     const job = bundle.job;
     const local = bundle.localVersion;
     const state: DownloadSummary["state"] = job.state === "completed"
@@ -662,6 +860,10 @@ export class DownloadManager {
       updatedAt: job.updatedAt,
     }, bundle.playbackHead);
     const localPlaybackAvailable = state === "downloaded";
+    const canWatchWhileDownloading = confirmedProgressiveEligibility ?? ((job.state === "downloading" || job.state === "paused")
+      && job.expectedSize !== null
+      && job.expectedSize > 0
+      && job.bytesDownloaded >= this.progressiveThreshold(bundle));
     return {
       downloadId: job.downloadId,
       itemId: job.itemId,
@@ -670,11 +872,13 @@ export class DownloadManager {
       item,
       resumePositionTicks: item.userData.playbackPositionTicks,
       localPlaybackAvailable,
+      canWatchWhileDownloading,
       state,
       bytesDownloaded: job.bytesDownloaded,
       expectedSize: job.expectedSize,
       progressPercent,
       keepDownloaded: job.keepDownloaded,
+      smartManaged: job.smartManaged,
       error: job.errorCode && job.errorMessage ? { code: job.errorCode, message: job.errorMessage } : null,
       canPause: job.state === "queued" || job.state === "downloading",
       canResume: job.state === "paused",

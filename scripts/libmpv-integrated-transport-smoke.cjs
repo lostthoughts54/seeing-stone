@@ -98,6 +98,10 @@ app.whenReady().then(async () => {
   assert.ok(Array.isArray(tracks) && tracks.some((track) => track?.type === "video"), "Production bridge did not expose a video track.");
   await session.command({ kind: "pause" });
   await waitFor(async () => await session.query("pause") === true, 2000, "production pause command");
+  for (const rate of [1.04, 0.94, 1]) {
+    await session.command({ kind: "rate", rate });
+    await waitFor(async () => Math.abs(Number(await session.query("speed")) - rate) < 0.001, 2000, `playback rate ${rate}`);
+  }
   await session.command({ kind: "seek", positionTicks: 2_500_000 });
   await session.command({ kind: "play" });
   const beforeReload = await session.query("seeing-stone-frame-stats");
@@ -107,16 +111,14 @@ app.whenReady().then(async () => {
     return stats.renderedFrames > beforeReload.renderedFrames;
   }, 7500, "frames after production renderer reload");
   window.setFullScreen(true);
-  await delay(500);
-  const presenterLayers = await window.webContents.executeJavaScript(`[
-    document.getElementById("libmpvVideoSurface")?.style.zIndex,
-    document.getElementById("libmpvVideoSurfaceBack")?.style.zIndex,
-  ].filter(Boolean).map(Number)`);
-  assert.equal(presenterLayers.length, 2, "Production presenter did not retain both GPU canvas buffers.");
-  assert.ok(
-    presenterLayers.every((layer) => layer === 1 || layer === 2),
-    `Production presenter escaped its bounded video layers: ${JSON.stringify(presenterLayers)}`,
-  );
+  let presenterLayers = [];
+  await waitFor(async () => {
+    presenterLayers = await window.webContents.executeJavaScript(`[
+      document.getElementById("libmpvVideoSurface")?.style.zIndex,
+      document.getElementById("libmpvVideoSurfaceBack")?.style.zIndex,
+    ].filter(Boolean).map(Number)`);
+    return presenterLayers.length === 2 && presenterLayers.every((layer) => layer === 1 || layer === 2);
+  }, 3000, "both bounded production presenter layers");
   window.setFullScreen(false);
   await delay(500);
   await session.stop();
@@ -126,6 +128,7 @@ app.whenReady().then(async () => {
     presenter: "production-preload",
     presenterLayers,
     trackCount: tracks.length,
+    playbackRates: [1.04, 0.94, 1],
   })}\n`);
   app.quit();
 }).catch(async (error) => {

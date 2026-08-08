@@ -24,6 +24,8 @@ export type PlayerAction =
 
 export interface PlaybackCommandContext {
   origin: PlayerActionOrigin;
+  /** Require an eligible growing download and reject server fallback for this open attempt. */
+  requireProgressive?: boolean;
   /** Monotonic revision owned by the caller's authentication/group session. */
   commandRevision?: number;
   /** Opaque validated identifier used only for duplicate/origin correlation. */

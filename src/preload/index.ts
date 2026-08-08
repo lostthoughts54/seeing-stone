@@ -50,13 +50,20 @@ import {
   type RpcResult,
   type SafeSession,
   type SoloSessionDiagnostics,
+  type TrailerOpenResult,
+  type TrailerOpenInput,
   type SearchInput,
   type ServerConnection,
   type ServerUrlInput,
+  type SmartDownloadFollowInput,
+  type SmartDownloadsState,
+  type SmartDownloadUnfollowInput,
+  type SmartDownloadUnfollowResult,
   type WatchedStateInput,
   type WatchedStateResult,
   type WatchPartyCreateInput,
   type WatchPartyGroupInput,
+  type WatchPartySyncOffsetInput,
   type WatchPartyVisibilityInput,
   type WatchPartyViewState,
 } from "../shared/contracts";
@@ -99,7 +106,7 @@ const bridge: JellyfinBridge = {
   search: { query: (input: SearchInput) => invoke<MediaItem[]>(IPC.searchQuery, input) },
   items: {
     getDetails: (input: ItemIdInput) => invoke<MediaItem>(IPC.itemsGetDetails, input),
-    openTrailer: (input: ItemIdInput) => invoke<{ opened: boolean }>(IPC.itemsOpenTrailer, input),
+    openTrailer: (input: TrailerOpenInput) => invoke<TrailerOpenResult>(IPC.itemsOpenTrailer, input),
     setWatched: (input: WatchedStateInput) => invoke<WatchedStateResult>(IPC.itemsSetWatched, input),
   },
   shows: {
@@ -139,6 +146,19 @@ const bridge: JellyfinBridge = {
       const receive = (_event: Electron.IpcRendererEvent, downloads: DownloadSummary[]) => listener(downloads);
       ipcRenderer.on(IPC.downloadsChanged, receive);
       return () => ipcRenderer.removeListener(IPC.downloadsChanged, receive);
+    },
+  },
+  smartDownloads: {
+    getState: () => invoke<SmartDownloadsState>(IPC.smartDownloadsGetState),
+    follow: (input: SmartDownloadFollowInput) => invoke<SmartDownloadsState>(IPC.smartDownloadsFollow, input),
+    setLimit: (input: SmartDownloadFollowInput) => invoke<SmartDownloadsState>(IPC.smartDownloadsSetLimit, input),
+    checkNow: () => invoke<SmartDownloadsState>(IPC.smartDownloadsCheckNow),
+    unfollow: (input: SmartDownloadUnfollowInput) => invoke<SmartDownloadUnfollowResult>(IPC.smartDownloadsUnfollow, input),
+    skip: (input: DownloadIdInput) => invoke<SmartDownloadsState>(IPC.smartDownloadsSkip, input),
+    subscribe: (listener: (state: SmartDownloadsState) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: SmartDownloadsState) => listener(state);
+      ipcRenderer.on(IPC.smartDownloadsChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.smartDownloadsChanged, receive);
     },
   },
   playback: {
@@ -204,6 +224,7 @@ const bridge: JellyfinBridge = {
     wait: () => invoke<WatchPartyViewState>(IPC.watchPartiesWait),
     continue: () => invoke<WatchPartyViewState>(IPC.watchPartiesContinue),
     resync: () => invoke<WatchPartyViewState>(IPC.watchPartiesResync),
+    setLocalSyncOffset: (input: WatchPartySyncOffsetInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetLocalSyncOffset, input),
     setBufferingPolicy: (input: BufferingPolicyPreferenceInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetBufferingPolicy, input),
     setVisible: (input: WatchPartyVisibilityInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetVisible, input),
     subscribe: (listener: (state: WatchPartyViewState) => void) => {
@@ -239,6 +260,7 @@ let libmpvBackSurfaceContext: ImageBitmapRenderingContext | null = null;
 let libmpvPresentedTexture: SharedTextureImported | null = null;
 let libmpvResizeObserver: ResizeObserver | null = null;
 let libmpvStopped = true;
+let libmpvLastAcceptedSequence = 0;
 
 async function playerViewport(): Promise<HTMLElement> {
   const existing = document.getElementById("playerViewport");
@@ -251,6 +273,7 @@ async function playerViewport(): Promise<HTMLElement> {
 
 function stopLibMpvPresenter(): void {
   libmpvStopped = true;
+  libmpvLastAcceptedSequence = 0;
   libmpvResizeObserver?.disconnect();
   libmpvResizeObserver = null;
   libmpvPresentedTexture?.release();
@@ -310,6 +333,7 @@ async function startLibMpvPresenter(input: unknown): Promise<void> {
   resize();
   viewport.append(front.surface, back.surface);
   libmpvSurfaceGeneration = Number(generation);
+  libmpvLastAcceptedSequence = 0;
   libmpvSurface = front.surface;
   libmpvSurfaceContext = front.context;
   libmpvBackSurface = back.surface;
@@ -327,11 +351,24 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metada
   let retainedForPresentation = false;
   try {
     const record = metadata && typeof metadata === "object" ? metadata as Record<string, unknown> : null;
+    const sequence = record?.sequence;
     if (libmpvStopped || !record || record.surfaceGeneration !== libmpvSurfaceGeneration
+      || !Number.isSafeInteger(sequence) || Number(sequence) <= libmpvLastAcceptedSequence
       || !libmpvSurfaceContext || !libmpvSurface || !libmpvBackSurfaceContext || !libmpvBackSurface) return;
+    const acceptedSequence = Number(sequence);
+    const acceptedGeneration = libmpvSurfaceGeneration;
+    const backSurface = libmpvBackSurface;
+    const backSurfaceContext = libmpvBackSurfaceContext;
+    libmpvLastAcceptedSequence = acceptedSequence;
     frame = importedSharedTexture.getVideoFrame();
     const bitmap = await createImageBitmap(frame);
-    libmpvBackSurfaceContext.transferFromImageBitmap(bitmap);
+    if (libmpvStopped || acceptedGeneration !== libmpvSurfaceGeneration
+      || acceptedSequence !== libmpvLastAcceptedSequence
+      || backSurface !== libmpvBackSurface || backSurfaceContext !== libmpvBackSurfaceContext) {
+      bitmap.close();
+      return;
+    }
+    backSurfaceContext.transferFromImageBitmap(bitmap);
     // Keep both video buffers permanently below the renderer controls. The
     // previous monotonically increasing layer eventually covered every HTML
     // overlay after only a few frames.
@@ -344,7 +381,7 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metada
     retainedForPresentation = true;
     ipcRenderer.send(libmpvPresenterIpc.presented, {
       surfaceGeneration: libmpvSurfaceGeneration,
-      sequence: record.sequence,
+      sequence: acceptedSequence,
     });
     previousTexture?.release();
   } finally {

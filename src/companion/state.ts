@@ -1,4 +1,4 @@
-import type { CompanionBootstrap, CompanionPlayerState, CompanionQueueState } from "../shared/companionContracts";
+import type { CompanionBootstrap, CompanionPlayerState, CompanionQueueState, CompanionWatchPartyState } from "../shared/companionContracts";
 
 export class CompanionModel extends EventTarget {
   bootstrap: CompanionBootstrap | null = null;
@@ -14,6 +14,7 @@ export class CompanionModel extends EventTarget {
     if (!this.bootstrap) return;
     if (topic === "player") this.bootstrap.player = payload as CompanionPlayerState;
     if (topic === "queue") this.bootstrap.queue = payload as CompanionQueueState;
+    if (topic === "watchparty") this.bootstrap.watchParty = payload as CompanionWatchPartyState;
     if (topic === "server" && payload && typeof payload === "object") {
       const record = payload as Record<string, unknown>;
       if (record.player && record.queue) this.bootstrap = payload as CompanionBootstrap;

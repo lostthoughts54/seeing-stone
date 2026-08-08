@@ -46,4 +46,13 @@ describe("PlaybackCommandService Companion presentation", () => {
     await service.start(item.id, "start-over", false, "local-user");
     expect(player.setFullscreen).not.toHaveBeenCalled();
   });
+
+  it("carries an explicit Watch now requirement only for that local start", async () => {
+    const { service, player } = harness();
+    await service.start(item.id, "resume", false, "local-user", true);
+    expect(player.loadItem).toHaveBeenCalledWith(item.id, "resume", {
+      origin: "local-user",
+      requireProgressive: true,
+    });
+  });
 });

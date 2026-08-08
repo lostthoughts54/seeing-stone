@@ -146,7 +146,7 @@ describe("renderer and preload security boundary", () => {
     expect(input).toContain("Ctrl+r script-message jellyfin-resync");
   });
 
-  it("pins hardened BrowserWindow settings and renderer network denial", async () => {
+  it("pins hardened BrowserWindow settings and narrowly scoped trailer networking", async () => {
     const main = [
       await readFile("src/main/index.ts", "utf8"),
       await readFile("src/main/electronSecurity.ts", "utf8"),
@@ -170,13 +170,15 @@ describe("renderer and preload security boundary", () => {
     expect(main).toContain("requestSingleInstanceLock");
     for (const wiring of [
       "registerPrivilegedSchemes()",
-      "const rendererSession = hardenSession()",
+      "const rendererSession = hardenSession(applicationId)",
       'rendererSession.protocol.handle("app"',
       'rendererSession.protocol.handle("jellyfin-artwork"',
     ]) expect(main).toContain(wiring);
     expect(main).toMatch(/registerIpcHandlers\(\s*ipcMain,\s*mainWindow/);
     expect(main).not.toContain('rendererSession.protocol.handle("jellyfin-media"');
     expect(main).toContain('"media-src \'none\'"');
+    expect(main).toContain('"frame-src https://www.youtube.com"');
+    expect(main).toContain("isAllowedTrailerRequest(details)");
   });
 
   it("guards reused artwork elements and playback resolution against stale async results", async () => {

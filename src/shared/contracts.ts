@@ -109,9 +109,10 @@ export interface PlaybackStartResult {
   durationTicks: number;
   source: "server" | "local";
   sourceKind: PlaybackSourceKind;
+  notice?: string | null;
 }
 
-export type PlaybackSourceKind = "matched-local" | "downloaded" | "direct-play" | "direct-stream" | "transcode" | "offline-local";
+export type PlaybackSourceKind = "matched-local" | "downloaded" | "downloading" | "direct-play" | "direct-stream" | "transcode" | "offline-local";
 
 export interface PlaybackDiagnostics {
   sourceKind: PlaybackSourceKind | null;
@@ -175,6 +176,8 @@ export interface PlaybackState {
   paused: boolean;
   buffering: boolean;
   seekable: boolean;
+  /** null means ordinary seek rules; 0 means progressive playback has not confirmed a BOF range. */
+  seekableUntilTicks: number | null;
   /** Effective mpv volume on a 0-100 scale. */
   volume: number;
   fullscreen: boolean;
@@ -331,11 +334,13 @@ export interface DownloadSummary {
   item: MediaItem;
   resumePositionTicks: number;
   localPlaybackAvailable: boolean;
+  canWatchWhileDownloading: boolean;
   state: DownloadState;
   bytesDownloaded: number;
   expectedSize: number | null;
   progressPercent: number | null;
   keepDownloaded: boolean;
+  smartManaged: boolean;
   error: { code: string; message: string } | null;
   canPause: boolean;
   canResume: boolean;
@@ -363,11 +368,23 @@ export type RpcResult<T> =
 export interface ServerUrlInput { url: string }
 export interface LoginInput { connectionId: string; username: string; password: string; remember: boolean }
 export interface ItemIdInput { itemId: string }
-export interface LibraryItemsInput { libraryId: string; type: "Movie" | "Series"; limit: number }
+export interface TrailerOpenInput { itemId: string; openExternally?: boolean }
+
+export interface TrailerOpenResult {
+  opened: boolean;
+  mode: "embedded" | "external" | null;
+  embedUrl: string | null;
+}
+export interface LibraryItemsInput { libraryId: string; type: "Movie" | "Series" | "Mixed"; limit: number }
 export interface SearchInput { query: string }
 export interface EpisodesInput { seriesId: string; seasonId: string }
 export interface ArtworkInput { itemId: string; kind: ImageKind; tag?: string; width?: number; height?: number }
-export interface PlaybackStartInput { itemId: string; resumeMode: "resume" | "start-over" }
+export interface PlaybackStartInput {
+  itemId: string;
+  resumeMode: "resume" | "start-over";
+  /** Require an eligible growing download; never fall through to Jellyfin for this attempt. */
+  progressiveOnly?: boolean;
+}
 export interface PlaybackIdInput { playbackId: string }
 export interface PlaybackPauseInput extends PlaybackIdInput { paused: boolean }
 export interface PlaybackSeekInput extends PlaybackIdInput { positionTicks: number }
@@ -442,6 +459,25 @@ export interface CleanMachineDiagnosticActionResult {
 export interface DownloadStartInput { itemId: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
+export type SmartDownloadStatus = "ready" | "checking" | "offline" | "attention";
+export interface SmartSeriesSummary {
+  seriesId: string;
+  name: string;
+  episodeLimit: number;
+  status: SmartDownloadStatus;
+  lastSuccessfulCheck: number | null;
+  error: { code: string; message: string; occurredAt: number } | null;
+}
+export interface SmartDownloadsState {
+  series: SmartSeriesSummary[];
+  notice: string | null;
+}
+export interface SmartDownloadFollowInput { seriesId: string; episodeLimit: number }
+export interface SmartDownloadUnfollowInput { seriesId: string; disposition: "keep" | "remove" }
+export interface SmartDownloadUnfollowResult {
+  state: SmartDownloadsState;
+  warning: string | null;
+}
 export interface WatchedStateInput { itemId: string; watched: boolean }
 export interface WatchedStateResult {
   itemId: string;
@@ -525,12 +561,29 @@ export interface SyncPlayDiagnostics {
   measuredAtUnixMs: number | null;
 }
 
+export type WatchPartyPreparationPhase =
+  | "idle"
+  | "waiting-for-participant"
+  | "preparing"
+  | "ready"
+  | "starting"
+  | "playing"
+  | "error";
+
+export interface WatchPartyPreparationState {
+  phase: WatchPartyPreparationPhase;
+  minimumParticipants: 2;
+  localSyncOffsetMilliseconds: number;
+  scheduledStartAtUnixMs: number | null;
+}
+
 export interface WatchPartyViewState {
   availability: "signed-out" | "connecting" | "available" | "denied" | "unsupported" | "offline";
   connection: "disconnected" | "connecting" | "connected";
   groups: WatchPartySummary[];
   joinedGroup: JoinedWatchParty | null;
   sharedControls: boolean;
+  preparation: WatchPartyPreparationState;
   sync: SyncPlayDiagnostics;
   telemetry: ParticipantTelemetryViewState;
   error: { code: string; message: string } | null;
@@ -539,6 +592,7 @@ export interface WatchPartyViewState {
 export interface WatchPartyCreateInput { name: string }
 export interface WatchPartyGroupInput { groupId: string }
 export interface WatchPartyVisibilityInput { visible: boolean }
+export interface WatchPartySyncOffsetInput { offsetMilliseconds: number }
 
 export interface JellyfinBridge {
   application: {
@@ -562,7 +616,7 @@ export interface JellyfinBridge {
   search: { query(input: SearchInput): Promise<MediaItem[]> };
   items: {
     getDetails(input: ItemIdInput): Promise<MediaItem>;
-    openTrailer(input: ItemIdInput): Promise<{ opened: boolean }>;
+    openTrailer(input: TrailerOpenInput): Promise<TrailerOpenResult>;
     setWatched(input: WatchedStateInput): Promise<WatchedStateResult>;
   };
   shows: {
@@ -601,6 +655,15 @@ export interface JellyfinBridge {
     delete(input: DownloadIdInput): Promise<DownloadSummary>;
     setKeep(input: DownloadKeepInput): Promise<DownloadSummary>;
     subscribe(listener: (downloads: DownloadSummary[]) => void): () => void;
+  };
+  smartDownloads: {
+    getState(): Promise<SmartDownloadsState>;
+    follow(input: SmartDownloadFollowInput): Promise<SmartDownloadsState>;
+    setLimit(input: SmartDownloadFollowInput): Promise<SmartDownloadsState>;
+    checkNow(): Promise<SmartDownloadsState>;
+    unfollow(input: SmartDownloadUnfollowInput): Promise<SmartDownloadUnfollowResult>;
+    skip(input: DownloadIdInput): Promise<SmartDownloadsState>;
+    subscribe(listener: (state: SmartDownloadsState) => void): () => void;
   };
   playback: {
     start(input: PlaybackStartInput): Promise<PlaybackStartResult>;
@@ -643,6 +706,7 @@ export interface JellyfinBridge {
     wait(): Promise<WatchPartyViewState>;
     continue(): Promise<WatchPartyViewState>;
     resync(): Promise<WatchPartyViewState>;
+    setLocalSyncOffset(input: WatchPartySyncOffsetInput): Promise<WatchPartyViewState>;
     setBufferingPolicy(input: BufferingPolicyPreferenceInput): Promise<WatchPartyViewState>;
     setVisible(input: WatchPartyVisibilityInput): Promise<WatchPartyViewState>;
     subscribe(listener: (state: WatchPartyViewState) => void): () => void;
@@ -691,6 +755,13 @@ export const IPC = {
   downloadsDelete: "downloads:delete",
   downloadsSetKeep: "downloads:set-keep",
   downloadsChanged: "downloads:changed",
+  smartDownloadsGetState: "smart-downloads:get-state",
+  smartDownloadsFollow: "smart-downloads:follow",
+  smartDownloadsSetLimit: "smart-downloads:set-limit",
+  smartDownloadsCheckNow: "smart-downloads:check-now",
+  smartDownloadsUnfollow: "smart-downloads:unfollow",
+  smartDownloadsSkip: "smart-downloads:skip",
+  smartDownloadsChanged: "smart-downloads:changed",
   playbackStart: "playback:start",
   playbackStartLive: "playback:start-live",
   playbackSetPaused: "playback:set-paused",
@@ -731,6 +802,7 @@ export const IPC = {
   watchPartiesWait: "watch-parties:wait",
   watchPartiesContinue: "watch-parties:continue",
   watchPartiesResync: "watch-parties:resync",
+  watchPartiesSetLocalSyncOffset: "watch-parties:set-local-sync-offset",
   watchPartiesSetBufferingPolicy: "watch-parties:set-buffering-policy",
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",

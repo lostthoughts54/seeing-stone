@@ -36,6 +36,7 @@
           <button data-view="player" aria-current="page">Now Playing</button>
           <button data-view="queue">Up Next</button>
           <button data-view="browse">Browse</button>
+          <button data-view="liveTv">Live TV</button>
           <button data-view="settings">Settings</button>
         </nav>
         <section id="playerView" class="view panel" aria-labelledby="nowPlayingTitle">
@@ -56,6 +57,17 @@
             <input id="volume" type="range" min="0" max="100" value="100"><button id="stop">Stop</button>
           </div>
           <button id="goLive" class="primary hidden">Go Live</button>
+          <section id="watchPartyTiming" class="watch-party-timing hidden" aria-labelledby="watchPartyTimingTitle">
+            <p class="eyebrow">Watch party</p><h3 id="watchPartyTimingTitle">This computer’s timing</h3>
+            <p id="watchPartyPreparation" class="muted" aria-live="polite"></p>
+            <strong id="watchPartyOffset">In sync</strong>
+            <p class="muted">If this computer sounds late, choose Earlier.</p>
+            <div class="timing-actions">
+              <button id="watchPartyEarlier" type="button">Earlier 100 ms</button>
+              <button id="watchPartyLater" type="button">Later 100 ms</button>
+              <button id="watchPartyReset" type="button">Reset</button>
+            </div>
+          </section>
           <details><summary>Audio and subtitles</summary>
             <label for="audioTrack">Audio</label><select id="audioTrack"></select>
             <label for="subtitleTrack">Subtitles</label><select id="subtitleTrack"></select>
@@ -68,8 +80,29 @@
         <section id="browseView" class="view panel hidden" aria-labelledby="browseTitle">
           <h2 id="browseTitle">Browse</h2>
           <form id="searchForm" role="search"><label class="sr-only" for="search">Search your Jellyfin library</label>
-            <input id="search" type="search" maxlength="100" placeholder="Search movies, shows, episodes"></form>
+            <input id="search" type="search" maxlength="100" placeholder="Search all libraries"></form>
+          <div id="browseControls" class="browse-controls">
+            <div id="libraryTabs" class="library-tabs" role="tablist" aria-label="Media libraries"></div>
+            <label class="sort-control" for="browseSort"><span>Sort</span>
+              <select id="browseSort">
+                <option value="recently-added">Recently Added</option>
+                <option value="release-date">Release Date</option>
+                <option value="alphabetical">Alphabetical</option>
+              </select>
+            </label>
+          </div>
+          <div class="browse-heading"><button id="browseBack" class="hidden" type="button">Back to library</button><p id="browseStatus" class="muted" aria-live="polite"></p></div>
           <div id="browseList" class="media-grid" aria-live="polite"></div>
+          <button id="browseMore" class="browse-more hidden" type="button">Load more</button>
+        </section>
+        <section id="liveTvView" class="view panel hidden" aria-labelledby="liveTvTitle">
+          <div class="section-heading"><div><p class="eyebrow">On this computer</p><h2 id="liveTvTitle">Live TV Guide</h2></div><button id="refreshLiveTv" type="button">Refresh</button></div>
+          <form id="liveTvSearchForm" role="search">
+            <label class="sr-only" for="liveTvSearch">Search channels and programs</label>
+            <input id="liveTvSearch" type="search" maxlength="100" placeholder="Channel, number, or program">
+          </form>
+          <p id="liveTvGuideStatus" class="muted" aria-live="polite"></p>
+          <div id="liveTvGuideList" class="live-tv-guide-list" aria-live="polite"></div>
         </section>
         <section id="settingsView" class="view panel hidden" aria-labelledby="settingsTitle">
           <h2 id="settingsTitle">Connection</h2><p>Paired with Seeing Stone.</p>

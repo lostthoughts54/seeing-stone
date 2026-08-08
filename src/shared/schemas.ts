@@ -13,11 +13,13 @@ export const loginSchema = z.object({
 
 export const itemIdSchema = z.object({ itemId: z.string().min(1).max(128) });
 
+export const trailerOpenSchema = itemIdSchema.extend({ openExternally: z.boolean().optional() });
+
 export const watchedStateSchema = itemIdSchema.extend({ watched: z.boolean() });
 
 export const libraryItemsSchema = z.object({
   libraryId: z.string().min(1).max(128),
-  type: z.enum(["Movie", "Series"]),
+  type: z.enum(["Movie", "Series", "Mixed"]),
   limit: z.number().int().min(1).max(500),
 });
 
@@ -39,6 +41,7 @@ export const artworkSchema = z.object({
 export const playbackStartSchema = z.object({
   itemId: z.string().min(1).max(128),
   resumeMode: z.enum(["resume", "start-over"]),
+  progressiveOnly: z.boolean().optional(),
 });
 
 const liveTvId = z.string().trim().min(1).max(128).regex(/^[^/?#\\\0]+$/);
@@ -115,6 +118,16 @@ export const downloadIdSchema = z.object({ downloadId: z.string().uuid() });
 
 export const downloadKeepSchema = downloadIdSchema.extend({ keepDownloaded: z.boolean() });
 
+export const smartDownloadFollowSchema = z.object({
+  seriesId: z.string().min(1).max(128),
+  episodeLimit: z.number().int().min(1).max(5),
+});
+
+export const smartDownloadUnfollowSchema = z.object({
+  seriesId: z.string().min(1).max(128),
+  disposition: z.enum(["keep", "remove"]),
+});
+
 export const watchPartyCreateSchema = z.object({
   name: z.string().trim().min(1).max(200),
 });
@@ -124,6 +137,10 @@ export const watchPartyGroupSchema = z.object({
 });
 
 export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });
+
+export const watchPartySyncOffsetSchema = z.object({
+  offsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
+});
 
 export const bufferingPolicyPreferenceSchema = z.object({
   mode: z.enum(["wait-for-all", "continue"]),
@@ -173,7 +190,7 @@ export const cachedMediaItemSchema = z.object({
 }).strict();
 
 export const cachedPlaybackDiagnosticsSchema = z.object({
-  sourceKind: z.enum(["matched-local", "downloaded", "direct-play", "direct-stream", "transcode", "offline-local"]).nullable(),
+  sourceKind: z.enum(["matched-local", "downloaded", "downloading", "direct-play", "direct-stream", "transcode", "offline-local"]).nullable(),
   playbackRate: z.number().finite().min(0.25).max(4),
   bufferAheadTicks: cachedNonnegativeInteger.nullable(),
   container: cachedOptionalText(64),

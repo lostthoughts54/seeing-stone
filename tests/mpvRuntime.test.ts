@@ -19,10 +19,12 @@ describe("mpv runtime resolution", () => {
       await Promise.all([
         writeFile(join(developmentRuntime, "mpv.exe"), "runtime"),
         writeFile(join(developmentAssets, "input.conf"), "ESC quit"),
+        writeFile(join(developmentAssets, "progressive-input.conf"), "LEFT script-message jellyfin-seek-relative -10"),
       ]);
       await expect(resolveMpvRuntime({ packaged: false, resourcesPath: "unused", moduleDirectory })).resolves.toEqual({
         executable: join(developmentRuntime, "mpv.exe"),
         inputConfig: join(developmentAssets, "input.conf"),
+        progressiveInputConfig: join(developmentAssets, "progressive-input.conf"),
       });
 
       const packagedRuntime = join(root, "resources", "mpv");
@@ -30,10 +32,12 @@ describe("mpv runtime resolution", () => {
       await Promise.all([
         writeFile(join(packagedRuntime, "mpv.exe"), "runtime"),
         writeFile(join(packagedRuntime, "input.conf"), "ESC quit"),
+        writeFile(join(packagedRuntime, "progressive-input.conf"), "LEFT script-message jellyfin-seek-relative -10"),
       ]);
       await expect(resolveMpvRuntime({ packaged: true, resourcesPath: join(root, "resources"), moduleDirectory })).resolves.toEqual({
         executable: join(packagedRuntime, "mpv.exe"),
         inputConfig: join(packagedRuntime, "input.conf"),
+        progressiveInputConfig: join(packagedRuntime, "progressive-input.conf"),
       });
     } finally {
       await rm(root, { recursive: true, force: true });

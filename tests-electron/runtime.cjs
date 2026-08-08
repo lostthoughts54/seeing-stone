@@ -14,7 +14,7 @@ const { join, resolve } = require("node:path");
 
 const CHILD_FLAG = "--electron-runtime-child";
 const USER_DATA_ENV = "JELLYFIN_ELECTRON_TEST_USER_DATA";
-const EXPECTED_TESTS = 24;
+const EXPECTED_TESTS = 28;
 
 if (!process.versions.electron) {
   runNodeParent();
@@ -161,7 +161,7 @@ async function runElectronChild() {
       indexNumber: null,
       parentIndexNumber: null,
       userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 },
-      hasTrailer: false,
+      hasTrailer: true,
       playable: true,
     };
     const runtimeSeries = {
@@ -240,7 +240,13 @@ async function runElectronChild() {
       async restore() { return safeSession; },
       getSafeSession() { return safeSession; },
       async getLibraries() {
-        return [{ id: "runtime-library", name: "Runtime library", collectionType: "movies" }];
+        return [
+          { id: "runtime-collections", name: "Collections", collectionType: "boxsets" },
+          { id: "runtime-library", name: "Cool Stuff", collectionType: "movies" },
+          { id: "runtime-shows", name: "Boring", collectionType: "tvshows" },
+          { id: "runtime-music", name: "Amazing", collectionType: "music" },
+          { id: "runtime-live-tv", name: "Live TV", collectionType: "livetv" },
+        ];
       },
       async getLibraryItems(_libraryId, type) {
         return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
@@ -251,11 +257,17 @@ async function runElectronChild() {
         if (expireHome) throw new AppError("SESSION_EXPIRED", "Your Jellyfin session has expired.", 401);
         if (homeUnavailable) throw new AppError("SERVER_UNAVAILABLE", "Jellyfin is unavailable.", 503);
         return {
-          libraries: [{ id: "runtime-library", name: "Runtime library", collectionType: "movies" }],
-          resumeItems: [],
-          nextUpItems: [],
+          libraries: [
+            { id: "runtime-collections", name: "Collections", collectionType: "boxsets" },
+            { id: "runtime-library", name: "Cool Stuff", collectionType: "movies" },
+            { id: "runtime-shows", name: "Boring", collectionType: "tvshows" },
+            { id: "runtime-music", name: "Amazing", collectionType: "music" },
+            { id: "runtime-live-tv", name: "Live TV", collectionType: "livetv" },
+          ],
+          resumeItems: [runtimeItem, runtimeEpisode],
+          nextUpItems: [runtimeEpisodeTwo],
           latestRows: [{
-            library: { id: "runtime-library", name: "Runtime library", collectionType: "movies" },
+            library: { id: "runtime-library", name: "Cool Stuff", collectionType: "movies" },
             items: [runtimeItem, runtimeEpisode],
           }],
         };
@@ -284,6 +296,9 @@ async function runElectronChild() {
           name: "Runtime item",
           userData: { played: false, playbackPositionTicks: 12345, playedPercentage: 1 },
         };
+      },
+      async getTrailerUrl(itemId) {
+        return itemId === runtimeItem.id ? "https://youtu.be/dQw4w9WgXcQ" : null;
       },
       async getMediaSourceCapabilities(itemId) {
         return {
@@ -339,6 +354,7 @@ async function runElectronChild() {
       expectedSize: 4,
       progressPercent: 100,
       keepDownloaded: true,
+      smartManaged: false,
       error: null,
       canPause: false,
       canResume: false,
@@ -663,6 +679,35 @@ async function runElectronChild() {
       async copyReport() { return { completed: true }; },
       async saveReport() { return { completed: false }; },
     };
+    const trailerWindow = {
+      async open(_url, openExternally) {
+        return openExternally
+          ? { mode: "external", embedUrl: null }
+        : { mode: "embedded", embedUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1" };
+      },
+    };
+    const emptySmartDownloadsState = {
+      series: [{
+        seriesId: runtimeSeries.id,
+        name: runtimeSeries.name,
+        episodeLimit: 2,
+        status: "ready",
+        lastSuccessfulCheck: Date.now(),
+        error: null,
+      }],
+      notice: null,
+    };
+    const smartDownloads = {
+      async activate() {},
+      async deactivate() {},
+      async getState() { return structuredClone(emptySmartDownloadsState); },
+      async follow() { return structuredClone(emptySmartDownloadsState); },
+      async setLimit() { return structuredClone(emptySmartDownloadsState); },
+      async checkNow() { return structuredClone(emptySmartDownloadsState); },
+      async unfollow() { return { state: structuredClone(emptySmartDownloadsState), warning: null }; },
+      async skip() { return structuredClone(emptySmartDownloadsState); },
+      async notifyWatchedItem() {},
+    };
     registerIpcHandlers(
       ipcMain,
       mainWindow,
@@ -679,6 +724,10 @@ async function runElectronChild() {
       soloSessionDiagnostics,
       openSourceLicenses,
       cleanMachineDiagnostics,
+      undefined,
+      undefined,
+      trailerWindow,
+      smartDownloads,
     );
     let rendererExit = null;
     let failedLoad = null;
@@ -789,11 +838,13 @@ async function runElectronChild() {
         mediaSources: ["getCapabilities"],
         liveTv: ["cancelSchedule", "createRecording", "deleteRecording", "getGuide", "getRecordings", "getSeriesTimers", "getStatus", "getTimers", "updateSchedule"],
         downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "listOfflinePlayable", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
+        smartDownloads: ["checkNow", "follow", "getState", "setLimit", "skip", "subscribe", "unfollow"],
         playback: ["cancelNextEpisode", "continueNextEpisode", "getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "startLive", "stop", "subscribe"],
         sessionPanel: ["getSolo", "subscribeSolo"],
+        companion: ["beginPairing", "cancelPairing", "getStatus", "regeneratePort", "renameDevice", "revokeDevice", "selectNetwork", "setEnabled", "subscribe"],
         licenses: ["list"],
         diagnostics: ["copyCleanMachine", "getCleanMachine", "saveCleanMachine"],
-        watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setVisible", "subscribe", "wait"],
+        watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setLocalSyncOffset", "setVisible", "subscribe", "wait"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -811,6 +862,66 @@ async function runElectronChild() {
       });
       assert.equal(bridge.genericInvoke, false);
       assert.equal(bridge.webviewLoadUrl, "undefined");
+    });
+
+    await test("library rails preserve server names and add the verified local Downloaded library once", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelectorAll("#mainLibraryNavigation [data-library-id]").length === 4) break;
+          await delay(20);
+        }
+        const entries = (selector) => [...document.querySelectorAll(selector)].map((button) => ({
+          id: button.dataset.libraryId,
+          label: button.querySelector("span")?.textContent,
+          disabled: button.disabled,
+        }));
+        const value = {
+          main: entries("#mainLibraryNavigation [data-library-id]"),
+          player: entries("#playerLibraryNavigation [data-library-id]"),
+          localCardIds: [],
+          localDetailTitle: null,
+          followedShows: [],
+          selectionCheckboxes: 0,
+          selectedDeleteLabel: null,
+        };
+        document.querySelector('#mainLibraryNavigation [data-library-id="seeing-stone:downloaded"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("libraryTitle").textContent === "Downloaded"
+            && document.querySelectorAll("#libraryGrid [data-media-item]").length === 2) break;
+          await delay(20);
+        }
+        value.localCardIds = [...document.querySelectorAll("#libraryGrid [data-media-item]")]
+          .map((card) => card.dataset.mediaItem).sort();
+        value.followedShows = [...document.querySelectorAll("#downloadedFollowedSeriesList strong")]
+          .map((element) => element.textContent);
+        document.getElementById("selectDownloadedButton").click();
+        value.selectionCheckboxes = document.querySelectorAll("#libraryGrid [data-download-select]").length;
+        document.querySelector('#libraryGrid [data-download-select="runtime-downloaded-movie-id"]')?.click();
+        value.selectedDeleteLabel = document.getElementById("deleteSelectedDownloadedButton").textContent.trim();
+        document.getElementById("cancelDownloadedSelectionButton").click();
+        document.querySelector('#libraryGrid [data-media-item="runtime-movie-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime movie") break;
+          await delay(20);
+        }
+        value.localDetailTitle = document.getElementById("detailTitle").textContent;
+        document.getElementById("navHomeButton").click();
+        return value;
+      })()`);
+      const expected = [
+        { id: "runtime-library", label: "Cool Stuff", disabled: false },
+        { id: "runtime-shows", label: "Boring", disabled: false },
+        { id: "runtime-music", label: "Amazing", disabled: true },
+        { id: "seeing-stone:downloaded", label: "Downloaded", disabled: false },
+      ];
+      assert.deepEqual(result.main, expected);
+      assert.deepEqual(result.player, expected);
+      assert.deepEqual(result.localCardIds, ["runtime-movie-id", "runtime-offline-episode-id"]);
+      assert.equal(result.localDetailTitle, "Runtime movie");
+      assert.deepEqual(result.followedShows, ["Runtime series"]);
+      assert.equal(result.selectionCheckboxes, 2);
+      assert.equal(result.selectedDeleteLabel, "Delete selected (1)");
     });
 
     await test("renderer opens the generated sanitized open-source license inventory", async () => {
@@ -903,6 +1014,37 @@ async function runElectronChild() {
       assert.equal(chooseDownloadLocationCount, 1);
       assert.equal(openDownloadLocationCount, 1);
       assert.equal(defaultDownloadLocationCount, 1);
+    });
+
+    await test("Phone Remote is prominent in primary navigation with live status", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("closeDownloadsButton").click();
+        const button = document.getElementById("navCompanionButton");
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (button.getAttribute("aria-label")?.includes("off")) break;
+          await delay(20);
+        }
+        const beforeOpen = {
+          label: button.textContent.trim(),
+          ariaLabel: button.getAttribute("aria-label"),
+          statusClass: document.getElementById("companionNavStatusDot").className,
+          oldProfileEntryExists: Boolean(document.getElementById("companionButton")),
+        };
+        button.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (!document.getElementById("companionPanel").classList.contains("is-hidden")) break;
+          await delay(20);
+        }
+        const panelVisible = !document.getElementById("companionPanel").classList.contains("is-hidden");
+        document.getElementById("closeCompanionButton").click();
+        return { beforeOpen, panelVisible };
+      })()`);
+      assert.equal(result.beforeOpen.label, "Phone Remote");
+      assert.equal(result.beforeOpen.ariaLabel, "Phone Remote, off");
+      assert.match(result.beforeOpen.statusClass, /is-off/);
+      assert.equal(result.beforeOpen.oldProfileEntryExists, false);
+      assert.equal(result.panelVisible, true);
     });
 
     await test("watch-party UI lists, joins, leaves, and creates through the narrow bridge", async () => {
@@ -1068,6 +1210,38 @@ async function runElectronChild() {
         { itemId: runtimeItem.id, watched: true },
         { itemId: runtimeItem.id, watched: false },
       ]);
+    });
+
+    await test("trailer opens as an overlay inside the existing application window", async () => {
+      const windowCount = BrowserWindow.getAllWindows().length;
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.querySelector('[data-media-item="runtime-movie-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime movie") break;
+          await delay(20);
+        }
+        document.getElementById("detailTrailerButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (!document.getElementById("trailerPanel").classList.contains("is-hidden")) break;
+          await delay(20);
+        }
+        const result = {
+          visible: !document.getElementById("trailerPanel").classList.contains("is-hidden"),
+          title: document.getElementById("trailerTitle").textContent,
+          source: document.getElementById("trailerFrame").getAttribute("src"),
+        };
+        document.getElementById("closeTrailerButton").click();
+        result.closed = document.getElementById("trailerPanel").classList.contains("is-hidden");
+        result.sourceCleared = !document.getElementById("trailerFrame").hasAttribute("src");
+        return result;
+      })()`);
+      assert.equal(result.visible, true);
+      assert.equal(result.title, "Runtime movie Trailer");
+      assert.equal(result.source, "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1");
+      assert.equal(result.closed, true);
+      assert.equal(result.sourceCleared, true);
+      assert.equal(BrowserWindow.getAllWindows().length, windowCount);
     });
 
     await test("episode details open the parent series at the episode season", async () => {
@@ -1269,6 +1443,40 @@ async function runElectronChild() {
       playback.stop(playbackState.playbackId);
     });
 
+    await test("home episode artwork opens the episode while its series name opens the series", async () => {
+      const result = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        document.getElementById("navHomeButton").click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.querySelectorAll('#homeRows [data-series-link="runtime-series-id"]').length === 2) break;
+          await delay(20);
+        }
+        const seriesLinks = document.querySelectorAll('#homeRows [data-series-link="runtime-series-id"]');
+        seriesLinks[0]?.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime series") break;
+          await delay(20);
+        }
+        const seriesTitle = document.getElementById("detailTitle").textContent;
+        document.getElementById("navHomeButton").click();
+        document.querySelector('#homeRows [data-media-item="runtime-episode-id"]')?.click();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById("detailTitle").textContent === "Runtime episode") break;
+          await delay(20);
+        }
+        const episodeTitle = document.getElementById("detailTitle").textContent;
+        const artworkLabel = document.querySelector('#homeRows [data-media-item="runtime-episode-id"]')?.getAttribute("aria-label");
+        document.getElementById("navHomeButton").click();
+        return { seriesLinkCount: seriesLinks.length, seriesTitle, episodeTitle, artworkLabel };
+      })()`);
+      assert.deepEqual(result, {
+        seriesLinkCount: 2,
+        seriesTitle: "Runtime series",
+        episodeTitle: "Runtime episode",
+        artworkLabel: "Open episode Runtime episode",
+      });
+    });
+
     await test("downloaded media exposes Play and invokes only the narrow playback action", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -1384,31 +1592,31 @@ async function runElectronChild() {
     await test("fullscreen video click toggles pause while double-click only exits fullscreen", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+        const waitForPlayback = async (predicate, attempts = 150) => {
+          for (let attempt = 0; attempt < attempts; attempt += 1) {
+            const playback = await window.jellyfin.playback.getState();
+            if (predicate(playback)) return playback;
+            await delay(20);
+          }
+          return window.jellyfin.playback.getState();
+        };
         document.querySelector('#homeRows [data-quick-play-item="runtime-episode-id"]')?.click();
-        for (let attempt = 0; attempt < 150; attempt += 1) {
-          if ((await window.jellyfin.playback.getState()).itemId === "runtime-episode-id") break;
-          await delay(20);
-        }
+        await waitForPlayback((playback) => playback.itemId === "runtime-episode-id"
+          && !document.getElementById("playerView").classList.contains("is-hidden")
+          && !document.getElementById("playerFullscreenButton").disabled);
         document.getElementById("playerFullscreenButton").click();
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const fullscreen = (await window.jellyfin.playback.getState()).fullscreen;
-          const rendererFullscreen = document.getElementById("playerView").dataset.fullscreen === "true";
-          if (fullscreen && rendererFullscreen) break;
-          await delay(20);
-        }
+        await waitForPlayback((playback) => playback.fullscreen
+          && document.getElementById("playerView").dataset.fullscreen === "true", 100);
 
         const viewport = document.getElementById("playerViewport");
         viewport.click();
-        await delay(350);
-        const afterFirstClick = await window.jellyfin.playback.getState();
+        const afterFirstClick = await waitForPlayback((playback) => playback.paused, 100);
         viewport.click();
-        await delay(350);
-        const afterSecondClick = await window.jellyfin.playback.getState();
+        const afterSecondClick = await waitForPlayback((playback) => !playback.paused, 100);
         viewport.click();
         viewport.click();
         viewport.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
-        await delay(350);
-        const afterDoubleClick = await window.jellyfin.playback.getState();
+        const afterDoubleClick = await waitForPlayback((playback) => !playback.fullscreen, 100);
         document.getElementById("closePlayerButton").click();
         for (let attempt = 0; attempt < 100; attempt += 1) {
           if ((await window.jellyfin.playback.getState()).playbackId === null) break;

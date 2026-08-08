@@ -46,8 +46,8 @@ const unsafeItem = {
     SupportsDirectPlay: true,
     SupportsDirectStream: true,
     SupportsTranscoding: true,
-    TranscodingReasons: ["ContainerNotSupported", "https://server.invalid/?api_key=SECRET_TOKEN_SENTINEL"],
-    TranscodingUrl: "/transcode?api_key=SECRET_TOKEN_SENTINEL",
+      TranscodingReasons: [],
+      TranscodingUrl: "/transcode?api_key=SECRET_TOKEN_SENTINEL&TranscodeReasons=ContainerNotSupported",
     RequiredHttpHeaders: { Authorization: "SECRET_TOKEN_SENTINEL" },
     MediaStreams: [{
       Type: "Video",
@@ -124,7 +124,13 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname === "/Users/user-1/Items/movie-1") return Response.json(unsafeItem);
       if (url.pathname === "/Shows/series-1/Seasons") return Response.json({ Items: [{ ...unsafeItem, Id: "season-1", Name: "Season 1", Type: "Season" }] });
       if (url.pathname === "/Shows/series-1/Episodes") return Response.json({ Items: [{ ...unsafeItem, Id: "episode-1", Name: "Episode 1", Type: "Episode", SeriesId: "series-1", SeasonId: "season-1" }] });
-      if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId")) return Response.json({ Items: [unsafeItem] });
+      if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId") === "series-1" && url.searchParams.get("Recursive") === "true") {
+        return Response.json({
+          Items: [{ ...unsafeItem, Id: "episode-1", Name: "Episode 1", Type: "Episode", SeriesId: "series-1", SeasonId: "season-1", ParentIndexNumber: 1, IndexNumber: 1 }],
+          TotalRecordCount: 1,
+        });
+      }
+      if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId")) return Response.json({ Items: [unsafeItem], TotalRecordCount: 61 });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("SearchTerm")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("IncludeItemTypes")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({
@@ -143,6 +149,7 @@ describe("JellyfinApi main-side boundary", () => {
         transcodeSignal = init?.signal ?? undefined;
         return new Response("transcoded-video", { headers: { "Content-Type": "video/mp4" } });
       }
+      if (url.pathname === "/transcode") return new Response("live-video", { headers: { "Content-Type": "video/mp2t" } });
       if (url.pathname.startsWith("/Sessions/Playing")) return new Response(null, { status: 204 });
       if (url.pathname === "/UserPlayedItems/movie-1") return Response.json({ Played: init?.method === "POST" });
       throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
@@ -158,14 +165,21 @@ describe("JellyfinApi main-side boundary", () => {
     const home = await api.getHome();
     const libraries = await api.getLibraries();
     const libraryItems = await api.getLibraryItems("library-1", "Movie", 100);
+    const libraryPage = await api.getLibraryItemsPage("library-1", "Movie", 30, 30, "recently-added");
     const searchItems = await api.search("movie");
     const details = await api.getDetails("movie-1");
     const seasons = await api.getSeasons("series-1");
     const episodes = await api.getEpisodes("series-1", "season-1");
+    const smartEpisodesPage = await api.getSeriesEpisodesPage("series-1", 0, 200);
     const nextUp = await api.getNextUpForSeries("series-1");
     const sourceInfo = await api.getPlaybackSourceInfo("movie-1");
     const capabilities = sourceInfo.capabilities;
     expect(sourceInfo.playSessionId).toBe("play-session-1");
+    const negotiatedLive = await api.fetchNegotiatedLiveStream(sourceInfo.negotiatedSources[0].transcodingUrl!);
+    expect(await negotiatedLive.text()).toBe("live-video");
+    const negotiatedRequest = observedRequests.find((entry) => entry.url.pathname === "/transcode");
+    expect(negotiatedRequest?.url.searchParams.get("api_key")).toBeNull();
+    expect(negotiatedRequest?.url.searchParams.get("TranscodeReasons")).toBe("ContainerNotSupported");
     const externalSubtitle = await api.fetchExternalSubtitle("movie-1", "source-1", 4, "srt");
     expect(await externalSubtitle.text()).toContain("Subtitle");
     const artwork = await api.fetchArtwork("movie-1", "Primary", { maxWidth: "500" });
@@ -217,6 +231,7 @@ describe("JellyfinApi main-side boundary", () => {
       details,
       seasons,
       episodes,
+      smartEpisodesPage,
       nextUp,
       capabilities,
     });
@@ -242,13 +257,25 @@ describe("JellyfinApi main-side boundary", () => {
       EnableDirectStream: true,
       EnableTranscoding: true,
       MaxAudioChannels: 8,
-      DeviceProfile: { Name: "Seeing Stone mpv" },
+      DeviceProfile: {
+        Name: "Seeing Stone mpv",
+        MaxStreamingBitrate: 200_000_000,
+        MaxStaticBitrate: 200_000_000,
+      },
     });
     const watchedRequests = observedRequests.filter((entry) => entry.url.pathname === "/UserPlayedItems/movie-1");
     expect(watchedRequests.map((entry) => entry.init?.method)).toEqual(["POST", "DELETE", "POST", "DELETE"]);
     const offlineStops = observedRequests.filter((entry) => entry.url.pathname === "/Sessions/Playing/Stopped");
     expect(offlineStops.map((entry) => JSON.parse(String(entry.init?.body)).PositionTicks)).toEqual([100000000, 1000]);
     expect(rendererPayload).not.toContain("RequiredHttpHeaders");
+    expect(smartEpisodesPage).toMatchObject({ startIndex: 0, totalRecordCount: 1 });
+    expect(smartEpisodesPage.items[0]).toMatchObject({ id: "episode-1", type: "Episode", parentIndexNumber: 1, indexNumber: 1 });
+    const smartEpisodesRequest = observedRequests.find((entry) => entry.url.searchParams.get("Recursive") === "true"
+      && entry.url.searchParams.get("ParentId") === "series-1");
+    expect(smartEpisodesRequest?.url.searchParams.get("Limit")).toBe("200");
+    expect(smartEpisodesRequest?.url.searchParams.get("StartIndex")).toBe("0");
+    expect(smartEpisodesRequest?.url.searchParams.get("EnableTotalRecordCount")).toBe("true");
+    await expect(api.getSeriesEpisodesPage("series-1", 0, 199)).rejects.toMatchObject({ code: "INVALID_EPISODE_PAGE" });
     expect(home.resumeItems[0]).toMatchObject({
       id: "movie-1",
       name: "Movie",
@@ -260,6 +287,12 @@ describe("JellyfinApi main-side boundary", () => {
     });
     expect(libraries[0]).toEqual({ id: "library-1", name: "Movies", collectionType: "movies" });
     expect(libraryItems[0].id).toBe("movie-1");
+    expect(libraryPage).toMatchObject({ totalRecordCount: 61, items: [{ id: "movie-1" }] });
+    const pagedLibraryRequest = observedRequests.find(({ url }) => url.pathname === "/Users/user-1/Items"
+      && url.searchParams.get("StartIndex") === "30");
+    expect(pagedLibraryRequest?.url.searchParams.get("SortBy")).toBe("DateCreated,SortName");
+    expect(pagedLibraryRequest?.url.searchParams.get("SortOrder")).toBe("Descending");
+    expect(pagedLibraryRequest?.url.searchParams.get("EnableTotalRecordCount")).toBe("true");
     expect(searchItems[0].id).toBe("movie-1");
     expect(details.id).toBe("movie-1");
     expect(seasons[0]).toMatchObject({ id: "season-1", type: "Season" });
@@ -536,7 +569,7 @@ describe("JellyfinApi main-side boundary", () => {
     });
   });
 
-  it("generates a custom Anime library and scopes its series request by library ID", async () => {
+  it("preserves custom user-view names and scopes mixed video requests by library ID", async () => {
     const observedRequests: URL[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -544,37 +577,41 @@ describe("JellyfinApi main-side boundary", () => {
       if (url.pathname === "/System/Info/Public") return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
       if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
       if (url.pathname === "/Users/user-1/Views") {
-        return Response.json({ Items: [{ Id: "anime-library", Name: "Anime", CollectionType: "tvshows" }] });
+        return Response.json({ Items: [
+          { Id: "cool-library", Name: "Cool Stuff", CollectionType: "movies" },
+          { Id: "boring-library", Name: "Boring", CollectionType: "tvshows" },
+          { Id: "amazing-library", Name: "Amazing", CollectionType: null },
+          { Id: "music-library", Name: "My Music", CollectionType: "music" },
+        ] });
       }
       if (url.pathname === "/Users/user-1/Items/Resume" || url.pathname === "/Shows/NextUp") return Response.json({ Items: [] });
       if (url.pathname === "/Items/Latest") {
-        return Response.json([{ ...unsafeItem, Id: "anime-1", Name: "Frieren", Type: "Series" }]);
+        return Response.json([{ ...unsafeItem, Id: "latest-1", Name: "Latest", Type: "Movie" }]);
       }
       if (url.pathname === "/Users/user-1/Items") {
-        return Response.json({ Items: [{ ...unsafeItem, Id: "anime-1", Name: "Frieren", Type: "Series" }] });
+        return Response.json({ Items: [{ ...unsafeItem, Id: "video-1", Name: "A Video", Type: "Video" }] });
       }
       throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
     }));
 
-    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-anime-"));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-custom-views-"));
     const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
     const connection = await api.connect("http://127.0.0.1:8096");
     await api.login(connection.connectionId, "Viewer", "password", false);
 
     const home = await api.getHome();
-    const items = await api.getLibraryItems("anime-library", "Series", 100);
+    const items = await api.getLibraryItems("amazing-library", "Mixed", 100);
 
-    expect(home.libraries).toContainEqual({ id: "anime-library", name: "Anime", collectionType: "tvshows" });
-    expect(home.latestRows[0]?.library.name).toBe("Anime");
-    expect(home.latestRows[0]?.items[0]).toMatchObject({ id: "anime-1", type: "Series" });
-    expect(items[0]).toMatchObject({ id: "anime-1", type: "Series" });
-    const latestRequest = observedRequests.find((url) => url.pathname === "/Items/Latest");
+    expect(home.libraries.map((library) => library.name)).toEqual(["Cool Stuff", "Boring", "Amazing", "My Music"]);
+    expect(home.latestRows.map((row) => row.library.name)).toEqual(["Cool Stuff", "Boring"]);
+    expect(items[0]).toMatchObject({ id: "video-1", type: "Video" });
+    const latestRequest = observedRequests.find((url) => url.pathname === "/Items/Latest" && url.searchParams.get("ParentId") === "cool-library");
     expect(latestRequest?.searchParams.get("UserId")).toBe("user-1");
-    expect(latestRequest?.searchParams.get("ParentId")).toBe("anime-library");
+    expect(latestRequest?.searchParams.get("ParentId")).toBe("cool-library");
     expect(latestRequest?.searchParams.get("GroupItems")).toBe("true");
     expect(latestRequest?.searchParams.has("IncludeItemTypes")).toBe(false);
     expect(latestRequest?.searchParams.has("SortBy")).toBe(false);
     const libraryRequests = observedRequests.filter((url) => url.pathname === "/Users/user-1/Items");
-    expect(libraryRequests.at(-1)?.searchParams.get("ParentId")).toBe("anime-library");
-    expect(libraryRequests.at(-1)?.searchParams.get("IncludeItemTypes")).toBe("Series");
+    expect(libraryRequests.at(-1)?.searchParams.get("ParentId")).toBe("amazing-library");
+    expect(libraryRequests.at(-1)?.searchParams.get("IncludeItemTypes")).toBe("Movie,Series,Video,MusicVideo");
   });

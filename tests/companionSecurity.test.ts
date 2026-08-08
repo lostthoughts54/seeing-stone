@@ -3,8 +3,8 @@ import { CompanionAuthenticationService } from "../src/main/services/companionAu
 import { normalizeCompanionDeviceName } from "../src/main/services/companionCredentialStore";
 import { CompanionPairingService } from "../src/main/services/companionPairing";
 import { assertCompanionRequestContext } from "../src/main/services/companionServer";
-import { newCompanionCommandId } from "../src/companion/api";
-import { assertNoCompanionForbiddenFields, companionPlayerStateSchema } from "../src/shared/companionSchemas";
+import { getLibrary, getLiveTvGuide, newCompanionCommandId } from "../src/companion/api";
+import { assertNoCompanionForbiddenFields, companionCommandEnvelopeSchema, companionPlayerStateSchema } from "../src/shared/companionSchemas";
 
 describe("Companion security boundaries", () => {
   it("creates command UUIDs without secure-context randomUUID", () => {
@@ -12,6 +12,43 @@ describe("Companion security boundaries", () => {
     const second = newCompanionCommandId();
     expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(second).not.toBe(first);
+  });
+
+  it("requests one opaque library page with an allowlisted sort and offset", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ revision: "1", items: [], nextOffset: null }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reference = "a".repeat(32);
+    await getLibrary(reference, "release-date", 30);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/library/${reference}?sort=release-date&offset=30&limit=30`,
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("loads the sanitized guide and accepts only opaque channel references for switching", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ availability: "available", message: null, generatedAtUnixMs: 1, channels: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await getLiveTvGuide();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/live-tv/guide",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(companionCommandEnvelopeSchema.safeParse({
+      sessionEpoch: "a".repeat(32),
+      sequence: 1,
+      commandId: "6f084a65-2a40-41cb-a627-a4ef3ce40bbb",
+      playbackId: null,
+      command: { type: "start-live", channelRef: "b".repeat(32) },
+    }).success).toBe(true);
+    expect(companionCommandEnvelopeSchema.safeParse({
+      sessionEpoch: "a".repeat(32),
+      sequence: 1,
+      commandId: "6f084a65-2a40-41cb-a627-a4ef3ce40bbb",
+      playbackId: null,
+      command: { type: "start-live", channelRef: "channel-1" },
+    }).success).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it("accepts iOS same-origin pairing when Fetch Metadata is omitted", () => {
@@ -99,8 +136,8 @@ describe("Companion security boundaries", () => {
       sequence: session.nextSequence,
       commandId: "73978915-594d-48b8-82e5-d44d5a8ba3ef",
     }, "wrong")).toThrowError(/refresh/i);
-    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v1.${session.webSocketTicket}`)).toBe(true);
-    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v1.${session.webSocketTicket}`)).toBe(false);
+    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v2.${session.webSocketTicket}`)).toBe(true);
+    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v2.${session.webSocketTicket}`)).toBe(false);
   });
 
   it("rejects raw player DTO fields and malformed sanitized output", () => {

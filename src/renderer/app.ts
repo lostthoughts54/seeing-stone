@@ -19,6 +19,8 @@ import type {
   PlaybackTrack,
   SafeSession,
   SessionPanelView,
+  SmartDownloadsState,
+  SmartSeriesSummary,
   SoloSessionDiagnostics,
   WatchPartyViewState,
 } from "../shared/contracts";
@@ -38,9 +40,20 @@ import {
 } from "./playerPresentation";
 
 const TICKS_PER_SECOND = 10000000;
+const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
+const DOWNLOADED_LIBRARY: LibrarySummary = {
+  id: DOWNLOADED_LIBRARY_ID,
+  name: "Downloaded",
+  collectionType: "downloaded",
+};
 type Route = "home" | "library" | "search" | "details" | "watch-parties" | "live-tv";
 type LiveTvTab = "guide" | "recordings" | "scheduled";
-type MediaRow = { title: string; items: MediaItem[]; shape: "poster" | "landscape" };
+type MediaRow = {
+  title: string;
+  items: MediaItem[];
+  shape: "poster" | "landscape";
+  linkEpisodeSeries?: boolean;
+};
 type ImageOptions = { width?: number; height?: number };
 type LibraryFilter = "all" | "unwatched" | "watched" | "downloaded";
 type LibrarySort = "title-ascending" | "title-descending" | "year-descending" | "year-ascending" | "rating-descending";
@@ -68,6 +81,8 @@ const navHomeButton = byId<HTMLButtonElement>("navHomeButton");
 const navLiveTvButton = byId<HTMLButtonElement>("navLiveTvButton");
 const mainLibraryNavigation = byId<HTMLElement>("mainLibraryNavigation");
 const navWatchPartiesButton = byId<HTMLButtonElement>("navWatchPartiesButton");
+const navCompanionButton = byId<HTMLButtonElement>("navCompanionButton");
+const companionNavStatusDot = byId<HTMLElement>("companionNavStatusDot");
 const closeApplicationButton = byId<HTMLButtonElement>("closeApplicationButton");
 const searchInput = byId<HTMLInputElement>("searchInput");
 const profileButton = byId<HTMLButtonElement>("profileButton");
@@ -78,7 +93,6 @@ const serverLabel = byId<HTMLElement>("serverLabel");
 const profileAdapterSelect = byId<HTMLSelectElement>("profileAdapterSelect");
 const profileAdapterStatus = byId<HTMLElement>("profileAdapterStatus");
 const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
-const companionButton = byId<HTMLButtonElement>("companionButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
 
@@ -91,6 +105,9 @@ const watchPartiesView = byId<HTMLElement>("watchPartiesView");
 const liveTvView = byId<HTMLElement>("liveTvView");
 const liveTvStatus = byId<HTMLElement>("liveTvStatus");
 const liveTvContent = byId<HTMLElement>("liveTvContent");
+const liveTvGuideTools = byId<HTMLElement>("liveTvGuideTools");
+const liveTvChannelSearch = byId<HTMLInputElement>("liveTvChannelSearch");
+const liveTvChannelSearchStatus = byId<HTMLElement>("liveTvChannelSearchStatus");
 const refreshLiveTvButton = byId<HTMLButtonElement>("refreshLiveTvButton");
 const liveTvGuideTab = byId<HTMLButtonElement>("liveTvGuideTab");
 const liveTvRecordingsTab = byId<HTMLButtonElement>("liveTvRecordingsTab");
@@ -114,6 +131,13 @@ const homeRows = byId<HTMLElement>("homeRows");
 const libraryTitle = byId<HTMLElement>("libraryTitle");
 const libraryFilter = byId<HTMLSelectElement>("libraryFilter");
 const librarySort = byId<HTMLSelectElement>("librarySort");
+const downloadedLibraryActions = byId<HTMLElement>("downloadedLibraryActions");
+const selectDownloadedButton = byId<HTMLButtonElement>("selectDownloadedButton");
+const selectAllDownloadedButton = byId<HTMLButtonElement>("selectAllDownloadedButton");
+const deleteSelectedDownloadedButton = byId<HTMLButtonElement>("deleteSelectedDownloadedButton");
+const cancelDownloadedSelectionButton = byId<HTMLButtonElement>("cancelDownloadedSelectionButton");
+const downloadedFollowedSeries = byId<HTMLElement>("downloadedFollowedSeries");
+const downloadedFollowedSeriesList = byId<HTMLElement>("downloadedFollowedSeriesList");
 const libraryGrid = byId<HTMLElement>("libraryGrid");
 const searchTitle = byId<HTMLElement>("searchTitle");
 const searchRows = byId<HTMLElement>("searchRows");
@@ -137,6 +161,8 @@ const detailTrailerButton = byId<HTMLButtonElement>("detailTrailerButton");
 const detailWatchedButton = byId<HTMLButtonElement>("detailWatchedButton");
 const detailWatchedLabel = byId<HTMLElement>("detailWatchedLabel");
 const detailSeriesButton = byId<HTMLButtonElement>("detailSeriesButton");
+const detailSmartDownloadsButton = byId<HTMLButtonElement>("detailSmartDownloadsButton");
+const detailSmartDownloadsLabel = byId<HTMLElement>("detailSmartDownloadsLabel");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
 const selectSeasonEpisodes = byId<HTMLInputElement>("selectSeasonEpisodes");
@@ -154,6 +180,7 @@ const playerCenter = byId<HTMLElement>("playerCenter");
 const playerFrame = byId<HTMLElement>("playerFrame");
 const playerViewport = byId<HTMLElement>("playerViewport");
 const nextEpisodeCountdown = byId<HTMLElement>("nextEpisodeCountdown");
+const watchPartyStartCue = byId<HTMLElement>("watchPartyStartCue");
 const nextEpisodeCountdownTitle = byId<HTMLElement>("nextEpisodeCountdownTitle");
 const nextEpisodeCountdownMeta = byId<HTMLElement>("nextEpisodeCountdownMeta");
 const nextEpisodeCountdownLabel = byId<HTMLElement>("nextEpisodeCountdownLabel");
@@ -245,6 +272,12 @@ const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
 const companionScrim = byId<HTMLElement>("companionScrim");
 const companionPanel = byId<HTMLElement>("companionPanel");
 const closeCompanionButton = byId<HTMLButtonElement>("closeCompanionButton");
+const trailerScrim = byId<HTMLElement>("trailerScrim");
+const trailerPanel = byId<HTMLElement>("trailerPanel");
+const trailerTitle = byId<HTMLElement>("trailerTitle");
+const trailerFrame = byId<HTMLIFrameElement>("trailerFrame");
+const closeTrailerButton = byId<HTMLButtonElement>("closeTrailerButton");
+const openTrailerBrowserButton = byId<HTMLButtonElement>("openTrailerBrowserButton");
 const companionNetwork = byId<HTMLSelectElement>("companionNetwork");
 const companionEnabled = byId<HTMLInputElement>("companionEnabled");
 const companionStatus = byId<HTMLElement>("companionStatus");
@@ -263,6 +296,14 @@ const chooseDownloadLocationButton = byId<HTMLButtonElement>("chooseDownloadLoca
 const openDownloadLocationButton = byId<HTMLButtonElement>("openDownloadLocationButton");
 const defaultDownloadLocationButton = byId<HTMLButtonElement>("defaultDownloadLocationButton");
 const downloadsList = byId<HTMLElement>("downloadsList");
+const smartDownloadsList = byId<HTMLElement>("smartDownloadsList");
+const checkSmartDownloadsButton = byId<HTMLButtonElement>("checkSmartDownloadsButton");
+const smartDownloadDialog = byId<HTMLDialogElement>("smartDownloadDialog");
+const smartDownloadDialogTitle = byId<HTMLElement>("smartDownloadDialogTitle");
+const smartDownloadDialogDescription = byId<HTMLElement>("smartDownloadDialogDescription");
+const smartDownloadEpisodeLimit = byId<HTMLSelectElement>("smartDownloadEpisodeLimit");
+const smartUnfollowDialog = byId<HTMLDialogElement>("smartUnfollowDialog");
+const smartUnfollowDialogDescription = byId<HTMLElement>("smartUnfollowDialogDescription");
 const playerFallbackNotice = byId<HTMLElement>("playerFallbackNotice");
 const playerFallbackNoticeMessage = byId<HTMLElement>("playerFallbackNoticeMessage");
 const toast = byId<HTMLElement>("toast");
@@ -282,11 +323,12 @@ interface RendererState {
   searchReturnRoute: Route;
   searchReturnScrollTop: number;
   selectedLibraryId: string | null;
-  libraryType: "Movie" | "Series";
   libraryFilter: LibraryFilter;
   librarySort: LibrarySort;
   libraryCache: Map<string, MediaItem[]>;
   libraryRequestIds: Map<string, number>;
+  downloadedSelectionMode: boolean;
+  selectedDownloadIds: Set<string>;
   detailItem: MediaItem | null;
   detailPlayItem: MediaItem | null;
   detailsRequestId: number;
@@ -313,6 +355,7 @@ interface RendererState {
   downloads: DownloadSummary[];
   offlinePlayable: OfflinePlayableSummary[];
   downloadLocation: DownloadLocationSummary | null;
+  smartDownloads: SmartDownloadsState;
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
   searchRequestId: number;
@@ -324,6 +367,7 @@ interface RendererState {
   liveTvSeriesTimers: LiveTvSeriesTimer[];
   liveTvTab: LiveTvTab;
   liveTvRequestId: number;
+  liveTvChannelQuery: string;
 }
 
 const state: RendererState = {
@@ -341,11 +385,12 @@ const state: RendererState = {
   searchReturnRoute: "home",
   searchReturnScrollTop: 0,
   selectedLibraryId: null,
-  libraryType: "Movie",
   libraryFilter: "all",
   librarySort: "title-ascending",
   libraryCache: new Map(),
   libraryRequestIds: new Map(),
+  downloadedSelectionMode: false,
+  selectedDownloadIds: new Set(),
   detailItem: null,
   detailPlayItem: null,
   detailsRequestId: 0,
@@ -372,6 +417,7 @@ const state: RendererState = {
   downloads: [],
   offlinePlayable: [],
   downloadLocation: null,
+  smartDownloads: { series: [], notice: null },
   lastFocusElement: null,
   searchTimer: null,
   searchRequestId: 0,
@@ -383,6 +429,7 @@ const state: RendererState = {
   liveTvSeriesTimers: [],
   liveTvTab: "guide",
   liveTvRequestId: 0,
+  liveTvChannelQuery: "",
 };
 
 let connectionRetryInFlight = false;
@@ -403,6 +450,7 @@ let playerAdapterPreference: PlaybackAdapterPreference | null = null;
 let visibleCatalogRefreshInFlight = false;
 let visibleCatalogRefreshQueued = false;
 let dismissedPlaybackId: string | null = null;
+let liveTvChannelSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
 const CATALOG_REFRESH_INTERVAL_MS = 60_000;
 
@@ -691,6 +739,22 @@ function watchPartyStateLabel(value: string): string {
   return "Idle";
 }
 
+function watchPartyPreparationLabel(phase: NonNullable<typeof state.watchParties>["preparation"]["phase"]): string {
+  if (phase === "waiting-for-participant") return "Waiting for another participant";
+  if (phase === "preparing") return "Preparing this computer";
+  if (phase === "ready") return "This computer is ready—waiting for everyone";
+  if (phase === "starting") return "Starting…";
+  if (phase === "playing") return "Playing together";
+  if (phase === "error") return "This computer could not prepare playback";
+  return "Watch party joined";
+}
+
+function watchPartyOffsetLabel(offsetMilliseconds: number): string {
+  return offsetMilliseconds === 0
+    ? "In sync"
+    : `${Math.abs(offsetMilliseconds)} ms ${offsetMilliseconds > 0 ? "earlier" : "later"}`;
+}
+
 function renderWatchParties(): void {
   const value = state.watchParties;
   watchPartyList.innerHTML = "";
@@ -818,6 +882,7 @@ function setLiveTvTab(tab: LiveTvTab): void {
   setButtonActive(liveTvGuideTab, tab === "guide");
   setButtonActive(liveTvRecordingsTab, tab === "recordings");
   setButtonActive(liveTvScheduledTab, tab === "scheduled");
+  liveTvGuideTools.classList.toggle("is-hidden", tab !== "guide");
   renderLiveTv();
 }
 
@@ -952,6 +1017,7 @@ function showProgramDetails(program: LiveTvProgram): void {
 function renderLiveTvGuide(): void {
   const guide = state.liveTvGuide;
   if (!guide || guide.status.availability !== "available") {
+    liveTvChannelSearchStatus.textContent = "";
     const empty = document.createElement("section");
     empty.className = "live-tv-empty";
     const title = document.createElement("h2");
@@ -965,6 +1031,28 @@ function renderLiveTvGuide(): void {
   const start = Date.parse(guide.windowStartUtc);
   const end = Date.parse(guide.windowEndUtc);
   const total = end - start;
+  const query = state.liveTvChannelQuery.trim().toLocaleLowerCase();
+  const queryTerms = query.split(/\s+/).filter(Boolean);
+  const matchingChannels = queryTerms.length
+    ? guide.channels.filter((channel) => {
+      const searchable = `${channel.number ?? ""} ${channel.name}`.toLocaleLowerCase();
+      return queryTerms.every((term) => searchable.includes(term));
+    })
+    : guide.channels;
+  const visibleChannels = matchingChannels.slice(0, 300);
+  liveTvChannelSearchStatus.textContent = matchingChannels.length > visibleChannels.length
+    ? `Showing ${visibleChannels.length.toLocaleString()} of ${matchingChannels.length.toLocaleString()} matching channels. Refine your search to see more.`
+    : `${matchingChannels.length.toLocaleString()} ${matchingChannels.length === 1 ? "channel" : "channels"}`;
+  if (!matchingChannels.length) {
+    renderMessage(liveTvContent, `No channels match “${state.liveTvChannelQuery.trim()}”.`);
+    return;
+  }
+  const programsByChannel = new Map<string, LiveTvProgram[]>();
+  for (const program of guide.programs) {
+    const programs = programsByChannel.get(program.channelId);
+    if (programs) programs.push(program);
+    else programsByChannel.set(program.channelId, [program]);
+  }
   const grid = document.createElement("div");
   grid.className = "live-tv-grid";
   const axis = document.createElement("div");
@@ -975,16 +1063,17 @@ function renderLiveTvGuide(): void {
     axis.append(label);
   }
   grid.append(axis);
-  for (const channel of guide.channels) {
+  for (const channel of visibleChannels) {
     const row = document.createElement("section");
     row.className = "live-tv-row";
     const heading = document.createElement("button");
     heading.className = "live-tv-channel";
     heading.textContent = [channel.number, channel.name].filter(Boolean).join(" ");
+    heading.title = [channel.number, channel.name].filter(Boolean).join(" ");
     heading.addEventListener("click", () => { void watchLive(channel.id); });
     const track = document.createElement("div");
     track.className = "live-tv-track";
-    for (const program of guide.programs.filter((entry) => entry.channelId === channel.id)) {
+    for (const program of programsByChannel.get(channel.id) ?? []) {
       const cell = document.createElement("button");
       cell.className = "live-tv-program";
       const left = Math.max(0, (Date.parse(program.startUtc) - start) / total * 100);
@@ -1003,7 +1092,7 @@ function renderLiveTvGuide(): void {
   if (Date.now() >= start && Date.now() <= end) {
     const marker = document.createElement("div");
     marker.className = "live-tv-now-marker";
-    marker.style.left = `calc(11rem + ${(Date.now() - start) / total * 100}% * ((100% - 11rem) / 100%))`;
+    marker.style.left = `calc(var(--live-tv-channel-width) + ${(Date.now() - start) / total * 100}% * ((100% - var(--live-tv-channel-width)) / 100%))`;
     grid.append(marker);
   }
   liveTvContent.append(grid);
@@ -1085,6 +1174,7 @@ function renderLiveTvSchedules(): void {
 
 function renderLiveTv(): void {
   liveTvContent.innerHTML = "";
+  liveTvGuideTools.classList.toggle("is-hidden", state.liveTvTab !== "guide");
   liveTvStatus.textContent = state.liveTvGuide
     ? `Guide updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date())}`
     : "Loading Live TV…";
@@ -1188,6 +1278,21 @@ async function resyncWatchParty(button: HTMLButtonElement): Promise<void> {
   }
 }
 
+async function setWatchPartySyncOffset(offsetMilliseconds: number, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.watchParties = await window.jellyfin.watchParties.setLocalSyncOffset({ offsetMilliseconds });
+    renderWatchParties();
+    if (!playerView.classList.contains("is-hidden")) renderPlayerState(true);
+    showToast(offsetMilliseconds === 0
+      ? "This computer’s timing adjustment was reset."
+      : `This computer will play ${watchPartyOffsetLabel(offsetMilliseconds)}.`);
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "The timing adjustment could not be saved."));
+  }
+}
+
 async function waitForWatchParty(button: HTMLButtonElement): Promise<void> {
   button.disabled = true;
   try {
@@ -1276,39 +1381,64 @@ async function loadLibraries(): Promise<void> {
   renderLibraryNavigation();
 }
 
-function supportedLibraries(): LibrarySummary[] {
-  return state.libraries.filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows");
+function navigationLibraries(): LibrarySummary[] {
+  const serverLibraries = state.libraries.filter((library) => {
+    if (!library.id || !library.name.trim()) return false;
+    const collectionType = library.collectionType?.trim().toLocaleLowerCase() ?? null;
+    return collectionType !== "boxsets" && collectionType !== "livetv";
+  });
+  return state.offlinePlayable.length
+    ? [...serverLibraries, DOWNLOADED_LIBRARY]
+    : serverLibraries;
 }
 
-function libraryItemType(library: LibrarySummary): "Movie" | "Series" {
-  return library.collectionType === "movies" ? "Movie" : "Series";
+function libraryItemType(library: LibrarySummary): "Movie" | "Series" | "Mixed" | null {
+  if (library.collectionType === "movies") return "Movie";
+  if (library.collectionType === "tvshows") return "Series";
+  if (library.collectionType === null || ["mixed", "homevideos", "homevideosandphotos", "musicvideos", "downloaded"].includes(library.collectionType)) {
+    return "Mixed";
+  }
+  return null;
+}
+
+function supportedLibraries(): LibrarySummary[] {
+  return navigationLibraries().filter((library) => libraryItemType(library) !== null);
 }
 
 function createLibraryNavigationButton(library: LibrarySummary, player: boolean): HTMLButtonElement {
   const button = document.createElement("button");
+  const itemType = libraryItemType(library);
   button.type = "button";
-  button.title = library.name;
+  button.title = itemType ? library.name : `${library.name} is not supported by this video client yet`;
   button.dataset.libraryId = library.id;
-  button.innerHTML = library.collectionType === "movies"
+  button.disabled = itemType === null;
+  button.setAttribute("aria-label", itemType ? library.name : `${library.name}, unsupported media library`);
+  button.innerHTML = library.collectionType === "downloaded"
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m-4-4 4 4 4-4"></path><path d="M4 16v4h16v-4"></path></svg>'
+    : library.collectionType === "movies"
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M4 8h16M9 3v5m6-5v5"></path></svg>'
-    : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 2h8"></path></svg>';
+    : library.collectionType === "tvshows"
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M8 2h8"></path></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v11H3z"></path><path d="M3 7V4h7l2 3"></path></svg>';
   const label = document.createElement("span");
   label.textContent = library.name;
   button.append(label);
-  button.addEventListener("click", async () => {
-    if (player) await closePlayer();
-    await openLibrary(library.id);
-  });
+  if (itemType) {
+    button.addEventListener("click", async () => {
+      if (player) await closePlayer();
+      await openLibrary(library.id);
+    });
+  }
   return button;
 }
 
 function renderLibraryNavigation(): void {
+  const navigation = navigationLibraries();
   const libraries = supportedLibraries();
-  mainLibraryNavigation.replaceChildren(...libraries.map((library) => createLibraryNavigationButton(library, false)));
-  playerLibraryNavigation.replaceChildren(...libraries.map((library) => createLibraryNavigationButton(library, true)));
+  mainLibraryNavigation.replaceChildren(...navigation.map((library) => createLibraryNavigationButton(library, false)));
+  playerLibraryNavigation.replaceChildren(...navigation.map((library) => createLibraryNavigationButton(library, true)));
   if (!libraries.some((library) => library.id === state.selectedLibraryId)) {
     state.selectedLibraryId = libraries[0]?.id ?? null;
-    state.libraryType = libraries[0] ? libraryItemType(libraries[0]) : "Movie";
   }
   if (state.currentRoute === "library" && !state.selectedLibraryId) setRoute("home");
   else setRoute(state.currentRoute, { preserveScroll: true });
@@ -1324,8 +1454,18 @@ async function loadHome(requestId = ++state.homeRequestId, showLoading = true): 
   state.resumeItems = payload.resumeItems;
   state.nextUpItems = payload.nextUpItems;
   const rows: MediaRow[] = [];
-  if (state.resumeItems.length) rows.push({ title: "Continue Watching", items: state.resumeItems, shape: "landscape" });
-  if (state.nextUpItems.length) rows.push({ title: "Next Up", items: state.nextUpItems, shape: "landscape" });
+  if (state.resumeItems.length) rows.push({
+    title: "Continue Watching",
+    items: state.resumeItems,
+    shape: "landscape",
+    linkEpisodeSeries: true,
+  });
+  if (state.nextUpItems.length) rows.push({
+    title: "Next Up",
+    items: state.nextUpItems,
+    shape: "landscape",
+    linkEpisodeSeries: true,
+  });
   for (const result of payload.latestRows) {
     if (result.items.length) rows.push({ title: `Recently Added to ${result.library.name}`, items: result.items, shape: "poster" });
   }
@@ -1341,6 +1481,7 @@ async function loadHome(requestId = ++state.homeRequestId, showLoading = true): 
 async function loadInitialData(): Promise<void> {
   const requestId = ++state.homeRequestId;
   showMain();
+  void refreshCompanionNavStatus();
   renderLoadingRows(homeRows);
   const downloadsRequest = refreshDownloads(() => requestId === state.homeRequestId).catch((error) => {
     if (requestId === state.homeRequestId) showToast(errorMessage(error, "Downloads could not be loaded."));
@@ -1486,7 +1627,16 @@ function createMediaRow(
   rail.className = `media-rail ${row.shape}`;
   rail.setAttribute("tabindex", "0");
   rail.setAttribute("aria-label", row.title);
-  for (const item of row.items) rail.append(createMediaCard(item, row.shape, activate, actionLabel, loadArtwork));
+  for (const item of row.items) {
+    rail.append(createMediaCard(
+      item,
+      row.shape,
+      activate,
+      actionLabel,
+      loadArtwork,
+      row.linkEpisodeSeries ? openEpisodeSeriesFromCard : undefined,
+    ));
+  }
 
   previous.className = "rail-arrow previous";
   previous.type = "button";
@@ -1511,6 +1661,7 @@ function createMediaCard(
   activate?: (item: MediaItem) => void,
   actionLabel?: string,
   loadArtwork = true,
+  seriesTitleActivate?: (episode: MediaItem, trigger: HTMLButtonElement) => void,
 ): HTMLElement {
   const shell = document.createElement("span");
   const button = document.createElement("button");
@@ -1521,6 +1672,7 @@ function createMediaCard(
   const title = document.createElement("strong");
   const subtitle = document.createElement("small");
   const localBadge = document.createElement("span");
+  const separateSeriesTitle = item.type === "Episode" && Boolean(item.seriesId && item.seriesName && seriesTitleActivate);
 
   shell.className = `media-card-shell ${shape}`;
   button.type = "button";
@@ -1528,6 +1680,7 @@ function createMediaCard(
   button.dataset.mediaItem = item.id;
   button.title = actionLabel ? `${actionLabel}: ${itemCardTitle(item)}` : itemCardTitle(item);
   if (actionLabel) button.setAttribute("aria-label", `${actionLabel}: ${itemCardTitle(item)}`);
+  else if (separateSeriesTitle) button.setAttribute("aria-label", `Open episode ${item.name}`);
   button.addEventListener("click", () => activate ? activate(item) : openDetails(item));
 
   art.className = "media-art";
@@ -1564,12 +1717,27 @@ function createMediaCard(
     art.append(progress);
   }
 
-  copy.className = "media-copy";
+  copy.className = `media-copy${separateSeriesTitle ? " separate-series-copy" : ""}`;
   title.textContent = itemCardTitle(item);
   subtitle.textContent = itemCardSubtitle(item);
-  copy.append(title, subtitle);
-  button.append(art, copy);
-  shell.append(button);
+  if (separateSeriesTitle) {
+    const seriesButton = document.createElement("button");
+    seriesButton.type = "button";
+    seriesButton.className = "media-card-series-link";
+    seriesButton.dataset.seriesLink = item.seriesId!;
+    seriesButton.title = `Open ${item.seriesName}`;
+    seriesButton.setAttribute("aria-label", `Open series ${item.seriesName}`);
+    seriesButton.append(title);
+    seriesButton.addEventListener("click", () => seriesTitleActivate!(item, seriesButton));
+    copy.append(seriesButton, subtitle);
+    button.classList.add("artwork-only");
+    button.append(art);
+    shell.append(button, copy);
+  } else {
+    copy.append(title, subtitle);
+    button.append(art, copy);
+    shell.append(button);
+  }
   if (!activate && canPlay(item)) {
     const quickPlay = document.createElement("button");
     quickPlay.type = "button";
@@ -1623,7 +1791,7 @@ function renderDetails(item: MediaItem): void {
   detailDownloadButton.onclick = downloadable ? () => startDownload(item) : null;
   detailTrailerButton.disabled = !item.hasTrailer;
   detailTrailerButton.onclick = item.hasTrailer
-    ? () => window.jellyfin.items.openTrailer({ itemId: item.id }).catch((error) => showToast(errorMessage(error, "The trailer could not be opened.")))
+    ? () => { void openTrailer(item.id); }
     : null;
   const watchedCapable = item.type === "Movie" || item.type === "Episode" || item.type === "Video";
   detailWatchedButton.classList.toggle("is-hidden", !watchedCapable);
@@ -1638,8 +1806,102 @@ function renderDetails(item: MediaItem): void {
   detailSeriesButton.onclick = seriesCapable
     ? () => { void openSeriesFromEpisode(item); }
     : null;
+  updateDetailSmartDownloadsButton(item);
   updateDetailPlayButton();
   syncVisibleDownloadButtons();
+}
+
+function smartSeries(seriesId: string): SmartSeriesSummary | null {
+  return state.smartDownloads.series.find((series) => series.seriesId === seriesId) ?? null;
+}
+
+function updateDetailSmartDownloadsButton(item: MediaItem | null = state.detailItem): void {
+  const seriesCapable = item?.type === "Series";
+  detailSmartDownloadsButton.classList.toggle("is-hidden", !seriesCapable);
+  detailSmartDownloadsButton.disabled = !seriesCapable;
+  detailSmartDownloadsButton.onclick = seriesCapable ? () => { void configureSmartDownloads(item); } : null;
+  const followed = seriesCapable ? smartSeries(item.id) : null;
+  detailSmartDownloadsLabel.textContent = followed
+    ? `Smart Downloads: ${followed.episodeLimit}`
+    : "Smart Downloads";
+}
+
+function showDialog(dialog: HTMLDialogElement): Promise<string> {
+  dialog.returnValue = "cancel";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue || "cancel"), { once: true });
+    dialog.showModal();
+  });
+}
+
+async function configureSmartDownloads(series: MediaItem): Promise<void> {
+  const existing = smartSeries(series.id);
+  smartDownloadDialogTitle.textContent = existing ? `Smart Downloads for ${series.name}` : `Follow ${series.name}`;
+  smartDownloadDialogDescription.textContent = "Choose how many upcoming unwatched regular episodes to keep ready.";
+  smartDownloadEpisodeLimit.value = String(existing?.episodeLimit ?? 3);
+  const action = await showDialog(smartDownloadDialog);
+  if (action !== "save") return;
+  const episodeLimit = Number(smartDownloadEpisodeLimit.value);
+  detailSmartDownloadsButton.disabled = true;
+  try {
+    state.smartDownloads = existing
+      ? await window.jellyfin.smartDownloads.setLimit({ seriesId: series.id, episodeLimit })
+      : await window.jellyfin.smartDownloads.follow({ seriesId: series.id, episodeLimit });
+    renderSmartDownloads();
+    updateDetailSmartDownloadsButton(series);
+    showToast(existing ? "Smart Download limit updated." : `${series.name} is now followed for Smart Downloads.`);
+  } catch (error) {
+    showToast(errorMessage(error, "Smart Downloads could not be updated."));
+  } finally {
+    detailSmartDownloadsButton.disabled = false;
+  }
+}
+
+async function openTrailer(itemId: string): Promise<void> {
+  detailTrailerButton.disabled = true;
+  try {
+    const result = await window.jellyfin.items.openTrailer({ itemId });
+    if (!result.opened) showToast("No trailer is available for this title.");
+    else if (result.mode === "external") showToast("This trailer cannot be embedded, so it opened in your browser.");
+    else if (result.embedUrl) {
+      activeTrailerItemId = itemId;
+      trailerLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      trailerTitle.textContent = `${detailTitle.textContent || "Title"} Trailer`;
+      trailerFrame.src = result.embedUrl;
+      trailerScrim.classList.remove("is-hidden");
+      trailerPanel.classList.remove("is-hidden");
+      closeTrailerButton.focus();
+    }
+  } catch (error) {
+    showToast(errorMessage(error, "The trailer could not be opened."));
+  } finally {
+    detailTrailerButton.disabled = false;
+  }
+}
+
+let activeTrailerItemId: string | null = null;
+let trailerLastFocus: HTMLElement | null = null;
+
+function closeTrailer(): void {
+  if (trailerPanel.classList.contains("is-hidden")) return;
+  trailerFrame.removeAttribute("src");
+  trailerScrim.classList.add("is-hidden");
+  trailerPanel.classList.add("is-hidden");
+  activeTrailerItemId = null;
+  trailerLastFocus?.focus();
+  trailerLastFocus = null;
+}
+
+async function openTrailerInBrowser(): Promise<void> {
+  if (!activeTrailerItemId) return;
+  openTrailerBrowserButton.disabled = true;
+  try {
+    await window.jellyfin.items.openTrailer({ itemId: activeTrailerItemId, openExternally: true });
+  } catch (error) {
+    showToast(errorMessage(error, "The trailer could not be opened in your browser."));
+  } finally {
+    openTrailerBrowserButton.disabled = false;
+  }
 }
 
 function applyKnownWatchedState(itemId: string, watched: boolean): void {
@@ -1736,6 +1998,22 @@ async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): P
     if (fullItem.type === "Series") await loadSeriesSeasons(fullItem, requestId, options.preferredSeasonId);
   } catch (error) {
     showToast(errorMessage(error, "Details could not be loaded."));
+  }
+}
+
+async function openEpisodeSeriesFromCard(episode: MediaItem, trigger: HTMLButtonElement): Promise<void> {
+  if (episode.type !== "Episode" || !episode.seriesId) return;
+  trigger.disabled = true;
+  try {
+    const series = await window.jellyfin.items.getDetails({ itemId: episode.seriesId });
+    if (series.type !== "Series") throw new Error("The parent series could not be found.");
+    await openDetails(series, {
+      alreadyLoaded: true,
+      preferredSeasonId: episode.seasonId,
+    });
+  } catch (error) {
+    trigger.disabled = false;
+    showToast(errorMessage(error, "The series could not be opened."));
   }
 }
 
@@ -1956,7 +2234,18 @@ function renderLibraryLoading(): void {
 
 async function refreshLibrary(library: LibrarySummary, showLoading = false): Promise<void> {
   const type = libraryItemType(library);
+  if (!type) return;
   const cachedItems = state.libraryCache.get(library.id);
+  if (library.id === DOWNLOADED_LIBRARY_ID) {
+    const items = state.offlinePlayable.map((entry) => entry.item);
+    state.libraryCache.set(library.id, items);
+    if ((!cachedItems || !mediaItemsEqual(cachedItems, items))
+      && state.currentRoute === "library"
+      && state.selectedLibraryId === library.id) {
+      renderLibraryGrid(items);
+    }
+    return;
+  }
   if (showLoading && !cachedItems) renderLibraryLoading();
   const requestId = (state.libraryRequestIds.get(library.id) || 0) + 1;
   state.libraryRequestIds.set(library.id, requestId);
@@ -1976,10 +2265,17 @@ async function refreshLibrary(library: LibrarySummary, showLoading = false): Pro
 }
 
 async function openLibrary(libraryId: string): Promise<void> {
-  const library = supportedLibraries().find((candidate) => candidate.id === libraryId);
+  const library = navigationLibraries().find((candidate) => candidate.id === libraryId);
   if (!library) return;
+  if (!libraryItemType(library)) {
+    showToast(`${library.name} is not supported by this video client yet.`);
+    return;
+  }
+  if (library.id !== DOWNLOADED_LIBRARY_ID) {
+    state.downloadedSelectionMode = false;
+    state.selectedDownloadIds.clear();
+  }
   state.selectedLibraryId = library.id;
-  state.libraryType = libraryItemType(library);
   libraryTitle.textContent = library.name;
   setRoute("library");
 
@@ -2022,8 +2318,111 @@ function openHome(): void {
   void refreshVisibleCatalog();
 }
 
+function selectableDownloadForItem(itemId: string): DownloadSummary | undefined {
+  return state.downloads.find((download) => download.itemId === itemId
+    && download.state === "downloaded"
+    && download.canDelete);
+}
+
+function updateDownloadedSelectionActions(): void {
+  const localLibrary = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+  downloadedLibraryActions.classList.toggle("is-hidden", !localLibrary);
+  selectDownloadedButton.disabled = !state.downloads.some((download) => download.state === "downloaded" && download.canDelete);
+  selectDownloadedButton.classList.toggle("is-hidden", state.downloadedSelectionMode);
+  selectAllDownloadedButton.classList.toggle("is-hidden", !state.downloadedSelectionMode);
+  deleteSelectedDownloadedButton.classList.toggle("is-hidden", !state.downloadedSelectionMode);
+  cancelDownloadedSelectionButton.classList.toggle("is-hidden", !state.downloadedSelectionMode);
+  const count = state.selectedDownloadIds.size;
+  deleteSelectedDownloadedButton.disabled = count === 0;
+  deleteSelectedDownloadedButton.textContent = count > 0 ? `Delete selected (${count})` : "Delete selected";
+}
+
+function renderDownloadedFollowedSeries(): void {
+  const localLibrary = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+  downloadedFollowedSeries.classList.toggle("is-hidden", !localLibrary);
+  downloadedFollowedSeriesList.replaceChildren();
+  if (!localLibrary) return;
+  if (!state.smartDownloads.series.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No shows are currently followed.";
+    downloadedFollowedSeriesList.append(empty);
+    return;
+  }
+  for (const series of state.smartDownloads.series) {
+    const button = document.createElement("button");
+    const name = document.createElement("strong");
+    const details = document.createElement("span");
+    button.type = "button";
+    button.className = "downloaded-followed-series-card";
+    button.title = `Open ${series.name}`;
+    name.textContent = series.name;
+    details.textContent = `Keep ${series.episodeLimit} · ${smartStatusLabel(series.status)}`;
+    button.append(name, details);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const item = await window.jellyfin.items.getDetails({ itemId: series.seriesId });
+        await openDetails(item, { alreadyLoaded: true });
+      } catch (error) {
+        button.disabled = false;
+        showToast(errorMessage(error, "The followed show could not be opened."));
+      }
+    });
+    downloadedFollowedSeriesList.append(button);
+  }
+}
+
+function renderDownloadedLibraryExtras(): void {
+  updateDownloadedSelectionActions();
+  renderDownloadedFollowedSeries();
+}
+
+function toggleDownloadedSelection(downloadId: string): void {
+  if (state.selectedDownloadIds.has(downloadId)) state.selectedDownloadIds.delete(downloadId);
+  else state.selectedDownloadIds.add(downloadId);
+  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+}
+
+async function deleteSelectedDownloads(): Promise<void> {
+  const selected = state.downloads.filter((download) => state.selectedDownloadIds.has(download.downloadId)
+    && download.state === "downloaded"
+    && download.canDelete);
+  if (!selected.length) return;
+  const smartCount = selected.filter((download) => download.smartManaged).length;
+  const prompt = `Delete ${selected.length} selected ${selected.length === 1 ? "download" : "downloads"}?${smartCount > 0
+    ? " Smart Download episodes will also be skipped so they are not downloaded again."
+    : ""}`;
+  if (!window.confirm(prompt)) return;
+
+  deleteSelectedDownloadedButton.disabled = true;
+  let removed = 0;
+  let failed = 0;
+  for (const download of selected) {
+    try {
+      if (download.smartManaged) {
+        state.smartDownloads = await window.jellyfin.smartDownloads.skip({ downloadId: download.downloadId });
+      } else {
+        await window.jellyfin.downloads.delete({ downloadId: download.downloadId });
+      }
+      state.selectedDownloadIds.delete(download.downloadId);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  state.downloadedSelectionMode = failed > 0 && state.selectedDownloadIds.size > 0;
+  await refreshDownloads().catch(() => undefined);
+  if (state.currentRoute === "library" && state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) {
+    renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+  }
+  if (failed > 0) showToast(`${removed} removed. ${failed} could not be deleted.`);
+  else showToast(`${removed} ${removed === 1 ? "download" : "downloads"} deleted.`);
+}
+
 function renderLibraryGrid(items: MediaItem[]): void {
   libraryGrid.innerHTML = "";
+  renderDownloadedLibraryExtras();
   const filtered = items.filter((item) => {
     if (state.libraryFilter === "watched") return item.userData.played;
     if (state.libraryFilter === "unwatched") return !item.userData.played;
@@ -2048,7 +2447,37 @@ function renderLibraryGrid(items: MediaItem[]): void {
     libraryGrid.append(empty);
     return;
   }
-  for (const item of filtered) libraryGrid.append(createMediaCard(item, "poster"));
+  const localOnly = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+  for (const item of filtered) {
+    const download = localOnly ? selectableDownloadForItem(item.id) : undefined;
+    const card = createMediaCard(
+      item,
+      "poster",
+      localOnly
+        ? (selected) => {
+          if (state.downloadedSelectionMode && download) toggleDownloadedSelection(download.downloadId);
+          else if (!state.downloadedSelectionMode) void openDetails(selected, { alreadyLoaded: true });
+        }
+        : undefined,
+    );
+    if (localOnly && state.downloadedSelectionMode) {
+      const selector = document.createElement("label");
+      const checkbox = document.createElement("input");
+      selector.className = "download-selection-checkbox";
+      checkbox.type = "checkbox";
+      checkbox.checked = Boolean(download && state.selectedDownloadIds.has(download.downloadId));
+      checkbox.disabled = !download;
+      checkbox.dataset.downloadSelect = download?.downloadId ?? "";
+      checkbox.setAttribute("aria-label", download ? `Select ${itemCardTitle(item)}` : `${itemCardTitle(item)} cannot be deleted`);
+      checkbox.addEventListener("change", () => {
+        if (download) toggleDownloadedSelection(download.downloadId);
+      });
+      selector.append(checkbox);
+      card.classList.toggle("is-download-selected", checkbox.checked);
+      card.append(selector);
+    }
+    libraryGrid.append(card);
+  }
 }
 
 async function runSearch(query: string): Promise<void> {
@@ -2132,6 +2561,7 @@ function openDownloads(): void {
   downloadsScrim.classList.remove("is-hidden");
   downloadsPanel.classList.remove("is-hidden");
   void refreshDownloadLocation().catch((error) => showToast(errorMessage(error, "The download location could not be loaded.")));
+  void refreshDownloads().catch((error) => showToast(errorMessage(error, "Downloads could not be refreshed.")));
   closeDownloadsButton.focus();
 }
 
@@ -2141,6 +2571,7 @@ function closeDownloads(): void {
 }
 
 function renderCompanion(status: CompanionSettingsState): void {
+  renderCompanionNavStatus(status);
   companionEnabled.checked = status.enabled;
   companionStatus.textContent = status.message
     ? `${status.runtimeState}: ${status.message}`
@@ -2210,6 +2641,23 @@ function renderCompanion(status: CompanionSettingsState): void {
   }
 }
 
+function renderCompanionNavStatus(status: CompanionSettingsState): void {
+  const connected = status.connectedDevices > 0;
+  const presentation = connected
+    ? { state: "is-connected", label: `${status.connectedDevices} connected` }
+    : status.enabled
+      ? { state: "is-ready", label: status.runtimeState === "listening" ? "Ready" : "Needs attention" }
+      : { state: "is-off", label: "Off" };
+  companionNavStatusDot.className = `companion-nav-status ${presentation.state}`;
+  navCompanionButton.title = `Phone Remote · ${presentation.label}`;
+  navCompanionButton.setAttribute("aria-label", `Phone Remote, ${presentation.label.toLowerCase()}`);
+}
+
+async function refreshCompanionNavStatus(): Promise<void> {
+  try { renderCompanionNavStatus(await window.jellyfin.companion.getStatus()); }
+  catch { /* The gray default remains when Companion settings are unavailable. */ }
+}
+
 function updateCompanionPairingCountdown(): void {
   if (!companionPairingExpiresAt) return;
   const seconds = Math.max(0, Math.ceil((companionPairingExpiresAt - Date.now()) / 1000));
@@ -2234,15 +2682,157 @@ function closeCompanion(): void {
 }
 
 async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
-  const [downloads, offlinePlayable] = await Promise.all([
+  const [downloads, offlinePlayable, smartDownloads] = await Promise.all([
     window.jellyfin.downloads.list(),
     window.jellyfin.downloads.listOfflinePlayable(),
+    window.jellyfin.smartDownloads.getState(),
   ]);
   if (!isCurrent()) return;
   state.downloads = downloads;
   state.offlinePlayable = offlinePlayable;
+  state.smartDownloads = smartDownloads;
+  syncDownloadedLibrary();
   renderDownloads();
+  renderSmartDownloads();
+  updateDetailSmartDownloadsButton();
   syncVisibleDownloadButtons();
+}
+
+function syncDownloadedLibrary(): void {
+  const previousItems = state.libraryCache.get(DOWNLOADED_LIBRARY_ID);
+  const items = state.offlinePlayable.map((entry) => entry.item);
+  const changed = previousItems
+    ? !mediaItemsEqual(previousItems, items)
+    : items.length > 0;
+  const wasSelected = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+
+  if (items.length) state.libraryCache.set(DOWNLOADED_LIBRARY_ID, items);
+  else state.libraryCache.delete(DOWNLOADED_LIBRARY_ID);
+
+  if (!changed && Boolean(previousItems?.length) === Boolean(items.length)) return;
+  renderLibraryNavigation();
+  if (!wasSelected || state.currentRoute !== "library") return;
+  if (items.length) {
+    state.selectedLibraryId = DOWNLOADED_LIBRARY_ID;
+    libraryTitle.textContent = DOWNLOADED_LIBRARY.name;
+    renderLibraryGrid(items);
+    setRoute("library", { preserveScroll: true });
+    return;
+  }
+  const fallback = supportedLibraries()[0];
+  if (fallback) void openLibrary(fallback.id);
+  else openHome();
+}
+
+function smartStatusLabel(status: SmartSeriesSummary["status"]): string {
+  if (status === "checking") return "Checking";
+  if (status === "offline") return "Offline";
+  if (status === "attention") return "Needs attention";
+  return "Ready";
+}
+
+function renderSmartDownloads(): void {
+  smartDownloadsList.replaceChildren();
+  if (!state.smartDownloads.series.length) {
+    const empty = document.createElement("p");
+    empty.className = "downloads-note";
+    empty.textContent = "Follow a series from its details page to keep upcoming episodes ready.";
+    smartDownloadsList.append(empty);
+    checkSmartDownloadsButton.disabled = true;
+    return;
+  }
+  checkSmartDownloadsButton.disabled = state.smartDownloads.series.some((series) => series.status === "checking");
+  for (const series of state.smartDownloads.series) {
+    const card = document.createElement("article");
+    const heading = document.createElement("header");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    const status = document.createElement("small");
+    const controls = document.createElement("div");
+    const limitLabel = document.createElement("label");
+    const limit = document.createElement("select");
+    const unfollow = document.createElement("button");
+    card.className = "smart-series-card";
+    title.textContent = series.name;
+    status.textContent = smartStatusLabel(series.status);
+    copy.append(title, status);
+    heading.append(copy);
+    controls.className = "smart-series-controls";
+    for (let value = 1; value <= 5; value += 1) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = String(value);
+      limit.append(option);
+    }
+    limit.value = String(series.episodeLimit);
+    limit.setAttribute("aria-label", `Episodes to keep for ${series.name}`);
+    limit.addEventListener("change", () => { void changeSmartDownloadLimit(series, limit); });
+    limitLabel.append(document.createTextNode("Keep"), limit, document.createTextNode("episodes"));
+    unfollow.type = "button";
+    unfollow.textContent = "Unfollow";
+    unfollow.addEventListener("click", () => { void unfollowSmartSeries(series, unfollow); });
+    controls.append(limitLabel, unfollow);
+    card.append(heading);
+    if (series.lastSuccessfulCheck !== null) {
+      const checked = document.createElement("small");
+      checked.textContent = `Last checked ${new Date(series.lastSuccessfulCheck).toLocaleString()}`;
+      card.append(checked);
+    }
+    if (series.error) {
+      const error = document.createElement("p");
+      error.className = "smart-series-error";
+      error.textContent = series.error.message;
+      card.append(error);
+    }
+    card.append(controls);
+    smartDownloadsList.append(card);
+  }
+}
+
+async function changeSmartDownloadLimit(series: SmartSeriesSummary, select: HTMLSelectElement): Promise<void> {
+  select.disabled = true;
+  try {
+    state.smartDownloads = await window.jellyfin.smartDownloads.setLimit({
+      seriesId: series.seriesId,
+      episodeLimit: Number(select.value),
+    });
+    renderSmartDownloads();
+    updateDetailSmartDownloadsButton();
+  } catch (error) {
+    select.value = String(series.episodeLimit);
+    select.disabled = false;
+    showToast(errorMessage(error, "The Smart Download limit could not be changed."));
+  }
+}
+
+async function unfollowSmartSeries(series: SmartSeriesSummary, button: HTMLButtonElement): Promise<void> {
+  smartUnfollowDialogDescription.textContent = `Choose what happens to existing ${series.name} copies.`;
+  const disposition = await showDialog(smartUnfollowDialog);
+  if (disposition !== "keep" && disposition !== "remove") return;
+  button.disabled = true;
+  try {
+    const result = await window.jellyfin.smartDownloads.unfollow({ seriesId: series.seriesId, disposition });
+    state.smartDownloads = result.state;
+    await refreshDownloads();
+    updateDetailSmartDownloadsButton();
+    showToast(result.warning ?? `${series.name} is no longer followed.`);
+  } catch (error) {
+    button.disabled = false;
+    showToast(errorMessage(error, "The series could not be unfollowed."));
+  }
+}
+
+async function checkSmartDownloads(): Promise<void> {
+  checkSmartDownloadsButton.disabled = true;
+  try {
+    state.smartDownloads = await window.jellyfin.smartDownloads.checkNow();
+    renderSmartDownloads();
+    if (!state.smartDownloads.notice) showToast("Smart Downloads are up to date.");
+  } catch (error) {
+    showToast(errorMessage(error, "Smart Downloads could not be checked."));
+  } finally {
+    renderSmartDownloads();
+  }
 }
 
 function renderDownloadLocation(): void {
@@ -2324,6 +2914,16 @@ async function performDownloadAction(download: DownloadSummary, action: "pause" 
   }
 }
 
+async function skipSmartDownload(download: DownloadSummary): Promise<void> {
+  try {
+    state.smartDownloads = await window.jellyfin.smartDownloads.skip({ downloadId: download.downloadId });
+    await refreshDownloads();
+    showToast(`${download.name} will be skipped by Smart Downloads.`);
+  } catch (error) {
+    showToast(errorMessage(error, "The Smart Download could not be skipped."));
+  }
+}
+
 function renderDownloads(): void {
   downloadsList.replaceChildren();
   if (!state.downloads.length) {
@@ -2345,7 +2945,8 @@ function renderDownloads(): void {
     card.className = "download-card";
     heading.className = "download-card-heading";
     title.textContent = download.name;
-    type.textContent = download.itemType;
+    type.textContent = download.smartManaged ? `${download.itemType} · Smart download` : download.itemType;
+    type.classList.toggle("smart-download-badge", download.smartManaged);
     status.className = "download-status";
     status.textContent = download.state;
     copy.append(title, type);
@@ -2373,12 +2974,41 @@ function renderDownloads(): void {
     }
 
     controls.className = "download-controls";
-    if (download.state === "downloaded") {
+    const progressiveAttemptAvailable = (download.state === "downloading" || download.state === "paused")
+      && download.expectedSize !== null
+      && download.expectedSize > 0;
+    if (download.state === "downloaded" || progressiveAttemptAvailable) {
       const play = document.createElement("button");
       play.type = "button";
       play.className = "primary";
-      play.textContent = "Play";
+      play.textContent = download.state === "downloaded" ? "Play" : "Watch now";
       play.addEventListener("click", () => { void playDownloadedItem(download); });
+      controls.append(play);
+      if (download.state !== "downloaded") {
+        const availability = document.createElement("p");
+        availability.className = "download-availability";
+        availability.textContent = download.state === "paused"
+          ? "Watch now checks the current buffer. Resume the download if more video is needed."
+          : "Watch now checks whether enough video has buffered.";
+        card.append(availability);
+      }
+    } else if (["queued", "downloading", "paused", "failed"].includes(download.state)) {
+      const play = document.createElement("button");
+      const availability = document.createElement("p");
+      const explanation = download.state === "failed"
+        ? "Retry the download before watching the partial copy."
+        : download.expectedSize === null
+          ? "Watch while downloading is unavailable because the total file size is unknown."
+          : download.state === "queued"
+            ? "Watch now becomes available after the download starts and buffers enough video."
+            : "Buffering enough video to enable Watch now.";
+      play.type = "button";
+      play.disabled = true;
+      play.textContent = "Watch now";
+      play.title = explanation;
+      availability.className = "download-availability";
+      availability.textContent = explanation;
+      card.append(availability);
       controls.append(play);
     }
     const action = (label: string, kind: "pause" | "resume" | "retry" | "cancel" | "delete"): void => {
@@ -2391,8 +3021,16 @@ function renderDownloads(): void {
     if (download.canPause) action("Pause", "pause");
     if (download.canResume) action("Resume", "resume");
     if (download.canRetry) action("Retry", "retry");
-    if (download.canCancel) action("Cancel", "cancel");
-    if (download.canDelete) action("Delete copy", "delete");
+    if (download.smartManaged && (download.canCancel || download.canDelete)) {
+      const skip = document.createElement("button");
+      skip.type = "button";
+      skip.textContent = download.canDelete ? "Remove & skip" : "Skip episode";
+      skip.addEventListener("click", () => { void skipSmartDownload(download); });
+      controls.append(skip);
+    } else {
+      if (download.canCancel) action("Cancel", "cancel");
+      if (download.canDelete) action("Delete copy", "delete");
+    }
 
     const keep = document.createElement("label");
     const checkbox = document.createElement("input");
@@ -2425,6 +3063,7 @@ interface PlaybackPresentation {
   meta: string;
   failureMessage: string;
   liveChannelId?: string;
+  progressiveOnly?: boolean;
 }
 
 let playerViewportRevision = 0;
@@ -2830,6 +3469,14 @@ function renderPlayerState(forceStructure = false): void {
   const sourceKind = playbackSourceKind();
   const connection = connectionStatePresentation(state.soloDiagnostics?.connection.state || "unknown");
   const joinedParty = state.watchParties?.joinedGroup || null;
+  const preparation = state.watchParties?.preparation;
+  const showPreparation = Boolean(
+    joinedParty
+    && preparation
+    && ["waiting-for-participant", "preparing", "ready", "starting", "error"].includes(preparation.phase),
+  );
+  watchPartyStartCue.classList.toggle("is-hidden", !showPreparation);
+  if (showPreparation && preparation) watchPartyStartCue.textContent = watchPartyPreparationLabel(preparation.phase);
 
   playerPhaseLabel.textContent = replayAvailable ? `${phase.label} — Replay available` : phase.label;
   setTone(playerFrameStatus, phase.tone);
@@ -2845,8 +3492,14 @@ function renderPlayerState(forceStructure = false): void {
 
   const positionTicks = playback?.positionTicks || 0;
   const durationTicks = playback?.durationTicks || 0;
+  const seekableUntilTicks = playback?.seekableUntilTicks ?? durationTicks;
+  const seekablePercent = durationTicks > 0 ? Math.max(0, Math.min(100, seekableUntilTicks / durationTicks * 100)) : 0;
   if (playerTimeline.dataset.scrubbing !== "true") playerTimeline.value = String(safeTimelineValue(positionTicks, durationTicks));
   playerTimeline.disabled = !playback?.seekable || durationTicks <= 0;
+  playerTimeline.style.setProperty("--seekable-percent", `${seekablePercent}%`);
+  playerTimeline.setAttribute("aria-valuetext", playback?.seekableUntilTicks === null || playback?.seekableUntilTicks === undefined
+    ? formatPlaybackTime(positionTicks)
+    : `${formatPlaybackTime(positionTicks)}; available through ${formatPlaybackTime(seekableUntilTicks)}`);
   playerTimeline.closest(".player-timeline-row")?.classList.toggle("is-hidden", livePlayback);
   playerLiveControls.classList.toggle("is-hidden", !livePlayback);
   document.querySelector(".player-rate-control")?.classList.toggle("is-hidden", livePlayback);
@@ -2862,7 +3515,8 @@ function renderPlayerState(forceStructure = false): void {
   playerPlayPauseButton.disabled = !replayAvailable
     && (!state.playbackId || !playback || ["resolving", "loading", "ended", "stopped", "error", "disconnected"].includes(playback.phase));
   playerBack10Button.disabled = !state.playbackId || !playback?.seekable;
-  playerForward10Button.disabled = !state.playbackId || !playback?.seekable;
+  playerForward10Button.disabled = !state.playbackId || !playback?.seekable
+    || (playback.seekableUntilTicks !== null && playback.positionTicks + 10 * TICKS_PER_SECOND > playback.seekableUntilTicks);
   playerBack10Button.classList.toggle("is-hidden", livePlayback);
   playerForward10Button.classList.toggle("is-hidden", livePlayback);
 
@@ -3056,6 +3710,38 @@ function renderWatchpartySessionPanel(): void {
     ...(value.sync.localDriftTicks !== null ? [{ label: "Local drift", value: `${Math.round(value.sync.localDriftTicks / 10_000)} ms` }] : []),
   ]);
   appendSessionSection("Participants", group.participants.map((name) => ({ label: name, value: "Jellyfin member" })));
+  const timing = document.createElement("section");
+  const timingTitle = document.createElement("h3");
+  const timingState = document.createElement("p");
+  const timingValue = document.createElement("strong");
+  const timingHelp = document.createElement("p");
+  const timingActions = document.createElement("div");
+  const earlier = document.createElement("button");
+  const later = document.createElement("button");
+  const reset = document.createElement("button");
+  const offset = value.preparation.localSyncOffsetMilliseconds;
+  timing.className = "session-sync-adjustment";
+  timingTitle.textContent = "This computer’s timing";
+  timingState.textContent = watchPartyPreparationLabel(value.preparation.phase);
+  timingState.setAttribute("role", "status");
+  timingValue.textContent = watchPartyOffsetLabel(offset);
+  timingHelp.textContent = "If this computer sounds late, choose Earlier.";
+  earlier.textContent = "Earlier 100 ms";
+  earlier.disabled = offset >= 2000;
+  earlier.dataset.sessionAction = "sync-earlier";
+  earlier.addEventListener("click", () => { void setWatchPartySyncOffset(Math.min(2000, offset + 100), earlier); });
+  later.textContent = "Later 100 ms";
+  later.disabled = offset <= -2000;
+  later.dataset.sessionAction = "sync-later";
+  later.addEventListener("click", () => { void setWatchPartySyncOffset(Math.max(-2000, offset - 100), later); });
+  reset.textContent = "Reset";
+  reset.disabled = offset === 0;
+  reset.dataset.sessionAction = "sync-reset";
+  reset.addEventListener("click", () => { void setWatchPartySyncOffset(0, reset); });
+  timingActions.className = "session-sync-actions";
+  timingActions.append(earlier, later, reset);
+  timing.append(timingTitle, timingState, timingValue, timingHelp, timingActions);
+  sessionPanelContent.append(timing);
   if (value.telemetry.availability === "available" && value.telemetry.participants.length > 0) {
     // Keep server-verified sessions separate from Jellyfin's display-name-only
     // group list; names are not stable identifiers and may be duplicated.
@@ -3380,7 +4066,8 @@ async function togglePlayerPaused(): Promise<void> {
 async function seekPlayerBy(seconds: number): Promise<void> {
   const playback = playbackForPlayer();
   if (!state.playbackId || !playback?.seekable) return;
-  const positionTicks = Math.max(0, Math.min(playback.durationTicks || Number.MAX_SAFE_INTEGER, playback.positionTicks + seconds * TICKS_PER_SECOND));
+  const maximum = playback.seekableUntilTicks ?? (playback.durationTicks || Number.MAX_SAFE_INTEGER);
+  const positionTicks = Math.max(0, Math.min(maximum, playback.positionTicks + seconds * TICKS_PER_SECOND));
   await applyPlaybackCommand(
     () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks }),
     "Playback could not be seeked.",
@@ -3424,6 +4111,7 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
       : await window.jellyfin.playback.start({
         itemId: presentation.itemId,
         resumeMode: presentation.resumeMode,
+        ...(presentation.progressiveOnly ? { progressiveOnly: true } : {}),
       });
     await refreshPlayerAdapterPreference();
   } catch (error) {
@@ -3440,7 +4128,8 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   state.playbackId = resolved.playbackId;
   state.playbackSource = resolved.source;
   state.playbackSourceKind = resolved.sourceKind;
-  state.playbackState = await window.jellyfin.playback.getState().catch(() => null);
+    state.playbackState = await window.jellyfin.playback.getState().catch(() => null);
+  if (resolved.notice) showToast(resolved.notice);
   renderPlayerState();
   void refreshSoloDiagnostics(true);
   playerPlayPauseButton.focus();
@@ -3508,14 +4197,38 @@ async function presentExternallyStartedPlayback(playback: PlaybackState): Promis
 }
 
 async function playDownloadedItem(download: DownloadSummary): Promise<void> {
-  if (download.state !== "downloaded") return;
+  let selected = download;
+  if (selected.state !== "downloaded") {
+    try {
+      const downloads = await window.jellyfin.downloads.list();
+      state.downloads = downloads;
+      renderDownloads();
+      syncVisibleDownloadButtons();
+      selected = downloads.find((entry) => entry.downloadId === download.downloadId) ?? selected;
+    } catch (error) {
+      showToast(errorMessage(error, "Download readiness could not be checked."));
+      return;
+    }
+    if (selected.state !== "downloaded" && !selected.canWatchWhileDownloading) {
+      showToast(selected.state === "paused"
+        ? "Still buffering. Resume the download, then try Watch now again shortly."
+        : selected.state === "failed"
+          ? "Retry the download before watching the partial copy."
+          : "Still buffering. Try Watch now again shortly.");
+      return;
+    }
+  }
+  const progressiveOnly = selected.state !== "downloaded";
   await startPresentedPlayback({
-    item: download.item,
-    itemId: download.itemId,
+    item: selected.item,
+    itemId: selected.itemId,
     resumeMode: "resume",
-    title: download.name,
-    meta: `${download.itemType} - Downloaded`,
-    failureMessage: "The downloaded media could not be played.",
+    title: selected.name,
+    meta: `${selected.itemType} - ${selected.state === "downloaded" ? "Downloaded" : "Downloading"}`,
+    failureMessage: selected.state === "downloaded"
+      ? "The downloaded media could not be played."
+      : "The partial download could not be played.",
+    progressiveOnly,
   });
 }
 
@@ -3791,6 +4504,8 @@ function closeCleanMachineDiagnostics(): void {
 }
 
 function resetSignedInState(): void {
+  if (smartDownloadDialog.open) smartDownloadDialog.close("cancel");
+  if (smartUnfollowDialog.open) smartUnfollowDialog.close("cancel");
   if (state.searchTimer) clearTimeout(state.searchTimer);
   if (state.toastTimer) clearTimeout(state.toastTimer);
   state.searchTimer = null;
@@ -3816,16 +4531,20 @@ function resetSignedInState(): void {
   state.searchReturnRoute = "home";
   state.searchReturnScrollTop = 0;
   state.selectedLibraryId = null;
-  state.libraryType = "Movie";
   state.libraryFilter = "all";
   state.librarySort = "title-ascending";
   state.libraryCache.clear();
   state.libraryRequestIds.clear();
+  state.downloadedSelectionMode = false;
+  state.selectedDownloadIds.clear();
   state.detailItem = null;
   state.detailPlayItem = null;
   detailSeriesButton.classList.add("is-hidden");
   detailSeriesButton.disabled = true;
   detailSeriesButton.onclick = null;
+  detailSmartDownloadsButton.classList.add("is-hidden");
+  detailSmartDownloadsButton.disabled = true;
+  detailSmartDownloadsButton.onclick = null;
   state.seasons = [];
   state.episodes = [];
   state.selectedEpisodeIds.clear();
@@ -3848,6 +4567,7 @@ function resetSignedInState(): void {
   state.watchParties = null;
   state.downloads = [];
   state.offlinePlayable = [];
+  state.smartDownloads = { series: [], notice: null };
 
   clearImage(featureImage);
   clearImage(detailBackdrop);
@@ -3859,6 +4579,7 @@ function resetSignedInState(): void {
   libraryGrid.replaceChildren();
   searchRows.replaceChildren();
   episodeList.replaceChildren();
+  smartDownloadsList.replaceChildren();
   seasonSelect.replaceChildren();
   seasonSelect.disabled = true;
   selectSeasonEpisodes.checked = false;
@@ -3928,6 +4649,7 @@ function resetSignedInState(): void {
   watchPartyStatus.textContent = "";
   watchPartyNameInput.value = "";
   closeDownloads();
+  closeTrailer();
   closeLicenses();
   closeCleanMachineDiagnostics();
   setRoute("home");
@@ -3980,6 +4702,7 @@ brandHomeButton.addEventListener("click", openHome);
 navHomeButton.addEventListener("click", openHome);
 navLiveTvButton.addEventListener("click", () => { void openLiveTv(); });
 navWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
+navCompanionButton.addEventListener("click", () => { void openCompanion(); });
 closeApplicationButton.addEventListener("click", () => {
   closeApplicationButton.disabled = true;
   void window.jellyfin.application.close().catch((error) => {
@@ -3995,6 +4718,23 @@ librarySort.addEventListener("change", () => {
   state.librarySort = librarySort.value as LibrarySort;
   renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
 });
+selectDownloadedButton.addEventListener("click", () => {
+  state.downloadedSelectionMode = true;
+  state.selectedDownloadIds.clear();
+  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+});
+selectAllDownloadedButton.addEventListener("click", () => {
+  for (const checkbox of libraryGrid.querySelectorAll<HTMLInputElement>("[data-download-select]")) {
+    if (!checkbox.disabled && checkbox.dataset.downloadSelect) state.selectedDownloadIds.add(checkbox.dataset.downloadSelect);
+  }
+  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+});
+cancelDownloadedSelectionButton.addEventListener("click", () => {
+  state.downloadedSelectionMode = false;
+  state.selectedDownloadIds.clear();
+  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+});
+deleteSelectedDownloadedButton.addEventListener("click", () => { void deleteSelectedDownloads(); });
 detailsBackButton.addEventListener("click", returnFromDetails);
 seasonSelect.addEventListener("change", () => {
   if (state.detailItem?.type === "Series") loadEpisodes(state.detailItem.id, seasonSelect.value);
@@ -4030,6 +4770,14 @@ liveTvGuideTab.addEventListener("click", () => setLiveTvTab("guide"));
 liveTvRecordingsTab.addEventListener("click", () => setLiveTvTab("recordings"));
 liveTvScheduledTab.addEventListener("click", () => setLiveTvTab("scheduled"));
 refreshLiveTvButton.addEventListener("click", () => { void refreshLiveTv(); });
+liveTvChannelSearch.addEventListener("input", () => {
+  state.liveTvChannelQuery = liveTvChannelSearch.value;
+  if (liveTvChannelSearchTimer) clearTimeout(liveTvChannelSearchTimer);
+  liveTvChannelSearchTimer = setTimeout(() => {
+    liveTvChannelSearchTimer = null;
+    if (state.liveTvTab === "guide") renderLiveTv();
+  }, 120);
+});
 playerPreviousChannelButton.addEventListener("click", () => { void changeLiveChannel(-1); });
 playerNextChannelButton.addEventListener("click", () => { void changeLiveChannel(1); });
 playerGoLiveButton.addEventListener("click", () => {
@@ -4080,11 +4828,14 @@ document.addEventListener("visibilitychange", () => {
 });
 
 downloadsButton.addEventListener("click", () => openDownloads());
+checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });
 closeDownloadsButton.addEventListener("click", closeDownloads);
 downloadsScrim.addEventListener("click", closeDownloads);
-companionButton.addEventListener("click", () => { void openCompanion(); });
 closeCompanionButton.addEventListener("click", closeCompanion);
 companionScrim.addEventListener("click", closeCompanion);
+closeTrailerButton.addEventListener("click", closeTrailer);
+trailerScrim.addEventListener("click", closeTrailer);
+openTrailerBrowserButton.addEventListener("click", () => { void openTrailerInBrowser(); });
 companionNetwork.addEventListener("change", () => {
   if (!companionNetwork.value) return;
   void window.jellyfin.companion.selectNetwork({ networkId: companionNetwork.value })
@@ -4173,13 +4924,20 @@ playerTimeline.addEventListener("input", () => {
   const playback = playbackForPlayer();
   if (!playback) return;
   playerTimeline.dataset.scrubbing = "true";
-  playerCurrentTime.textContent = formatPlaybackTime(timelineTicks(Number(playerTimeline.value), playback.durationTicks));
+  const maximum = playback.seekableUntilTicks ?? playback.durationTicks;
+  const requested = timelineTicks(Number(playerTimeline.value), playback.durationTicks);
+  const position = Math.min(maximum, requested);
+  if (position !== requested) playerTimeline.value = String(safeTimelineValue(position, playback.durationTicks));
+  playerCurrentTime.textContent = formatPlaybackTime(position);
 });
 playerTimeline.addEventListener("change", () => {
   const playback = playbackForPlayer();
   delete playerTimeline.dataset.scrubbing;
   if (!state.playbackId || !playback?.seekable) return;
-  const positionTicks = timelineTicks(Number(playerTimeline.value), playback.durationTicks);
+  const positionTicks = Math.min(
+    playback.seekableUntilTicks ?? playback.durationTicks,
+    timelineTicks(Number(playerTimeline.value), playback.durationTicks),
+  );
   void applyPlaybackCommand(
     () => window.jellyfin.playback.seek({ playbackId: state.playbackId as string, positionTicks }),
     "Playback could not be seeked.",
@@ -4377,6 +5135,12 @@ for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-playe
 }
 
 document.addEventListener("keydown", (event) => {
+  if (smartDownloadDialog.open || smartUnfollowDialog.open) return;
+  if (!trailerPanel.classList.contains("is-hidden") && event.key === "Escape") {
+    event.preventDefault();
+    closeTrailer();
+    return;
+  }
   if (!cleanMachineDiagnosticsPanel.classList.contains("is-hidden")) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -4470,10 +5234,22 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.jellyfin.downloads.subscribe((downloads) => {
+  const completedBefore = new Set(state.downloads
+    .filter((download) => download.state === "downloaded")
+    .map((download) => download.itemId));
+  const completedAfter = new Set(downloads
+    .filter((download) => download.state === "downloaded")
+    .map((download) => download.itemId));
+  const completedMembershipChanged = completedBefore.size !== completedAfter.size
+    || [...completedBefore].some((itemId) => !completedAfter.has(itemId));
   state.downloads = downloads;
   renderDownloads();
   syncVisibleDownloadButtons();
-  if (state.currentRoute === "library") {
+  updateDownloadedSelectionActions();
+  if (state.currentRoute === "library"
+    && state.selectedLibraryId !== DOWNLOADED_LIBRARY_ID
+    && state.libraryFilter === "downloaded"
+    && completedMembershipChanged) {
     renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
   }
   if (offlinePlayableRefreshTimer) clearTimeout(offlinePlayableRefreshTimer);
@@ -4481,8 +5257,17 @@ window.jellyfin.downloads.subscribe((downloads) => {
     offlinePlayableRefreshTimer = null;
     void window.jellyfin.downloads.listOfflinePlayable().then((items) => {
       state.offlinePlayable = items;
+      syncDownloadedLibrary();
     }).catch(() => undefined);
   }, 500);
+});
+
+window.jellyfin.smartDownloads.subscribe((smartDownloads) => {
+  state.smartDownloads = smartDownloads;
+  renderSmartDownloads();
+  renderDownloadedFollowedSeries();
+  updateDetailSmartDownloadsButton();
+  if (smartDownloads.notice) showToast(smartDownloads.notice);
 });
 
 window.jellyfin.watchParties.subscribe((watchParties) => {
@@ -4492,6 +5277,7 @@ window.jellyfin.watchParties.subscribe((watchParties) => {
 });
 
 window.jellyfin.companion.subscribe((status) => {
+  renderCompanionNavStatus(status);
   if (!companionPanel.classList.contains("is-hidden")) renderCompanion(status);
 });
 

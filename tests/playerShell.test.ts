@@ -10,11 +10,14 @@ describe("Seeing Stone player shell", () => {
     for (const id of [
       "navLiveTvButton", "mobileLiveTvButton", "liveTvView", "liveTvGuideTab",
       "liveTvRecordingsTab", "liveTvScheduledTab", "playerMiniGuide", "playerGoLiveButton",
+      "liveTvChannelSearch", "liveTvChannelSearchStatus",
     ]) expect(html).toContain(`id="${id}"`);
     expect(html).toContain('data-player-route="live-tv"');
     expect(app).toContain("window.jellyfin.playback.startLive");
     expect(app).toContain("window.jellyfin.liveTv.createRecording");
     expect(app).toContain("window.confirm");
+    expect(app).toContain("matchingChannels.slice(0, 300)");
+    expect(app).toContain("programsByChannel");
   });
 
   it("uses a dedicated inert native viewport with sibling controls", async () => {
@@ -132,6 +135,52 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('playerMeta.textContent = "Started from Companion Remote"');
     expect(renderer).toContain("if (externallyStarted) void presentExternallyStartedPlayback(playback)");
     expect(renderer).toContain("dismissedPlaybackId = playbackId");
+  });
+
+  it("keeps Watch now stable and checks progressive eligibility only on selection", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("const progressiveAttemptAvailable");
+    expect(renderer).toContain('play.className = "primary"');
+    expect(renderer).toContain("Watch now checks whether enough video has buffered.");
+    expect(renderer).toContain('showToast(selected.state === "paused"');
+    expect(renderer).toContain('"Still buffering. Try Watch now again shortly."');
+    expect(renderer).toContain("progressiveOnly,");
+    expect(renderer).toContain("...(presentation.progressiveOnly ? { progressiveOnly: true } : {})");
+  });
+
+  it("adds a local-only Downloaded library from verified offline-playable copies", async () => {
+    const [html, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(renderer).toContain('const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded"');
+    expect(renderer).toContain("state.offlinePlayable.length");
+    expect(renderer).toContain("state.offlinePlayable.map((entry) => entry.item)");
+    expect(renderer).toContain("syncDownloadedLibrary();");
+    expect(renderer).toContain("openDetails(selected, { alreadyLoaded: true })");
+    expect(html).toContain('id="selectDownloadedButton"');
+    expect(html).toContain('id="deleteSelectedDownloadedButton"');
+    expect(html).toContain('id="downloadedFollowedSeriesList"');
+    expect(renderer).toContain("async function deleteSelectedDownloads()");
+    expect(renderer).toContain("window.jellyfin.smartDownloads.skip({ downloadId: download.downloadId })");
+    expect(renderer).toContain("window.jellyfin.downloads.delete({ downloadId: download.downloadId })");
+    expect(renderer).toContain("for (const series of state.smartDownloads.series)");
+    const downloadSubscription = renderer.slice(
+      renderer.indexOf("window.jellyfin.downloads.subscribe"),
+      renderer.indexOf("window.jellyfin.smartDownloads.subscribe"),
+    );
+    expect(downloadSubscription).toContain("completedMembershipChanged");
+    expect(downloadSubscription).toContain('state.selectedLibraryId !== DOWNLOADED_LIBRARY_ID');
+  });
+
+  it("gives home episode artwork and series titles separate navigation targets", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain("linkEpisodeSeries: true");
+    expect(renderer).toContain("row.linkEpisodeSeries ? openEpisodeSeriesFromCard : undefined");
+    expect(renderer).toContain("seriesButton.dataset.seriesLink = item.seriesId!");
+    expect(renderer).toContain('button.setAttribute("aria-label", `Open episode ${item.name}`)');
+    expect(renderer).toContain("async function openEpisodeSeriesFromCard");
+    expect(renderer).toContain("preferredSeasonId: episode.seasonId");
   });
 
   it("bundles local fonts, responsive layouts, reduced motion, and visible focus", async () => {
@@ -300,6 +349,35 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('window.addEventListener("focus", () => { void refreshVisibleCatalog(); })');
     expect(renderer).toContain('document.addEventListener("visibilitychange"');
     expect(renderer).toContain("if (!document.hidden) void refreshVisibleCatalog()");
+  });
+
+  it("builds both library rails from every server-provided user view", async () => {
+    const [renderer, api] = await Promise.all([
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/main/services/jellyfinApi.ts", "utf8"),
+    ]);
+    expect(renderer).toContain("function navigationLibraries()");
+    expect(renderer).toContain("navigation.map((library) => createLibraryNavigationButton(library, false))");
+    expect(renderer).toContain("navigation.map((library) => createLibraryNavigationButton(library, true))");
+    expect(renderer).toContain("label.textContent = library.name");
+    expect(api).toContain('type === "Mixed" ? "Movie,Series,Video,MusicVideo" : type');
+    expect(renderer).toContain("button.disabled = itemType === null");
+    expect(renderer).toContain('collectionType !== "boxsets" && collectionType !== "livetv"');
+  });
+
+  it("exposes Smart Downloads through series details and the local download manager", async () => {
+    const [html, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(html).toContain('id="detailSmartDownloadsButton"');
+    expect(html).toContain('id="smartDownloadsList"');
+    expect(html).toContain('id="smartDownloadEpisodeLimit"');
+    expect(html).toContain('id="smartUnfollowDialog"');
+    expect(renderer).toContain("window.jellyfin.smartDownloads.follow");
+    expect(renderer).toContain("window.jellyfin.smartDownloads.checkNow");
+    expect(renderer).toContain('download.smartManaged ? `${download.itemType}');
+    expect(renderer).toContain('skip.textContent = download.canDelete ? "Remove & skip" : "Skip episode"');
   });
 
   it("keeps essential text and state colors at readable contrast", async () => {

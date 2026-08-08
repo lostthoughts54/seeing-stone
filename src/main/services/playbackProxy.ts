@@ -32,10 +32,10 @@ export class PlaybackProxy {
     await this.close();
     this.source = source;
     const externalSubtitles = source.externalSubtitles ?? [];
-    if (source.source === "local" && externalSubtitles.length === 0) {
+    if (source.source === "local" && !source.progressiveLease && externalSubtitles.length === 0) {
       return { media: source.mediaUrl, subtitles: [] };
     }
-    this.mediaCapabilityPath = source.source === "server" ? `/${randomUUID()}` : null;
+    this.mediaCapabilityPath = source.source === "server" || source.progressiveLease ? `/${randomUUID()}` : null;
     for (const subtitle of externalSubtitles) {
       this.subtitleCapabilities.set(`/${randomUUID()}.${subtitle.format}`, subtitle);
     }
@@ -74,7 +74,7 @@ export class PlaybackProxy {
   private async handle(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
     const source = this.source;
     const method = request.method;
-    const mediaRequest = Boolean(source && source.source === "server" && request.url === this.mediaCapabilityPath);
+    const mediaRequest = Boolean(source && (source.source === "server" || source.progressiveLease) && request.url === this.mediaCapabilityPath);
     const subtitle = request.url ? this.subtitleCapabilities.get(request.url) : undefined;
     if (!source || (method !== "GET" && method !== "HEAD") || (!mediaRequest && !subtitle)) {
       response.writeHead(method === "GET" || method === "HEAD" ? 404 : 405, { "Cache-Control": "no-store" });
@@ -89,7 +89,9 @@ export class PlaybackProxy {
     let upstream: Response;
     try {
       upstream = mediaRequest
-        ? await this.playback.handle(new Request(source.mediaUrl, { headers, signal: controller.signal }))
+        ? source.progressiveLease
+          ? await source.progressiveLease.handle(new Request(source.mediaUrl, { method, headers, signal: controller.signal }))
+          : await this.playback.handle(new Request(source.mediaUrl, { headers, signal: controller.signal }))
         : await this.playback.fetchExternalSubtitle(source.playbackId, subtitle!, controller.signal);
     } catch {
       if (!response.headersSent) response.writeHead(502, { "Cache-Control": "no-store" });

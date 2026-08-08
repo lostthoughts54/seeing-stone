@@ -10,7 +10,8 @@ Milestone 6 keeps one Play action throughout Home, libraries, search, details, s
 4. Give the validated path directly to the main-controlled mpv process.
 5. When connection state is explicitly Offline or Reconnecting, make no Jellyfin details or capability request and open from the cached identity, metadata, diagnostics, and local resume head.
 6. When Jellyfin is reachable, attach matching external text subtitles from the selected Jellyfin media source through a separate authenticated main-process proxy. Subtitle lookup failure never disqualifies the verified local video.
-7. If no local candidate passes, use the existing Jellyfin Direct Play, Direct Stream, or transcode resolver and attach its matching external Jellyfin subtitles through the same proxy.
+7. If no finalized candidate passes, acquire an eligible known-size progressive download lease. Start mpv paused at zero, accept only its confirmed contiguous beginning-of-file seek range, apply resume only when already inside that range, and then unpause.
+8. If no eligible progressive source exists—or a progressive attempt explicitly falls back—use the existing Jellyfin Direct Play, Direct Stream, or transcode resolver and attach its matching external Jellyfin subtitles through the same proxy.
 
 Titles and filenames are never used to substitute a different item. Missing, changed, path-escaped, or probe-invalid copies are marked unusable but never deleted automatically.
 
@@ -21,6 +22,7 @@ Titles and filenames are never used to substitute a different item. Missing, cha
 - Jellyfin subtitle paths, delivery URLs, required headers, and tokens remain main-only. Native mpv receives only a random loopback capability for each validated subtitle stream.
 - The renderer cannot choose a local file, media source, executable, or mpv argument.
 - The same controlled mpv window, seeking, tracks, fullscreen, completion, and Jellyfin Next Up behavior apply to local and server playback.
+- Progressive files use an opaque loopback capability and a main-only lease; partial paths, media-source identity, credentials, and authenticated metadata requests never cross preload.
 
 ## Resume and reporting
 

@@ -8,3 +8,4 @@ dist/
 coverage/
 *.log
 *.tsbuildinfo
+/scripts/recent-jellyfin-live-tv-error.cjs

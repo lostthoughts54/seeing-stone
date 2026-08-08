@@ -29,7 +29,12 @@ function playbackState(overrides: Partial<PlaybackState> = {}): PlaybackState {
   };
 }
 
-function harness() {
+function harness(preferences?: {
+  getBufferingPolicy: () => Promise<"wait-for-all" | "continue">;
+  setBufferingPolicy: (mode: "wait-for-all" | "continue") => Promise<void>;
+  getWatchPartySyncOffset?: () => Promise<number>;
+  setWatchPartySyncOffset?: (offsetMilliseconds: number) => Promise<void>;
+}) {
   const requests: Array<{ path: string; body: unknown; method: string }> = [];
   const api = {
     getDetails: vi.fn(async () => ({ userData: { playbackPositionTicks: 25_000_000 } })),
@@ -76,7 +81,7 @@ function harness() {
     stop: vi.fn(async () => { state = playbackState({ playbackId: null, itemId: null, phase: "stopped", source: null }); return state; }),
     clear: vi.fn(async () => undefined),
   };
-  const service = new SyncPlayService(api as never, player as never, { info: vi.fn(), warn: vi.fn(), error: vi.fn() }, 60_000);
+  const service = new SyncPlayService(api as never, player as never, { info: vi.fn(), warn: vi.fn(), error: vi.fn() }, 60_000, preferences);
   const internals = service as unknown as Record<string, any>;
   internals.state = {
     availability: "available",
@@ -93,6 +98,12 @@ function harness() {
       playlistItemId,
     },
     sharedControls: true,
+    preparation: {
+      phase: "playing",
+      minimumParticipants: 2,
+      localSyncOffsetMilliseconds: 0,
+      scheduledStartAtUnixMs: null,
+    },
     error: null,
   };
   internals.currentPlaylistItemId = playlistItemId;
@@ -150,6 +161,40 @@ describe("SyncPlayService", () => {
       body: { PositionTicks: 30_000_000, PlaylistItemId: nextPlaylist },
     });
     expect(h.service.getState().joinedGroup).toMatchObject({ currentItemId: nextItem, playlistItemId: nextPlaylist });
+  });
+
+  it("holds the first item for one participant and reports ready when a second joins", async () => {
+    const h = harness();
+    h.internals.state.joinedGroup.participants = ["Adam"];
+    h.internals.state.joinedGroup.participantCount = 1;
+    const nextItem = "66666666666646668666666666666666";
+    const nextPlaylist = "77777777777747778777777777777777";
+    h.receive(envelope("88888888888848888888888888888881", "SyncPlayGroupUpdate", {
+      GroupId: groupId,
+      Type: "PlayQueue",
+      Data: {
+        Reason: "NewPlaylist",
+        LastUpdate: "2026-07-13T20:01:00.000Z",
+        Playlist: [{ ItemId: nextItem, PlaylistItemId: nextPlaylist }],
+        PlayingItemIndex: 0,
+        StartPositionTicks: 0,
+        IsPlaying: false,
+        ShuffleMode: "Sorted",
+        RepeatMode: "RepeatNone",
+      },
+    }));
+    await h.internals.queueTask;
+
+    expect(h.requests.some((request) => request.path === "/SyncPlay/Ready")).toBe(false);
+    expect(h.service.getState().preparation.phase).toBe("waiting-for-participant");
+
+    h.receive(envelope("88888888888848888888888888888882", "SyncPlayGroupUpdate", {
+      GroupId: groupId,
+      Type: "UserJoined",
+      Data: "Kayla",
+    }));
+    await vi.waitFor(() => expect(h.requests.at(-1)?.path).toBe("/SyncPlay/Ready"));
+    expect(h.service.getState().preparation.phase).toBe("ready");
   });
 
   it("does not erase an active queue and resync anchor when GroupJoined is handled twice", async () => {
@@ -494,6 +539,37 @@ describe("SyncPlayService", () => {
       await h.internals.correctDrift();
       expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1, expect.objectContaining({ origin: "remote-sync" }));
       expect(h.player.seek).toHaveBeenCalledTimes(1);
+    } finally {
+      performanceNow.mockRestore();
+    }
+  });
+
+  it("persists a local timing adjustment and eases toward it without jumping", async () => {
+    const setWatchPartySyncOffset = vi.fn(async () => undefined);
+    const h = harness({
+      getBufferingPolicy: vi.fn(async () => "wait-for-all" as const),
+      setBufferingPolicy: vi.fn(async () => undefined),
+      getWatchPartySyncOffset: vi.fn(async () => 0),
+      setWatchPartySyncOffset,
+    });
+    const now = 25_000;
+    const performanceNow = vi.spyOn(performance, "now").mockReturnValue(now);
+    try {
+      h.setPlayerState(playbackState({ positionTicks: 40_000_000 }));
+      h.internals.syncAnchor = {
+        membershipRevision: h.internals.membershipRevision,
+        playlistItemId,
+        positionTicks: 40_000_000,
+        playing: true,
+        monotonicTimestampMs: now,
+      };
+
+      await h.service.setLocalSyncOffset(400);
+
+      expect(setWatchPartySyncOffset).toHaveBeenCalledWith(400);
+      expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(400);
+      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.04, expect.objectContaining({ origin: "remote-sync" }));
+      expect(h.player.seek).not.toHaveBeenCalled();
     } finally {
       performanceNow.mockRestore();
     }

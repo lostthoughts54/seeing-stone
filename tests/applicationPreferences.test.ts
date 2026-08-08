@@ -24,6 +24,7 @@ describe("ApplicationPreferencesService", () => {
     const preferences = new ApplicationPreferencesService(persistence as never);
     expect(await preferences.getAdapterMode()).toBeNull();
     expect(await preferences.getBufferingPolicy()).toBe("wait-for-all");
+    expect(await preferences.getWatchPartySyncOffset()).toBe(0);
     expect(await preferences.getCachedDiagnostics()).toBeNull();
   });
 
@@ -32,11 +33,14 @@ describe("ApplicationPreferencesService", () => {
     const preferences = new ApplicationPreferencesService(persistence as never);
     await preferences.setAdapterMode("embedded");
     await preferences.setBufferingPolicy("continue");
+    await preferences.setWatchPartySyncOffset(-300);
 
     expect(await preferences.getAdapterMode()).toBe("embedded");
     expect(await preferences.getBufferingPolicy()).toBe("continue");
+    expect(await preferences.getWatchPartySyncOffset()).toBe(-300);
     expect(persistence.setApplicationPreference).toHaveBeenCalledWith("player.adapter-mode", { mode: "embedded" });
     expect(persistence.setApplicationPreference).toHaveBeenCalledWith("watchparty.buffering-policy", { mode: "continue" });
+    expect(persistence.setApplicationPreference).toHaveBeenCalledWith("watchparty.sync-offset", { offsetMilliseconds: -300 });
   });
 
   it("rejects malformed cached diagnostics and round-trips sanitized values", async () => {

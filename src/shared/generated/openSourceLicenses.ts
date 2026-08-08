@@ -9,7 +9,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "redistributionStatus": "source-only"

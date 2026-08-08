@@ -104,6 +104,9 @@
             <button id="navWatchPartiesButton" type="button" title="Watch Parties">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6m0 0c0-4 2-6 5-6s5 2 5 6"></path></svg><span>Watch Parties</span>
             </button>
+            <button id="navCompanionButton" type="button" title="Phone Remote · Off" aria-label="Phone Remote, off">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"></rect><path d="M10 5h4M11 18.5h2"></path></svg><span>Phone Remote</span><i id="companionNavStatusDot" class="companion-nav-status is-off" aria-hidden="true"></i>
+            </button>
           </nav>
           <button id="closeApplicationButton" class="app-rail-close" type="button" title="Exit Seeing Stone">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg><span>Exit</span>
@@ -129,7 +132,7 @@
           <div id="profileMenu" class="profile-menu is-hidden">
             <strong id="userLabel">Signed in</strong>
             <span id="serverLabel">Jellyfin</span>
-            <small>Seeing Stone 0.6.0 Beta</small>
+            <small>Seeing Stone 0.7.0 Beta</small>
             <label class="profile-engine-setting">
               <span>Player engine</span>
               <select id="profileAdapterSelect" aria-label="Player engine">
@@ -140,7 +143,6 @@
             </label>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
             <button id="downloadsButton" type="button">Downloads</button>
-            <button id="companionButton" type="button">Companion Remote (Beta)</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
             <button id="refreshButton" type="button">Refresh Connection</button>
@@ -197,8 +199,24 @@
                     <option value="rating-descending">Highest rated</option>
                   </select>
                 </label>
+                <div id="downloadedLibraryActions" class="downloaded-library-actions is-hidden" aria-label="Downloaded library actions">
+                  <button id="selectDownloadedButton" type="button">Select downloads</button>
+                  <button id="selectAllDownloadedButton" class="is-hidden" type="button">Select all</button>
+                  <button id="deleteSelectedDownloadedButton" class="danger is-hidden" type="button" disabled>Delete selected</button>
+                  <button id="cancelDownloadedSelectionButton" class="is-hidden" type="button">Cancel</button>
+                </div>
               </div>
             </header>
+            <section id="downloadedFollowedSeries" class="downloaded-followed-series is-hidden" aria-labelledby="downloadedFollowedSeriesTitle">
+              <header>
+                <div>
+                  <p class="eyebrow">Smart Downloads</p>
+                  <h2 id="downloadedFollowedSeriesTitle">Followed shows</h2>
+                </div>
+                <p>Shows being watched for new episodes.</p>
+              </header>
+              <div id="downloadedFollowedSeriesList" class="downloaded-followed-series-list"></div>
+            </section>
             <div id="libraryGrid" class="poster-grid-view" aria-live="polite"></div>
           </section>
 
@@ -220,6 +238,11 @@
               <button id="liveTvRecordingsTab" type="button">Recordings</button>
               <button id="liveTvScheduledTab" type="button">Scheduled</button>
             </nav>
+            <div id="liveTvGuideTools" class="live-tv-guide-tools">
+              <label for="liveTvChannelSearch">Search channels</label>
+              <input id="liveTvChannelSearch" type="search" placeholder="Channel name or number" autocomplete="off" spellcheck="false" />
+              <span id="liveTvChannelSearchStatus" role="status" aria-live="polite"></span>
+            </div>
             <div id="liveTvStatus" class="live-tv-status" role="status"></div>
             <div id="liveTvContent" class="live-tv-content" aria-live="polite"></div>
           </section>
@@ -270,6 +293,10 @@
                     <button id="detailDownloadButton" type="button" disabled>
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
                       <span id="detailDownloadLabel">Download</span>
+                    </button>
+                    <button id="detailSmartDownloadsButton" class="is-hidden" type="button" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M5 19h14"></path><path d="M18 5a7 7 0 0 0-12 2"></path></svg>
+                      <span id="detailSmartDownloadsLabel">Smart Downloads</span>
                     </button>
                     <button id="detailTrailerButton" type="button" disabled>
                       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"></rect><path d="m10 9 5 3-5 3z"></path></svg>
@@ -386,6 +413,7 @@
               <section id="playerFrame" class="seeing-frame" aria-labelledby="playerTitle">
                 <div class="seeing-frame-glow" aria-hidden="true"></div>
                 <div id="playerViewport" class="player-viewport" aria-label="Native video surface"></div>
+                <div id="watchPartyStartCue" class="watch-party-start-cue is-hidden" role="status" aria-live="polite">Starting…</div>
                 <article id="nextEpisodeCountdown" class="next-episode-countdown is-hidden" role="status" aria-live="polite" aria-atomic="true">
                   <p class="next-episode-countdown-kicker">Up next</p>
                   <h2 id="nextEpisodeCountdownTitle">Next episode</h2>
@@ -536,7 +564,7 @@
           </div>
           <button id="closeDownloadsButton" type="button" aria-label="Close downloads" title="Close downloads">×</button>
         </header>
-        <p class="downloads-note">Downloads are kept until you delete them. If storage fills up, transfers pause for manual cleanup.</p>
+        <p class="downloads-note">Manual downloads are kept until you delete them. Smart Downloads rotate unneeded episodes unless you choose Keep downloaded.</p>
         <section class="download-location" aria-labelledby="downloadLocationTitle">
           <div class="download-location-copy">
             <strong id="downloadLocationTitle">Download location</strong>
@@ -549,8 +577,44 @@
             <button id="defaultDownloadLocationButton" type="button">Use Videos Folder</button>
           </div>
         </section>
+        <section class="smart-downloads-manager" aria-labelledby="smartDownloadsTitle">
+          <header>
+            <div><strong id="smartDownloadsTitle">Smart Downloads</strong><small>Keep upcoming episodes ready automatically.</small></div>
+            <button id="checkSmartDownloadsButton" type="button">Check now</button>
+          </header>
+          <div id="smartDownloadsList" class="smart-downloads-list" aria-live="polite"></div>
+        </section>
         <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
       </section>
+
+      <dialog id="smartDownloadDialog" class="smart-download-dialog" aria-labelledby="smartDownloadDialogTitle">
+        <form method="dialog">
+          <h2 id="smartDownloadDialogTitle">Smart Downloads</h2>
+          <p id="smartDownloadDialogDescription">Choose how many upcoming unwatched episodes to keep ready.</p>
+          <label for="smartDownloadEpisodeLimit">Episodes to keep</label>
+          <select id="smartDownloadEpisodeLimit">
+            <option value="1">1 episode</option><option value="2">2 episodes</option>
+            <option value="3" selected>3 episodes</option><option value="4">4 episodes</option>
+            <option value="5">5 episodes</option>
+          </select>
+          <div class="smart-download-dialog-actions">
+            <button value="cancel" type="submit">Cancel</button>
+            <button value="save" class="primary" type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="smartUnfollowDialog" class="smart-download-dialog" aria-labelledby="smartUnfollowDialogTitle">
+        <form method="dialog">
+          <h2 id="smartUnfollowDialogTitle">Stop Smart Downloads?</h2>
+          <p id="smartUnfollowDialogDescription">Choose what happens to this series&rsquo; existing copies.</p>
+          <div class="smart-download-dialog-actions stacked">
+            <button value="keep" class="primary" type="submit">Keep copies</button>
+            <button value="remove" type="submit">Remove smart copies</button>
+            <button value="cancel" type="submit">Cancel</button>
+          </div>
+        </form>
+      </dialog>
 
       <div id="licensesScrim" class="licenses-scrim is-hidden"></div>
       <section id="licensesPanel" class="licenses-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="licensesTitle">
@@ -608,6 +672,21 @@
         <details><summary>Troubleshooting</summary>
           <p>Allow Seeing Stone on Windows Private networks only. Guest Wi-Fi isolation, VPNs, mDNS filtering, DHCP changes, or a blocked port may prevent connection. Try the direct-IP address when the .local name does not resolve.</p>
         </details>
+      </section>
+
+      <div id="trailerScrim" class="trailer-scrim is-hidden"></div>
+      <section id="trailerPanel" class="trailer-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="trailerTitle">
+        <header class="trailer-header">
+          <div><p class="eyebrow">Preview</p><h2 id="trailerTitle">Trailer</h2></div>
+          <button id="closeTrailerButton" type="button" aria-label="Close trailer" title="Close trailer">&times;</button>
+        </header>
+        <div class="trailer-player">
+          <iframe id="trailerFrame" title="YouTube trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allowfullscreen></iframe>
+        </div>
+        <footer class="trailer-footer">
+          <span>If this trailer cannot play here, you can still watch it on YouTube.</span>
+          <button id="openTrailerBrowserButton" type="button">Open in browser</button>
+        </footer>
       </section>
 
       <aside id="playerFallbackNotice" class="player-fallback-notice is-hidden" role="alert" aria-live="assertive">

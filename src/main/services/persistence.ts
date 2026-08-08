@@ -27,6 +27,9 @@ import type {
   PlaybackRevisionRecord,
   RecordPlaybackRevisionInput,
   RegisterLocalVersionInput,
+  SmartSeriesCheckResult,
+  SmartSeriesRecord,
+  SmartSeriesRecordInput,
   TransitionDownloadInput,
   UpdateLocalVersionInput,
 } from "./persistenceTypes";
@@ -50,6 +53,10 @@ function nonnegativeInteger(value: number, name: string): number {
 
 function optionalNonnegativeInteger(value: number | null, name: string): number | null {
   return value === null ? null : nonnegativeInteger(value, name);
+}
+
+function sanitizedSmartErrorMessage(value: string): string {
+  return redactText(value).replace(/https?:\/\/[^\s"'<>]+/giu, "[REDACTED_URL]");
 }
 
 function safeIdentity(input: { serverId: string; userId: string; itemId?: string }) {
@@ -391,6 +398,15 @@ export class SqlitePersistenceService {
     return normalizeDownloadBundle(bundle);
   }
 
+  async setDownloadSmartManaged(downloadId: string, smartManaged: boolean): Promise<DownloadBundleRecord> {
+    const bundle = await this.invoke({
+      kind: "setDownloadSmartManaged",
+      downloadId: boundedText(downloadId, "Download identity", 256),
+      smartManaged,
+    }) as DownloadBundleRecord;
+    return normalizeDownloadBundle(bundle);
+  }
+
   async setDownloadExpectedSize(downloadId: string, expectedSize: number): Promise<DownloadBundleRecord> {
     const bundle = await this.invoke({
       kind: "setDownloadExpectedSize",
@@ -438,6 +454,93 @@ export class SqlitePersistenceService {
     }));
   }
 
+  async upsertSmartSeries(input: SmartSeriesRecordInput): Promise<SmartSeriesRecord> {
+    const identity = safeIdentity({ serverId: input.serverId, userId: input.userId, itemId: input.seriesId });
+    if (!Number.isSafeInteger(input.episodeLimit) || input.episodeLimit < 1 || input.episodeLimit > 5) {
+      throw new AppError("INVALID_PERSISTENCE_INPUT", "Smart Download episode limit is invalid.", 400);
+    }
+    return this.invoke({
+      kind: "upsertSmartSeries",
+      input: {
+        serverId: identity.serverId,
+        userId: identity.userId,
+        seriesId: identity.itemId!,
+        seriesName: boundedText(input.seriesName, "Series name", 1024),
+        episodeLimit: input.episodeLimit,
+      },
+    }) as Promise<SmartSeriesRecord>;
+  }
+
+  async listSmartSeries(serverId: string, userId: string): Promise<SmartSeriesRecord[]> {
+    const identity = safeIdentity({ serverId, userId });
+    return this.invoke({ kind: "listSmartSeries", serverId: identity.serverId, userId: identity.userId }) as Promise<SmartSeriesRecord[]>;
+  }
+
+  async recordSmartSeriesCheck(
+    serverId: string,
+    userId: string,
+    seriesId: string,
+    result: SmartSeriesCheckResult,
+  ): Promise<SmartSeriesRecord> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    const normalized: SmartSeriesCheckResult = result.success
+      ? { success: true, checkedAt: nonnegativeInteger(result.checkedAt, "Smart Download check timestamp") }
+      : {
+          success: false,
+          errorCode: boundedText(result.errorCode, "Smart Download error code", 128),
+          errorMessage: boundedText(sanitizedSmartErrorMessage(result.errorMessage), "Smart Download error message", 2048),
+          errorAt: nonnegativeInteger(result.errorAt, "Smart Download error timestamp"),
+        };
+    return this.invoke({
+      kind: "recordSmartSeriesCheck",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+      result: normalized,
+    }) as Promise<SmartSeriesRecord>;
+  }
+
+  async addSmartEpisodeSkip(serverId: string, userId: string, seriesId: string, itemId: string): Promise<void> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    await this.invoke({
+      kind: "addSmartEpisodeSkip",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+      itemId: boundedText(itemId, "Episode identity", 256),
+    });
+  }
+
+  async listSmartEpisodeSkips(serverId: string, userId: string, seriesId: string): Promise<string[]> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    return this.invoke({
+      kind: "listSmartEpisodeSkips",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+    }) as Promise<string[]>;
+  }
+
+  async deleteSmartSeries(serverId: string, userId: string, seriesId: string): Promise<void> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    await this.invoke({
+      kind: "deleteSmartSeries",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+    });
+  }
+
+  async unfollowSmartSeriesKeep(serverId: string, userId: string, seriesId: string): Promise<void> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    await this.invoke({
+      kind: "unfollowSmartSeriesKeep",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+    });
+  }
+
   async recordPlaybackRevision(input: RecordPlaybackRevisionInput): Promise<PlaybackRevisionRecord> {
     const identity = safeIdentity(input);
     const report = input.report ? {
@@ -475,6 +578,16 @@ export class SqlitePersistenceService {
   async getPlaybackHead(serverId: string, userId: string, itemId: string): Promise<PlaybackHeadRecord | null> {
     const identity = safeIdentity({ serverId, userId, itemId });
     return this.invoke({ kind: "getPlaybackHead", serverId: identity.serverId, userId: identity.userId, itemId: identity.itemId! }) as Promise<PlaybackHeadRecord | null>;
+  }
+
+  async listPlaybackHeadsForSeries(serverId: string, userId: string, seriesId: string): Promise<PlaybackHeadRecord[]> {
+    const identity = safeIdentity({ serverId, userId, itemId: seriesId });
+    return this.invoke({
+      kind: "listPlaybackHeadsForSeries",
+      serverId: identity.serverId,
+      userId: identity.userId,
+      seriesId: identity.itemId!,
+    }) as Promise<PlaybackHeadRecord[]>;
   }
 
   async listPendingProgress(limit = 100): Promise<PlaybackRevisionRecord[]> {

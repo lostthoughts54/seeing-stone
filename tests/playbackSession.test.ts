@@ -166,6 +166,87 @@ describe("PlaybackSessionService", () => {
     expect(closeLiveStream).toHaveBeenCalledWith("private-live-stream-1");
   });
 
+  it("waits for the previous tuner session to close before resolving a channel switch", async () => {
+    let releaseTuner!: () => void;
+    const tunerReleased = new Promise<void>((resolve) => { releaseTuner = resolve; });
+    const closeLiveStream = vi.fn(() => tunerReleased);
+    const getDetails = vi.fn(async (itemId: string) => ({
+      ...item,
+      id: itemId,
+      name: itemId === "channel-1" ? "News" : "Sports",
+      type: "TvChannel" as const,
+      runTimeTicks: 0,
+    }));
+    const service = new PlaybackSessionService({
+      getDetails,
+      getMediaSourceCapabilities: vi.fn(),
+      getPlaybackSourceInfo: vi.fn(async (itemId: string) => ({
+        capabilities: {
+          itemId,
+          sources: [{ id: `source-${itemId}`, container: "ts", size: null, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }],
+        },
+        playSessionId: `session-${itemId}`,
+        liveStreamId: `live-${itemId}`,
+      })),
+      fetchStaticStream: vi.fn(async () => new Response("video")),
+      fetchTranscodedStream: vi.fn(async () => new Response("video")),
+      fetchExternalSubtitle: vi.fn(async () => new Response("subtitle")),
+      closeLiveStream,
+    });
+
+    await service.start("channel-1", "start-over");
+    const switched = service.start("channel-2", "start-over");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(closeLiveStream).toHaveBeenCalledWith("live-channel-1");
+    expect(getDetails).toHaveBeenCalledTimes(1);
+    releaseTuner();
+    const next = await switched;
+    expect(next.itemId).toBe("channel-2");
+    expect(getDetails).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses Jellyfin's negotiated infinite Live TV stream instead of the on-demand mp4 route", async () => {
+    const channel: MediaItem = { ...item, id: "channel-1", name: "News", type: "TvChannel", runTimeTicks: 0, playable: true };
+    const fetchNegotiatedLiveStream = vi.fn(async () => new Response("transport-stream", {
+      headers: { "Content-Type": "video/mp2t", "Accept-Ranges": "none" },
+    }));
+    const fetchTranscodedStream = vi.fn();
+    const service = new PlaybackSessionService({
+      getDetails: vi.fn(async () => channel),
+      getMediaSourceCapabilities: vi.fn(),
+      getPlaybackSourceInfo: vi.fn(async () => ({
+        capabilities: {
+          itemId: channel.id,
+          sources: [{ id: "source-live", container: "ts", size: null, supportsDirectPlay: false, supportsDirectStream: false, supportsTranscoding: true }],
+        },
+        playSessionId: "play-session-live",
+        liveStreamId: "private-live-stream-1",
+        negotiatedSources: [{
+          sourceId: "source-live",
+          directStreamUrl: null,
+          transcodingUrl: "/Videos/private/live-stream",
+        }],
+      })),
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream,
+      fetchNegotiatedLiveStream,
+      fetchExternalSubtitle: vi.fn(async () => new Response("subtitle")),
+      closeLiveStream: vi.fn(async () => undefined),
+    });
+
+    const started = await service.start(channel.id, "start-over");
+    const response = await service.handle(new Request(started.mediaUrl));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("video/mp2t");
+    expect(response.headers.has("Accept-Ranges")).toBe(false);
+    expect(await response.text()).toBe("transport-stream");
+    expect(fetchNegotiatedLiveStream).toHaveBeenCalledWith("/Videos/private/live-stream", expect.any(AbortSignal));
+    expect(fetchTranscodedStream).not.toHaveBeenCalled();
+    expect(JSON.stringify(started)).not.toContain("/Videos/private/live-stream");
+  });
+
   it("keeps the authenticated source main-only and resolves an opaque internal stream", async () => {
     const fetchStaticStream = vi.fn(async () => new Response("video", { headers: { "Content-Type": "video/mp4" } }));
     const fetchTranscodedStream = vi.fn();
@@ -479,5 +560,93 @@ describe("PlaybackSessionService", () => {
     const started = await service.start(item.id, "start-over");
     await service.handle(new Request(started.mediaUrl));
     expect(fetchTranscodedStream).toHaveBeenCalledWith("movie-1", "mp4-transcode", started.serverPlaySessionId, 0, expect.any(AbortSignal));
+  });
+
+  it("prefers an eligible progressive lease and skips it for the server fallback attempt", async () => {
+    const release = vi.fn();
+    const lease = {
+      descriptor: {
+        item,
+        itemId: item.id,
+        itemType: "Movie" as const,
+        seriesId: null,
+        mediaSourceId: "source-1",
+        durationTicks: item.runTimeTicks,
+        expectedSize: 64 * 1024 * 1024,
+        container: "mkv",
+        diagnostics: {
+          sourceKind: "downloading" as const,
+          playbackRate: 1,
+          bufferAheadTicks: null,
+          container: "mkv",
+          videoCodec: "h264",
+          audioCodec: "aac",
+          audioChannels: 2,
+          resolution: "1920×1080",
+          bitrate: 8_000_000,
+          videoRange: "SDR",
+          transcodeReason: null,
+        },
+      },
+      handle: vi.fn(),
+      endMetadataAllowance: vi.fn(),
+      onEvent: vi.fn(() => vi.fn()),
+      release,
+    };
+    const acquireProgressive = vi.fn(async () => lease);
+    const getDetails = vi.fn(async () => item);
+    const getMediaSourceCapabilities = vi.fn(async () => ({
+      itemId: item.id,
+      sources: [{ id: "source-1", container: "mkv", size: 64 * 1024 * 1024, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }],
+    }));
+    const service = new PlaybackSessionService({
+      getConnectionDiagnostics: () => ({ state: "offline" as const, serverName: null, serverVersion: null, lastCheckedAt: 0, lastError: null }),
+      getDetails,
+      getMediaSourceCapabilities,
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+      fetchExternalSubtitle: vi.fn(),
+    }, { resolve: vi.fn(async () => null) }, undefined, undefined, { acquireProgressive });
+
+    const progressive = await service.start(item.id, "resume");
+    expect(progressive).toMatchObject({
+      sourceKind: "downloading",
+      source: "local",
+      resumePositionTicks: 0,
+      preferredResumePositionTicks: item.userData.playbackPositionTicks,
+      progressiveLease: lease,
+    });
+    expect(service.getState().seekableUntilTicks).toBe(0);
+    expect(getDetails).not.toHaveBeenCalled();
+
+    const server = await service.retryAfterLocalFailure(progressive.playbackId, "resume");
+    expect(server.sourceKind).toBe("direct-play");
+    expect(acquireProgressive).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledOnce();
+    expect(getDetails).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an early Watch now attempt without falling through to Jellyfin", async () => {
+    const getDetails = vi.fn(async () => item);
+    const getMediaSourceCapabilities = vi.fn(async () => ({
+      itemId: item.id,
+      sources: [{ id: "source-1", container: "mkv", size: 64 * 1024 * 1024, supportsDirectPlay: true, supportsDirectStream: true, supportsTranscoding: true }],
+    }));
+    const acquireProgressive = vi.fn(async () => null);
+    const service = new PlaybackSessionService({
+      getDetails,
+      getMediaSourceCapabilities,
+      fetchStaticStream: vi.fn(),
+      fetchTranscodedStream: vi.fn(),
+      fetchExternalSubtitle: vi.fn(),
+    }, { resolve: vi.fn(async () => null) }, undefined, undefined, { acquireProgressive });
+
+    await expect(service.start(item.id, "resume", { requireProgressive: true })).rejects.toMatchObject({
+      code: "PROGRESSIVE_NOT_READY",
+      message: expect.stringContaining("still buffering"),
+    });
+    expect(acquireProgressive).toHaveBeenCalledOnce();
+    expect(getDetails).not.toHaveBeenCalled();
+    expect(getMediaSourceCapabilities).not.toHaveBeenCalled();
   });
 });

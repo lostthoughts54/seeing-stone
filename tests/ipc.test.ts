@@ -33,6 +33,7 @@ function createHarness() {
     search: vi.fn(),
     getDetails: vi.fn(),
     openTrailer: vi.fn(),
+    getTrailerUrl: vi.fn(async () => "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
     getSeasons: vi.fn(),
     getEpisodes: vi.fn(),
     getMediaSourceCapabilities: vi.fn(),
@@ -72,6 +73,7 @@ function createHarness() {
     groups: [],
     joinedGroup: null,
     sharedControls: true,
+    preparation: { phase: "idle" as const, minimumParticipants: 2 as const, localSyncOffsetMilliseconds: 0, scheduledStartAtUnixMs: null },
     sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
     telemetry: {
       protocolVersion: 1 as const,
@@ -94,6 +96,7 @@ function createHarness() {
     continueAfterBuffering: vi.fn(async () => structuredClone(watchPartyState)),
     resyncGroup: vi.fn(async () => structuredClone(watchPartyState)),
     setBufferingPolicy: vi.fn(async () => structuredClone(watchPartyState)),
+    setLocalSyncOffset: vi.fn(async () => structuredClone(watchPartyState)),
     setViewVisible: vi.fn(async () => structuredClone(watchPartyState)),
     isJoined: vi.fn(() => false),
   };
@@ -115,6 +118,23 @@ function createHarness() {
     copyReport: vi.fn(async () => ({ completed: true })),
     saveReport: vi.fn(async () => ({ completed: false })),
   };
+  const trailerWindow = {
+    open: vi.fn(async (_url: string, openExternally?: boolean) => openExternally
+      ? { mode: "external" as const, embedUrl: null }
+      : { mode: "embedded" as const, embedUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ" }),
+  };
+  const smartState = { series: [], notice: null };
+  const smartDownloads = {
+    activate: vi.fn(),
+    deactivate: vi.fn(),
+    getState: vi.fn(async () => smartState),
+    follow: vi.fn(async () => smartState),
+    setLimit: vi.fn(async () => smartState),
+    checkNow: vi.fn(async () => smartState),
+    unfollow: vi.fn(async () => ({ state: smartState, warning: null })),
+    skip: vi.fn(async () => smartState),
+    notifyWatchedItem: vi.fn(),
+  };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -131,9 +151,13 @@ function createHarness() {
     undefined,
     undefined,
     cleanMachineDiagnostics as never,
+    undefined,
+    undefined,
+    trailerWindow,
+    smartDownloads as never,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
@@ -174,6 +198,7 @@ describe("IPC authorization and allowlist", () => {
     const invokeChannels = Object.values(IPC).filter((channel) => ![
       IPC.playbackStateChanged,
       IPC.downloadsChanged,
+      IPC.smartDownloadsChanged,
       IPC.sessionPanelSoloChanged,
       IPC.watchPartiesChanged,
       IPC.companionChanged,
@@ -238,6 +263,29 @@ describe("IPC authorization and allowlist", () => {
     expect(downloads.start).not.toHaveBeenCalled();
   });
 
+  it("allows only sanitized Smart Download intents", async () => {
+    const { handlers, validEvent, smartDownloads } = createHarness();
+    await expect(handlers.get(IPC.smartDownloadsFollow)?.(validEvent, {
+      seriesId: "series-1",
+      episodeLimit: 3,
+    })).resolves.toEqual({ ok: true, data: { series: [], notice: null } });
+    expect(smartDownloads.follow).toHaveBeenCalledWith("series-1", 3);
+
+    await expect(handlers.get(IPC.smartDownloadsFollow)?.(validEvent, {
+      seriesId: "series-1",
+      episodeLimit: 3,
+      serverId: "private-server",
+      path: "D:\\private\\episode.mkv",
+    })).resolves.toMatchObject({ ok: false });
+    expect(smartDownloads.follow).toHaveBeenCalledTimes(1);
+
+    await expect(handlers.get(IPC.smartDownloadsUnfollow)?.(validEvent, {
+      seriesId: "series-1",
+      disposition: "remove",
+    })).resolves.toMatchObject({ ok: true });
+    expect(smartDownloads.unfollow).toHaveBeenCalledWith("series-1", "remove");
+  });
+
   it("keeps offline playable discovery identity-owned and rejects renderer filters", async () => {
     const { handlers, validEvent, downloads } = createHarness();
     downloads.listOfflinePlayable.mockResolvedValue([]);
@@ -269,6 +317,31 @@ describe("IPC authorization and allowlist", () => {
     expect(rejected.ok).toBe(false);
     expect(JSON.stringify(rejected)).not.toContain("Sensitive Folder");
     expect(downloadLocation.choose).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves trailers main-side and returns only a controlled embed URL", async () => {
+    const { handlers, validEvent, api, trailerWindow } = createHarness();
+    await expect(handlers.get(IPC.itemsOpenTrailer)?.(validEvent, { itemId: "movie-1" })).resolves.toEqual({
+      ok: true,
+      data: { opened: true, mode: "embedded", embedUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ" },
+    });
+    expect(api.getTrailerUrl).toHaveBeenCalledWith("movie-1");
+    expect(trailerWindow.open).toHaveBeenCalledWith("https://www.youtube.com/watch?v=dQw4w9WgXcQ", undefined);
+
+    await expect(handlers.get(IPC.itemsOpenTrailer)?.(validEvent, {
+      itemId: "movie-1",
+      openExternally: true,
+    })).resolves.toEqual({
+      ok: true,
+      data: { opened: true, mode: "external", embedUrl: null },
+    });
+
+    const rejected = await handlers.get(IPC.itemsOpenTrailer)?.(validEvent, {
+      itemId: "movie-1",
+      url: "https://youtube.com.attacker.invalid/watch?v=dQw4w9WgXcQ",
+    }) as { ok: boolean };
+    expect(rejected.ok).toBe(false);
+    expect(trailerWindow.open).toHaveBeenCalledTimes(2);
   });
 
   it("allows only a boolean explicit watched action without renderer-authored playback data", async () => {
@@ -340,10 +413,12 @@ describe("IPC authorization and allowlist", () => {
     await expect(handlers.get(IPC.watchPartiesContinue)?.(validEvent)).resolves.toMatchObject({ ok: true });
     await expect(handlers.get(IPC.watchPartiesResync)?.(validEvent)).resolves.toMatchObject({ ok: true });
     await expect(handlers.get(IPC.watchPartiesSetBufferingPolicy)?.(validEvent, { mode: "continue" })).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesSetLocalSyncOffset)?.(validEvent, { offsetMilliseconds: -300 })).resolves.toMatchObject({ ok: true });
     expect(syncPlay.waitForAll).toHaveBeenCalledOnce();
     expect(syncPlay.continueAfterBuffering).toHaveBeenCalledOnce();
     expect(syncPlay.resyncGroup).toHaveBeenCalledOnce();
     expect(syncPlay.setBufferingPolicy).toHaveBeenCalledWith("continue");
+    expect(syncPlay.setLocalSyncOffset).toHaveBeenCalledWith(-300);
 
     const rejected = await handlers.get(IPC.watchPartiesWait)?.(validEvent, {
       participantId: "33333333333343338333333333333333",
@@ -357,5 +432,6 @@ describe("IPC authorization and allowlist", () => {
       mode: "wait-for-all",
       gracePeriodMs: 0,
     })).resolves.toMatchObject({ ok: false });
+    await expect(handlers.get(IPC.watchPartiesSetLocalSyncOffset)?.(validEvent, { offsetMilliseconds: 250 })).resolves.toMatchObject({ ok: false });
   });
 });

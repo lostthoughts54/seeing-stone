@@ -35,8 +35,12 @@ const installer = join(
   `Seeing-Stone-Libmpv-Test-Setup-${packageMetadata.version}-x64.exe`,
 );
 const acceptanceRoot = join(runtimeRoot, "libmpv-test-package-acceptance");
+const installRoot = join(acceptanceRoot, "install");
+const emptyCwd = join(acceptanceRoot, "empty-cwd");
 const userDataRoot = join(acceptanceRoot, "user-data");
 const engineDiagnosticsPath = join(userDataRoot, "player-engine-status.json");
+const installedExecutable = join(installRoot, "Seeing Stone Libmpv Test.exe");
+const installedResources = join(installRoot, "resources");
 
 function requireFile(path, description) {
   assert.equal(existsSync(path) && statSync(path).isFile(), true, `Missing ${description}: ${path}`);
@@ -67,15 +71,16 @@ function resetAcceptanceRoot() {
   );
   rmSync(acceptanceRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   mkdirSync(userDataRoot, { recursive: true });
+  mkdirSync(emptyCwd, { recursive: true });
 }
 
-function runPackagedRuntimeVideoSmoke() {
+function runPackagedRuntimeVideoSmoke(resourcesRoot) {
   const electron = join(root, "node_modules", "electron", "dist", "electron.exe");
   requireFile(electron, "controlled Electron test executable");
   const result = spawnSync(electron, [
     "--disable-error-dialogs",
     join(root, "scripts", "libmpv-integrated-transport-smoke.cjs"),
-    `--resources=${resources}`,
+    `--resources=${resourcesRoot}`,
   ], {
     cwd: root,
     encoding: "utf8",
@@ -99,9 +104,17 @@ async function waitForFile(path, timeoutMilliseconds) {
   throw new Error(`Timed out waiting for ${path}.`);
 }
 
-async function verifyPackagedDefaultAndCapability() {
-  resetAcceptanceRoot();
-  const child = spawn(packagedExecutable, [`--user-data-dir=${userDataRoot}`], {
+async function waitForMissing(path, timeoutMilliseconds) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    if (!existsSync(path)) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+  throw new Error(`Timed out waiting for removal of ${path}.`);
+}
+
+async function verifyInstalledDefaultAndCapability() {
+  const child = spawn(installedExecutable, [`--user-data-dir=${userDataRoot}`], {
     cwd: acceptanceRoot,
     env: sanitizedEnvironment(),
     stdio: "ignore",
@@ -123,11 +136,82 @@ async function verifyPackagedDefaultAndCapability() {
   }
 }
 
+function assertRuntimeLayout(resourcesRoot, manifest, artifacts, expectedFiles) {
+  const runtimeLibMpvDirectory = join(resourcesRoot, "libmpv");
+  requireFile(join(resourcesRoot, "app.asar"), "packaged application archive");
+  requireFile(join(runtimeLibMpvDirectory, "INTERNAL_TESTING_ONLY.md"), "internal-build marker");
+  requireFile(join(resourcesRoot, "mpv", "mpv-runtime.json"), "mpv runtime manifest");
+  requireFile(join(resourcesRoot, "mpv", "mpv.exe"), "legacy fallback player");
+  for (const artifact of artifacts) {
+    const path = join(runtimeLibMpvDirectory, artifact.filename);
+    requireFile(path, `libmpv artifact ${artifact.filename}`);
+    assert.equal(sha256(path), artifact.sha256, `Hash mismatch for packaged artifact ${artifact.filename}.`);
+  }
+  assert.deepEqual(
+    new Set(readdirSync(runtimeLibMpvDirectory)),
+    expectedFiles,
+    "The packaged libmpv directory contains missing or unexpected files.",
+  );
+}
+
+function installArtifact() {
+  const result = spawnSync(installer, ["/S", "/currentuser", `/D=${installRoot}`], {
+    cwd: emptyCwd,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 180000,
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) throw result.error;
+  assert.equal(result.signal, null, `NSIS installation ended with signal ${result.signal}.`);
+  assert.equal(result.status, 0, `NSIS installation failed with exit ${result.status}.`);
+}
+
+function runInstalledFallbackAcceptance() {
+  let lastResult = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const result = spawnSync(process.execPath, [
+      join(root, "scripts", "mpv-runtime-acceptance.cjs"),
+      join(installedResources, "mpv"),
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 120000,
+    });
+    lastResult = result;
+    if (!result.error && result.signal === null && result.status === 0) {
+      if (result.stdout) process.stdout.write(result.stdout);
+      return;
+    }
+    if (attempt === 1) process.stdout.write("Retrying the installed fallback smoke after a transient mpv command failure.\n");
+  }
+  if (lastResult.stdout) process.stdout.write(lastResult.stdout);
+  if (lastResult.stderr) process.stderr.write(lastResult.stderr);
+  if (lastResult.error) throw lastResult.error;
+  assert.equal(lastResult.signal, null, `Installed fallback smoke ended with signal ${lastResult.signal}.`);
+  assert.equal(lastResult.status, 0, `Installed fallback smoke failed with exit ${lastResult.status}.`);
+}
+
+function uninstallArtifact() {
+  const entry = readdirSync(installRoot, { withFileTypes: true })
+    .find((candidate) => candidate.isFile() && /^Uninstall.*\.exe$/i.test(candidate.name));
+  assert.ok(entry, "The installed uninstaller is missing.");
+  const result = spawnSync(join(installRoot, entry.name), ["/S", "/currentuser"], {
+    cwd: emptyCwd,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 120000,
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, `NSIS uninstall failed with exit ${result.status}.`);
+}
+
 async function main() {
+  resetAcceptanceRoot();
   requireFile(installer, "internal test installer");
   requireFile(packagedExecutable, "packaged executable");
-  requireFile(join(resources, "app.asar"), "packaged application archive");
-  requireFile(join(libmpvDirectory, "INTERNAL_TESTING_ONLY.md"), "internal-build marker");
   requireFile(manifestPath, "mpv runtime manifest");
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -145,23 +229,16 @@ async function main() {
     ...artifacts.map((artifact) => artifact.filename),
   ]);
 
-  for (const artifact of artifacts) {
-    const path = join(libmpvDirectory, artifact.filename);
-    requireFile(path, `libmpv artifact ${artifact.filename}`);
-    assert.equal(
-      sha256(path),
-      artifact.sha256,
-      `Hash mismatch for packaged artifact ${artifact.filename}.`,
-    );
-  }
-  assert.deepEqual(
-    new Set(readdirSync(libmpvDirectory)),
-    expectedFiles,
-    "The packaged libmpv directory contains missing or unexpected files.",
-  );
-
-  runPackagedRuntimeVideoSmoke();
-  const diagnostics = await verifyPackagedDefaultAndCapability();
+  assertRuntimeLayout(resources, manifest, artifacts, expectedFiles);
+  runPackagedRuntimeVideoSmoke(resources);
+  installArtifact();
+  requireFile(installedExecutable, "installed application executable");
+  assertRuntimeLayout(installedResources, manifest, artifacts, expectedFiles);
+  runPackagedRuntimeVideoSmoke(installedResources);
+  const diagnostics = await verifyInstalledDefaultAndCapability();
+  runInstalledFallbackAcceptance();
+  uninstallArtifact();
+  await waitForMissing(installedExecutable, 60000);
 
   const installerSha256 = sha256(installer);
   const acceptanceResult = {
@@ -173,6 +250,8 @@ async function main() {
     redistributionStatus: manifest.redistributionStatus,
     packagedDefault: diagnostics.active,
     fallbackActive: diagnostics.fallbackActive,
+    installedPackageTested: true,
+    bundledPlayers: ["libmpv", "legacy-mpv-fallback"],
   };
   writeFileSync(
     `${installer}.sha256.txt`,

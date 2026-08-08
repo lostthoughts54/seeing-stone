@@ -92,9 +92,30 @@ const safeDiagnosticToken = (value: unknown, maximum = 64): string | null =>
 const safeDiagnosticPhrase = (value: unknown, maximum = 256): string | null =>
   safeDiagnostic(value, maximum, /^[A-Za-z0-9][A-Za-z0-9 .,_+():~-]*$/);
 
+function transcodeReasonsFromUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 16_384) return null;
+  try {
+    const parsed = new URL(value, "http://seeing-stone.invalid");
+    const raw = parsed.searchParams.get("TranscodeReasons")
+      ?? parsed.searchParams.get("transcodeReasons");
+    if (!raw) return null;
+    return raw.split(/[,|;]/)
+      .map((reason) => safeDiagnosticPhrase(reason.trim(), 128))
+      .filter((reason): reason is string => Boolean(reason))
+      .slice(0, 16)
+      .join(", ") || null;
+  } catch {
+    return null;
+  }
+}
+
 export function seeingStoneMpvDeviceProfile(): JsonRecord {
   return {
     Name: "Seeing Stone mpv",
+    // This is the player's decoding/network capability, not a requested
+    // transcode quality. Jellyfin still applies its server and per-user caps.
+    MaxStreamingBitrate: 200_000_000,
+    MaxStaticBitrate: 200_000_000,
     DirectPlayProfiles: [
       { Container: "mp4,m4v,mov", Type: "Video", VideoCodec: "h264,hevc,av1,mpeg4", AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus" },
       { Container: "mkv,webm", Type: "Video", VideoCodec: "h264,hevc,av1,vp9,vp8,mpeg4,mpeg2video,vc1,theora", AudioCodec: "aac,ac3,eac3,mp3,flac,alac,opus,vorbis,dts,truehd" },
@@ -137,9 +158,10 @@ function mediaSourceCapabilities(itemId: string, value: unknown): MediaSourceCap
       const audio = streams.find((stream) => stream.Type === "Audio");
       const width = nullableNumber(video?.Width);
       const height = nullableNumber(video?.Height);
-      const transcodeReasons = Array.isArray(source.TranscodingReasons)
+      const declaredTranscodeReasons = Array.isArray(source.TranscodingReasons)
         ? source.TranscodingReasons.map((reason) => safeDiagnosticPhrase(reason, 128)).filter((reason): reason is string => Boolean(reason)).slice(0, 16).join(", ") || null
         : safeDiagnosticPhrase(source.TranscodingReasons, 512);
+      const transcodeReasons = declaredTranscodeReasons ?? transcodeReasonsFromUrl(source.TranscodingUrl);
       return {
         id: safeOpaqueIdentifier(source.Id) ?? "",
         container: safeDiagnosticToken(source.Container),
@@ -166,6 +188,16 @@ export interface PlaybackSourceInfo {
   playSessionId: string | null;
   /** Main-process-only. Never include this value in a renderer contract. */
   liveStreamId: string | null;
+  /** Main-process-only negotiated routes. They may contain authenticated query data. */
+  negotiatedSources: Array<{
+    sourceId: string;
+    directStreamUrl: string | null;
+    transcodingUrl: string | null;
+  }>;
+}
+
+function mainOnlyStreamUrl(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 16_384 ? value : null;
 }
 
 function externalSubtitleFormat(value: unknown): ExternalSubtitleFormat {
@@ -362,6 +394,12 @@ export interface AuthenticatedSocketContext extends AuthenticatedContext {
 export interface ServerTimeResponse {
   requestReceptionTime: string;
   responseTransmissionTime: string;
+}
+export interface SeriesEpisodesPage {
+  items: MediaItem[];
+  startIndex: number;
+  totalRecordCount: number;
+  sessionRevision: number;
 }
 export type SyncPlayEndpoint =
   | "/SyncPlay/List"
@@ -635,25 +673,11 @@ export class JellyfinApi {
       library,
       items: (Array.isArray(latestResults[index]) ? latestResults[index] : []).map(sanitizeMediaItem),
     }));
-    const duplicateLibraryIds = new Set<string>();
-    const rowsByName = new Map<string, typeof latestRows[number]>();
-    for (const row of latestRows) {
-      const normalizedName = row.library.name.trim().toLocaleLowerCase();
-      const previous = rowsByName.get(normalizedName);
-      const itemIds = [...new Set(row.items.map((item) => item.id))].sort();
-      const previousItemIds = previous ? [...new Set(previous.items.map((item) => item.id))].sort() : [];
-      if (previous && itemIds.length > 0 && itemIds.length === previousItemIds.length
-        && itemIds.every((id, index) => id === previousItemIds[index])) {
-        duplicateLibraryIds.add(row.library.id);
-      } else if (!previous) {
-        rowsByName.set(normalizedName, row);
-      }
-    }
     return {
-      libraries: libraries.filter((library) => !duplicateLibraryIds.has(library.id)),
+      libraries,
       resumeItems: this.items(asRecord(resumeResult)).map(sanitizeMediaItem),
       nextUpItems: this.items(asRecord(nextUpResult)).map(sanitizeMediaItem),
-      latestRows: latestRows.filter((row) => !duplicateLibraryIds.has(row.library.id)),
+      latestRows,
     };
   }
 
@@ -671,18 +695,48 @@ export class JellyfinApi {
     return item ?? null;
   }
 
-  async getLibraryItems(libraryId: string, type: "Movie" | "Series", limit: number): Promise<MediaItem[]> {
+  async getLibraryItems(libraryId: string, type: "Movie" | "Series" | "Mixed", limit: number): Promise<MediaItem[]> {
     const session = this.requireSession();
     const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
       ParentId: libraryId,
       Recursive: "true",
-      IncludeItemTypes: type,
+      IncludeItemTypes: type === "Mixed" ? "Movie,Series,Video,MusicVideo" : type,
       SortBy: "SortName",
       SortOrder: "Ascending",
       Fields: ITEM_FIELDS,
       Limit: String(limit),
     }));
     return this.items(result).map(sanitizeMediaItem);
+  }
+
+  async getLibraryItemsPage(
+    libraryId: string,
+    type: "Movie" | "Series",
+    startIndex: number,
+    limit: number,
+    sort: "recently-added" | "release-date" | "alphabetical",
+  ): Promise<{ items: MediaItem[]; totalRecordCount: number }> {
+    const session = this.requireSession();
+    const sorting = sort === "recently-added"
+      ? { SortBy: "DateCreated,SortName", SortOrder: "Descending" }
+      : sort === "release-date"
+        ? { SortBy: "PremiereDate,SortName", SortOrder: "Descending" }
+        : { SortBy: "SortName", SortOrder: "Ascending" };
+    const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+      ParentId: libraryId,
+      Recursive: "true",
+      IncludeItemTypes: type,
+      ...sorting,
+      Fields: ITEM_FIELDS,
+      StartIndex: String(Math.max(0, Math.floor(startIndex))),
+      Limit: String(Math.max(1, Math.min(50, Math.floor(limit)))),
+      EnableTotalRecordCount: "true",
+    }));
+    const items = this.items(result).map(sanitizeMediaItem);
+    return {
+      items,
+      totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))),
+    };
   }
 
   async search(query: string): Promise<MediaItem[]> {
@@ -716,6 +770,39 @@ export class JellyfinApi {
       Fields: ITEM_FIELDS,
     }));
     return this.items(result).map(sanitizeMediaItem);
+  }
+
+  async getSeriesEpisodesPage(seriesId: string, startIndex: number, limit = 200): Promise<SeriesEpisodesPage> {
+    if (!Number.isSafeInteger(startIndex) || startIndex < 0 || !Number.isSafeInteger(limit) || limit !== 200) {
+      throw new AppError("INVALID_EPISODE_PAGE", "The Smart Download episode page is invalid.", 400);
+    }
+    const session = this.requireSession();
+    const sessionRevision = this.getAuthenticatedSocketContext().sessionRevision;
+    const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+      ParentId: seriesId,
+      Recursive: "true",
+      IncludeItemTypes: "Episode",
+      IsVirtualItem: "false",
+      SortBy: "ParentIndexNumber,IndexNumber,SortName",
+      SortOrder: "Ascending",
+      Fields: ITEM_FIELDS,
+      StartIndex: String(startIndex),
+      Limit: String(limit),
+      EnableTotalRecordCount: "true",
+    }));
+    const totalRecordCount = Number(result.TotalRecordCount);
+    if (!Number.isSafeInteger(totalRecordCount) || totalRecordCount < 0) {
+      throw new AppError("EPISODE_ENUMERATION_INVALID", "Jellyfin returned an invalid episode count.", 502);
+    }
+    if (this.getAuthenticatedSocketContext().sessionRevision !== sessionRevision) {
+      throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while episodes were loading.", 409);
+    }
+    return {
+      items: this.items(result).map(sanitizeMediaItem),
+      startIndex,
+      totalRecordCount,
+      sessionRevision,
+    };
   }
 
   async getLiveTvStatus(): Promise<LiveTvStatus> {
@@ -855,10 +942,16 @@ export class JellyfinApi {
 
   async getPlaybackSourceInfo(itemId: string, signal?: AbortSignal): Promise<PlaybackSourceInfo> {
     const result = await this.requestPlaybackInfo(itemId, signal);
+    const rawSources = Array.isArray(result.MediaSources) ? result.MediaSources.map(asRecord) : [];
     return {
       capabilities: mediaSourceCapabilities(itemId, result),
       playSessionId: safeOpaqueIdentifier(result.PlaySessionId),
-      liveStreamId: safeOpaqueIdentifier(asRecord((Array.isArray(result.MediaSources) ? result.MediaSources : [])[0]).LiveStreamId),
+      liveStreamId: safeOpaqueIdentifier(rawSources[0]?.LiveStreamId),
+      negotiatedSources: rawSources.map((source) => ({
+        sourceId: safeOpaqueIdentifier(source.Id) ?? "",
+        directStreamUrl: mainOnlyStreamUrl(source.DirectStreamUrl),
+        transcodingUrl: mainOnlyStreamUrl(source.TranscodingUrl),
+      })).filter((source) => source.sourceId),
     };
   }
 
@@ -1026,6 +1119,37 @@ export class JellyfinApi {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchNegotiatedLiveStream(value: string, signal?: AbortSignal): Promise<Response> {
+    const session = this.requireSession();
+    const server = new URL(session.serverUrl);
+    let target: URL;
+    try {
+      target = new URL(value, `${session.serverUrl}/`);
+    } catch {
+      throw new AppError("INVALID_LIVE_TV_STREAM", "Jellyfin returned an invalid Live TV stream.", 502);
+    }
+    if (!['http:', 'https:'].includes(target.protocol)
+      || target.origin !== server.origin
+      || target.username
+      || target.password) {
+      throw new AppError("INVALID_LIVE_TV_STREAM", "Jellyfin returned an unauthorized Live TV stream.", 502);
+    }
+    const serverBasePath = server.pathname.replace(/\/$/, "");
+    if (serverBasePath && serverBasePath !== "/"
+      && target.pathname !== serverBasePath
+      && !target.pathname.startsWith(`${serverBasePath}/`)) {
+      throw new AppError("INVALID_LIVE_TV_STREAM", "Jellyfin returned an unauthorized Live TV stream.", 502);
+    }
+    for (const key of [...target.searchParams.keys()]) {
+      if (/^(?:api[_-]?key|token|x-emby-token)$/i.test(key)) target.searchParams.delete(key);
+    }
+    target.hash = "";
+    const relativePath = serverBasePath && serverBasePath !== "/"
+      ? target.pathname.slice(serverBasePath.length) || "/"
+      : target.pathname;
+    return this.fetchAuthenticated(`${relativePath}${target.search}`, {}, { signal });
   }
 
   async closeLiveStream(liveStreamId: string): Promise<void> {

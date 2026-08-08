@@ -35,6 +35,8 @@ extraResources:
       - vulkan-1.dll
   - from: assets/mpv/input.conf
     to: mpv/input.conf
+  - from: assets/mpv/progressive-input.conf
+    to: mpv/progressive-input.conf
   - from: assets/mpv/NOTICE.md
     to: mpv/NOTICE.md
   - from: assets/mpv/licenses
