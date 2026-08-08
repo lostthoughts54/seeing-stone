@@ -48,7 +48,7 @@
         },
         {
           "path": "native/libmpv-runtime/real-video-gate-result-scale-1.json",
-          "sha256": "b45bd7caad0355cd2a09f4ea8273960e5684b9be7cd2984c6e5dcccf3b8d8b54"
+          "sha256": "1d61bccab56d75c2374c863141dd703879332ec5f38a4b42ed59c7807259fe0c"
         },
         {
           "path": "native/libmpv-runtime/real-video-gate-result-scale-1-5.json",
