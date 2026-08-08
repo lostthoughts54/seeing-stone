@@ -1387,12 +1387,15 @@ async function runElectronChild() {
         const sort = document.getElementById("librarySort");
         sort.value = "title-descending";
         sort.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let attempt = 0; attempt < 100 && titles()[0] !== "Zulu movie"; attempt += 1) await delay(20);
         const descending = titles();
         filter.value = "unwatched";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let attempt = 0; attempt < 100 && titles().length !== 2; attempt += 1) await delay(20);
         const unwatched = titles();
         filter.value = "watched";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let attempt = 0; attempt < 100 && titles().length !== 1; attempt += 1) await delay(20);
         const watched = titles();
         filter.value = "downloaded";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
