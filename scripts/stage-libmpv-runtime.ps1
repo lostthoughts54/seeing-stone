@@ -8,7 +8,7 @@ $prefixBin = Join-Path $buildRoot "prefix\bin"
 $addon = Join-Path $root "native\libmpv-bridge\build\Release\seeing_stone_libmpv_bridge.node"
 $stageRoot = Join-Path $root ".runtime\libmpv"
 $resultPath = Join-Path $root "native\libmpv-runtime\build-result.json"
-$runtimeManifestPath = Join-Path $root "mpv-runtime.json"
+$runtimeManifestPath = Join-Path $root "libmpv-runtime.json"
 $sourceLockPath = Join-Path $root "native\libmpv-runtime\source-lock.json"
 $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
 
@@ -86,7 +86,7 @@ foreach ($symbol in $requiredSymbols) {
 $sourceLockHash = (Get-FileHash -LiteralPath $sourceLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $artifacts = @(Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name | ForEach-Object {
   $role = if ($_.Name -eq $libraries[0].Name) { "library" }
-    elseif ($_.Name -eq "mpv.exe") { "player" }
+    elseif ($_.Name -eq "mpv.exe") { "headless-media-probe" }
     elseif ($_.Name -eq "mpv.com") { "console-launcher" }
     elseif ($_.Extension -eq ".node") { "native-addon" }
     elseif ($_.Name -match '^(av|sw).+-\d+\.dll$') { "ffmpeg-companion" }
@@ -121,13 +121,15 @@ if ($existingCanonical -ne $resultCanonical) {
   [IO.File]::WriteAllText($resultPath, "$json`n", [Text.UTF8Encoding]::new($false))
 }
 
-$runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
 $libraryArtifact = $artifacts | Where-Object { $_.role -eq "library" } | Select-Object -First 1
 $addonArtifact = $artifacts | Where-Object { $_.role -eq "native-addon" } | Select-Object -First 1
+$mediaProbeArtifact = $artifacts | Where-Object { $_.role -eq "headless-media-probe" } | Select-Object -First 1
+if (-not $mediaProbeArtifact) { throw "LIBMPV_MEDIA_PROBE_EXECUTABLE_MISSING" }
 $companionArtifacts = @($artifacts | Where-Object { $_.role -in @("ffmpeg-companion", "runtime-companion") } | ForEach-Object {
   [ordered]@{ filename = $_.filename; sha256 = $_.sha256 }
 })
 $mpvSource = $sourceLock.sources | Where-Object { $_.name -eq "mpv" } | Select-Object -First 1
+$ffmpegSource = $sourceLock.sources | Where-Object { $_.name -eq "FFmpeg" } | Select-Object -First 1
 $toolchain = [ordered]@{
   environment = $sourceLock.toolchain.msys2Environment
   target = $sourceLock.target
@@ -156,22 +158,40 @@ foreach ($scaleLabel in @("1", "1-5")) {
     $gate.native.unusable -eq $false
   if (-not $validGate) { $realVideoGatePassed = $false }
 }
-$runtimeManifest.libmpv = [ordered]@{
-  status = "ready"
-  realVideoGatePassed = $realVideoGatePassed
-  library = [ordered]@{ filename = $libraryArtifact.filename; sha256 = $libraryArtifact.sha256 }
-  clientApiVersion = $result.clientApiVersion
-  requiredSymbols = $result.requiredSymbols
-  companionDlls = $companionArtifacts
-  renderBackends = $result.renderBackends
-  nativeAddon = [ordered]@{ filename = $addonArtifact.filename; sha256 = $addonArtifact.sha256 }
-  build = [ordered]@{
-    sourceRevision = $mpvSource.commit
-    sourceArchiveUrl = $mpvSource.immutableUrl
-    sourceArchiveSha256 = $mpvSource.archiveSha256
-    configuration = @($sourceLock.buildConfiguration.ffmpeg) + @($sourceLock.buildConfiguration.mpv)
-    toolchain = $toolchain
-    correspondingSource = $sourceLock.correspondingSource
+$runtimeManifest = [ordered]@{
+  schemaVersion = 4
+  runtimeFamily = "controlled-source-built-libmpv"
+  redistributionStatus = "internal-only-release-review-required"
+  productionPlaybackEngine = "libmpv"
+  sourceBuild = [ordered]@{
+    configurationId = $sourceLock.buildConfigurationId
+    sourceLock = "native/libmpv-runtime/source-lock.json"
+    sourceLockSha256 = $sourceLockHash
+    mpv = [ordered]@{ version = $mpvSource.version; commit = $mpvSource.commit; archiveSha256 = $mpvSource.archiveSha256 }
+    ffmpeg = [ordered]@{ version = $ffmpegSource.version; commit = $ffmpegSource.commit; archiveSha256 = $ffmpegSource.archiveSha256 }
+  }
+  mediaProbe = [ordered]@{
+    role = "headless-media-probe"
+    playbackEngine = $false
+    executable = [ordered]@{ filename = $mediaProbeArtifact.filename; sha256 = $mediaProbeArtifact.sha256 }
+  }
+  libmpv = [ordered]@{
+    status = "ready"
+    realVideoGatePassed = $realVideoGatePassed
+    library = [ordered]@{ filename = $libraryArtifact.filename; sha256 = $libraryArtifact.sha256 }
+    clientApiVersion = $result.clientApiVersion
+    requiredSymbols = $result.requiredSymbols
+    companionDlls = $companionArtifacts
+    renderBackends = $result.renderBackends
+    nativeAddon = [ordered]@{ filename = $addonArtifact.filename; sha256 = $addonArtifact.sha256 }
+    build = [ordered]@{
+      sourceRevision = $mpvSource.commit
+      sourceArchiveUrl = $mpvSource.immutableUrl
+      sourceArchiveSha256 = $mpvSource.archiveSha256
+      configuration = @($sourceLock.buildConfiguration.ffmpeg) + @($sourceLock.buildConfiguration.mpv)
+      toolchain = $toolchain
+      correspondingSource = $sourceLock.correspondingSource
+    }
   }
 }
 $runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 12

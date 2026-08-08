@@ -14,7 +14,7 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-const manifest = JSON.parse(await readFile(resolve(root, "mpv-runtime.json"), "utf8"));
+const manifest = JSON.parse(await readFile(resolve(root, "libmpv-runtime.json"), "utf8"));
 const config = await readFile(resolve(root, "electron-builder.yml"), "utf8");
 
 if (manifest.libmpv?.status !== "ready" || manifest.libmpv.realVideoGatePassed !== true) {
@@ -23,14 +23,18 @@ if (manifest.libmpv?.status !== "ready" || manifest.libmpv.realVideoGatePassed !
 if (!config.includes("  - from: .runtime/libmpv\n    to: libmpv")) {
   reject("production build does not package the staged libmpv runtime at resources/libmpv");
 }
-if (!config.includes('      - "*.dll"') || !config.includes('      - "*.node"')) {
+if (!config.includes('      - "*.dll"') || !config.includes('      - "*.node"') || !config.includes('      - "mpv.exe"')) {
   reject("production build does not restrict libmpv resources to the reviewed native closure");
+}
+if (config.includes("from: .runtime/mpv") || config.includes("to: mpv")) {
+  reject("production build still packages the legacy mpv runtime hierarchy");
 }
 
 const artifacts = [
   manifest.libmpv?.library,
   manifest.libmpv?.nativeAddon,
   ...(manifest.libmpv?.companionDlls ?? []),
+  manifest.mediaProbe?.executable,
 ].filter(Boolean);
 const declared = new Set();
 for (const artifact of artifacts) {

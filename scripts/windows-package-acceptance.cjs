@@ -15,6 +15,7 @@ const {
   readdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } = require("node:fs");
 const { join, relative, resolve } = require("node:path");
 const { extractFile, listPackage } = require("@electron/asar");
@@ -48,8 +49,7 @@ async function main() {
   assert.equal(process.platform, "win32", "Windows package acceptance must run on Windows.");
   requireFile(installer);
   requireFile(unpackedExecutable);
-  assertNoExistingInstallation();
-  assertNoExistingShortcuts();
+  const existingInstallations = queryInstallations();
   safelyResetAcceptanceRoot();
   mkdirSync(userDataRoot, { recursive: true });
   mkdirSync(emptyCwd, { recursive: true });
@@ -65,19 +65,45 @@ async function main() {
   assertPackagedResources(unpackedRoot);
   await assertHardenedFuses(unpackedExecutable);
 
+  if (existingInstallations.length > 0) {
+    const firstIdentity = await launchAndVerifyApp(unpackedExecutable, true);
+    writeStaleAdapterPreference("legacy");
+    const secondIdentity = await launchAndVerifyApp(unpackedExecutable, false);
+    assert.equal(secondIdentity, firstIdentity, "The packaged device ID changed across the legacy preference migration.");
+    writeStaleAdapterPreference("embedded");
+    const thirdIdentity = await launchAndVerifyApp(unpackedExecutable, false);
+    assert.equal(thirdIdentity, firstIdentity, "The packaged device ID changed across the embedded preference migration.");
+    runPackagedMediaProbe(join(unpackedRoot, "resources"));
+    process.stdout.write(`${JSON.stringify({
+      result: "passed",
+      mode: "directory-package-existing-install-preserved",
+      existingInstallationCount: existingInstallations.length,
+      packagedMediaProbe: join(unpackedRoot, "resources", "libmpv", "mpv.exe"),
+      deviceIdentityStable: true,
+      stalePreferencesMigrated: ["legacy", "embedded"],
+    }, null, 2)}\n`);
+    safelyResetAcceptanceRoot();
+    return;
+  }
+  assertNoExistingShortcuts();
+
   installArtifact();
   requireFile(installedExecutable);
   assertVersionInfo(installedExecutable);
   assertPackagedResources(installRoot);
   await assertHardenedFuses(installedExecutable);
   assertInstalledRegistryLocation();
-  assert.equal(listInstalledProcesses().length, 0, "The isolated installed app was already running.");
+  assert.equal(listApplicationProcesses(installedExecutable).length, 0, "The isolated installed app was already running.");
 
-  const firstIdentity = await launchAndVerifyInstalledApp(true);
-  const secondIdentity = await launchAndVerifyInstalledApp(false);
+  const firstIdentity = await launchAndVerifyApp(installedExecutable, true);
+  writeStaleAdapterPreference("legacy");
+  const secondIdentity = await launchAndVerifyApp(installedExecutable, false);
   assert.equal(secondIdentity, firstIdentity, "The packaged device ID changed across restart.");
+  writeStaleAdapterPreference("embedded");
+  const thirdIdentity = await launchAndVerifyApp(installedExecutable, false);
+  assert.equal(thirdIdentity, firstIdentity, "The packaged device ID changed after the embedded preference migration.");
 
-  runInstalledMpvAcceptance();
+  runPackagedMediaProbe(join(installRoot, "resources"));
   uninstallArtifact();
   await waitFor(() => !existsSync(installedExecutable), 60000, "installed executable removal");
   assert.equal(existsSync(userDataRoot), true, "Uninstall removed the isolated user-data directory.");
@@ -90,7 +116,7 @@ async function main() {
     version: packageJson.version,
     architecture: "x64",
     installer: artifact,
-    installedMpv: join(installRoot, "resources", "mpv", "mpv.exe"),
+    installedMediaProbe: join(installRoot, "resources", "libmpv", "mpv.exe"),
     deviceIdentityStable: true,
     userDataRetainedAfterUninstall: true,
     gracefulClose: "not automated; isolated test processes were stopped after each launch",
@@ -104,9 +130,8 @@ function assertPackagedResources(applicationRoot) {
   const asarPath = join(resources, "app.asar");
   const workerPath = join(resources, "app.asar.unpacked", "dist", "main", "services", "persistenceWorker.js");
   const workerTypesPath = join(resources, "app.asar.unpacked", "dist", "main", "services", "persistenceTypes.js");
-  const mpvRoot = join(resources, "mpv");
   const libMpvRoot = join(resources, "libmpv");
-  const manifestPath = join(mpvRoot, "mpv-runtime.json");
+  const manifestPath = join(libMpvRoot, "runtime-manifest.json");
 
   for (const file of [
     join(applicationRoot, "LICENSE.electron.txt"),
@@ -118,13 +143,11 @@ function assertPackagedResources(applicationRoot) {
     asarPath,
     workerPath,
     workerTypesPath,
-    join(mpvRoot, "mpv.exe"),
-    join(mpvRoot, "mpv.com"),
-    join(mpvRoot, "vulkan-1.dll"),
-    join(mpvRoot, "input.conf"),
-    join(mpvRoot, "NOTICE.md"),
+    join(resources, "legal", "mpv", "NOTICE.md"),
+    join(libMpvRoot, "mpv.exe"),
     manifestPath,
   ]) requireFile(file);
+  assert.equal(existsSync(join(resources, "mpv")), false, "The historical resources/mpv runtime was packaged.");
 
   assert.equal(existsSync(join(resources, "app")), false, "A loose application directory was packaged.");
   assert.equal(existsSync(join(resources, "default_app.asar")), false, "Electron's default application was packaged.");
@@ -158,14 +181,10 @@ function assertPackagedResources(applicationRoot) {
   }
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  assert.match(manifest.version, /^v0\.41\.0/);
-  assert.equal(manifest.commit, "e5486b96d7d06dd148337899bfdc46bf25101663");
-  assert.ok(Array.isArray(manifest.licenseFiles) && manifest.licenseFiles.length >= 8, "The verified mpv notice manifest is incomplete.");
-  for (const license of manifest.licenseFiles) {
-    const licensePath = join(mpvRoot, "licenses", license.path);
-    requireFile(licensePath);
-    assert.equal(hashFileSync(licensePath), license.sha256, `Packaged license checksum mismatch: ${license.path}`);
-  }
+  assert.equal(manifest.runtimeFamily, "controlled-source-built-libmpv");
+  assert.equal(manifest.productionPlaybackEngine, "libmpv");
+  assert.equal(manifest.sourceBuild.mpv.version, "0.41.0");
+  assert.equal(manifest.sourceBuild.ffmpeg.version, "8.1.2");
 
   assert.equal(manifest.libmpv?.status, "ready", "The packaged runtime manifest does not declare libmpv ready.");
   assert.equal(manifest.libmpv.realVideoGatePassed, true, "The packaged libmpv runtime has not passed the real-video gate.");
@@ -173,8 +192,9 @@ function assertPackagedResources(applicationRoot) {
     manifest.libmpv.library,
     manifest.libmpv.nativeAddon,
     ...manifest.libmpv.companionDlls,
+    manifest.mediaProbe.executable,
   ];
-  const expectedLibMpvFiles = new Set(libMpvArtifacts.map((artifact) => artifact.filename));
+  const expectedLibMpvFiles = new Set(["runtime-manifest.json", ...libMpvArtifacts.map((artifact) => artifact.filename)]);
   for (const artifact of libMpvArtifacts) {
     const artifactPath = join(libMpvRoot, artifact.filename);
     requireFile(artifactPath);
@@ -209,8 +229,9 @@ function installArtifact() {
   assertChildSucceeded(result, "NSIS installation");
 }
 
-async function launchAndVerifyInstalledApp(checkSecondInstance) {
-  const child = spawn(installedExecutable, [`--user-data-dir=${userDataRoot}`], {
+async function launchAndVerifyApp(executable, checkSecondInstance) {
+  rmSync(join(userDataRoot, "player-engine-status.json"), { force: true });
+  const child = spawn(executable, [`--user-data-dir=${userDataRoot}`], {
     cwd: emptyCwd,
     env: sanitizedEnvironment(),
     stdio: "ignore",
@@ -218,48 +239,55 @@ async function launchAndVerifyInstalledApp(checkSecondInstance) {
   });
   let mainPid = null;
   try {
-    const windowState = await waitForWindow(45000);
+    const windowState = await waitForWindow(45000, executable);
     mainPid = windowState.pid;
     assert.equal(windowState.title, expectedTitle);
     assert.equal(windowState.responding, true);
     await waitFor(() => existsSync(join(userDataRoot, "device-identity.json")), 15000, "device identity creation");
     await waitFor(() => existsSync(join(userDataRoot, "localfirst.sqlite3")), 15000, "SQLite database creation");
     assertSqliteHeader(join(userDataRoot, "localfirst.sqlite3"));
+    await waitFor(() => existsSync(join(userDataRoot, "player-engine-status.json")), 15000, "player engine diagnostics");
+    const playerEngine = JSON.parse(readFileSync(join(userDataRoot, "player-engine-status.json"), "utf8"));
+    assert.equal(playerEngine.internalLibMpvTestBuild, false);
+    assert.equal(playerEngine.launchSelection, "libmpv");
+    assert.equal(playerEngine.active, "libmpv");
+    assert.equal(playerEngine.libmpvAvailable, true);
+    assert.equal(playerEngine.fallbackActive, false);
     await waitForRenderedInterface(windowState.handle, 30000);
     const identity = readDeviceId();
 
     if (checkSecondInstance) {
-      const duplicate = spawn(installedExecutable, [`--user-data-dir=${userDataRoot}`], {
+      const duplicate = spawn(executable, [`--user-data-dir=${userDataRoot}`], {
         cwd: emptyCwd,
         env: sanitizedEnvironment(),
         stdio: "ignore",
         windowsHide: true,
       });
       await waitForProcessExit(duplicate, 15000, "second packaged instance");
-      assert.equal(listInstalledProcesses().some((process) => process.pid === mainPid && process.handle !== 0), true, "The primary packaged instance exited when a second instance started.");
+      assert.equal(listApplicationProcesses(executable).some((process) => process.pid === mainPid && process.handle !== 0), true, "The primary packaged instance exited when a second instance started.");
       // Let Electron's queued second-instance focus event settle before ending
       // this isolated single-instance probe.
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000));
       // End the single-instance probe without racing its focus event against
       // the separate graceful-close probe on the next restart.
-      stopInstalledProcesses();
-      await waitFor(() => listInstalledProcesses().length === 0, 15000, "single-instance probe shutdown");
+      stopApplicationProcesses(executable);
+      await waitFor(() => listApplicationProcesses(executable).length === 0, 15000, "single-instance probe shutdown");
       return identity;
     }
 
-    stopInstalledProcesses();
-    await waitFor(() => listInstalledProcesses().length === 0, 15000, "restart probe shutdown");
+    stopApplicationProcesses(executable);
+    await waitFor(() => listApplicationProcesses(executable).length === 0, 15000, "restart probe shutdown");
     return identity;
   } finally {
-    if (listInstalledProcesses().length > 0) stopInstalledProcesses();
+    if (listApplicationProcesses(executable).length > 0) stopApplicationProcesses(executable);
     if (child.exitCode === null) child.kill();
   }
 }
 
-function runInstalledMpvAcceptance() {
+function runPackagedMediaProbe(resources) {
   const result = spawnSync(process.execPath, [
-    join(root, "scripts", "mpv-runtime-acceptance.cjs"),
-    join(installRoot, "resources", "mpv"),
+    join(root, "scripts", "media-probe-acceptance.cjs"),
+    join(resources, "libmpv"),
   ], {
     cwd: root,
     encoding: "utf8",
@@ -268,7 +296,16 @@ function runInstalledMpvAcceptance() {
   });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
-  assertChildSucceeded(result, "installed mpv runtime acceptance");
+  assertChildSucceeded(result, "installed controlled media probe acceptance");
+}
+
+function writeStaleAdapterPreference(adapterMode) {
+  writeFileSync(join(userDataRoot, "player-preferences.json"), `${JSON.stringify({
+    schemaVersion: 4,
+    windowMaximized: true,
+    adapterMode,
+    adapterModeExplicit: true,
+  }, null, 2)}\n`, "utf8");
 }
 
 function uninstallArtifact() {
@@ -355,16 +392,16 @@ function authenticodeStatus(path) {
   return runPowerShell(script, [path]).trim();
 }
 
-async function waitForWindow(timeout) {
+async function waitForWindow(timeout, executable) {
   let state = null;
   await waitFor(() => {
-    state = listInstalledProcesses().find((process) => process.handle !== 0 && process.title === expectedTitle && process.responding === true) || null;
+    state = listApplicationProcesses(executable).find((process) => process.handle !== 0 && process.title === expectedTitle && process.responding === true) || null;
     return state !== null;
   }, timeout, "visible packaged window");
   return state;
 }
 
-function listInstalledProcesses() {
+function listApplicationProcesses(executable) {
   const script = String.raw`
 $target = [IO.Path]::GetFullPath($args[0])
 $found = @(
@@ -381,7 +418,7 @@ $found = @(
 )
 ConvertTo-Json -Compress -InputObject @($found)
 `;
-  const output = runPowerShell(script, [installedExecutable], 10000).trim();
+  const output = runPowerShell(script, [executable], 10000).trim();
   if (!output) return [];
   const parsed = JSON.parse(output);
   return Array.isArray(parsed) ? parsed : [parsed];
@@ -441,14 +478,14 @@ async function waitForRenderedInterface(handle, timeout) {
   assert.fail(`Packaged renderer did not leave its startup frame: ${JSON.stringify(pixels)}`);
 }
 
-function stopInstalledProcesses() {
+function stopApplicationProcesses(executable) {
   const script = String.raw`
 $target = [IO.Path]::GetFullPath($args[0])
 Get-Process -ErrorAction SilentlyContinue | Where-Object {
   try { [IO.Path]::GetFullPath($_.Path) -eq $target } catch { $false }
 } | Stop-Process -Force
 `;
-  runPowerShell(script, [installedExecutable]);
+  runPowerShell(script, [executable]);
 }
 
 function runPowerShell(script, args = [], timeout = 30000) {

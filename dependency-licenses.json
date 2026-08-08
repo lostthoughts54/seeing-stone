@@ -33,7 +33,7 @@
         },
         {
           "path": "assets/mpv/NOTICE.md",
-          "sha256": "8072f601caede8f80faa086cac832f4fe0997ed8bf698c93e39ab9db178624b0"
+          "sha256": "f4db1732d781e702f5e88f00c8de7757367285e38b66dccf846f2d209cfeb155"
         },
         {
           "path": "native/libmpv-bridge/synthetic-gate-result.json",
@@ -45,7 +45,11 @@
         },
         {
           "path": "native/libmpv-runtime/build-result.json",
-          "sha256": "862aed26ba2f6daca6ac61f3625035c49415800172704d166543f11e2449715b"
+          "sha256": "ed89616afbdd1799ea11d522e717300f3b0ec674e5cacfc4d38b4597335d6b88"
+        },
+        {
+          "path": "libmpv-runtime.json",
+          "sha256": "00c66deb6fbfa0ff24a6ac5e76bd6789166bbe6b6a025496f460d0316ae2c22f"
         },
         {
           "path": "native/libmpv-runtime/render-context-gate-result.json",
@@ -131,12 +135,12 @@
     },
     {
       "category": "native",
-      "name": "mpv libmpv source input",
+      "name": "Controlled source-built mpv/libmpv runtime",
       "version": "0.41.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "41f6a645068483470267271e1d09966ca3b9f413",
-      "redistributionStatus": "source-only",
+      "redistributionStatus": "internal-only-controlled-source-build",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
@@ -173,12 +177,12 @@
     },
     {
       "category": "native",
-      "name": "FFmpeg libmpv source input",
+      "name": "Controlled source-built FFmpeg runtime",
       "version": "8.1.2",
       "license": "LGPL-2.1-or-later",
       "projectUrl": "https://ffmpeg.org",
       "sourceRevision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
-      "redistributionStatus": "source-only",
+      "redistributionStatus": "internal-only-controlled-source-build",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
@@ -187,12 +191,12 @@
     },
     {
       "category": "native",
-      "name": "mpv",
+      "name": "Legacy development prebuilt mpv",
       "version": "v0.41.0-dev-ge5486b96d",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "e5486b96d7d06dd148337899bfdc46bf25101663",
-      "redistributionStatus": "internal-only-unverified-provenance",
+      "redistributionStatus": "development-only-not-production-packaged",
       "artifacts": [
         {
           "path": "assets/mpv/licenses/mpv-Copyright.txt",
@@ -210,12 +214,12 @@
     },
     {
       "category": "native",
-      "name": "FFmpeg",
+      "name": "Legacy development prebuilt FFmpeg",
       "version": "ff59522",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/FFmpeg/FFmpeg",
       "sourceRevision": "ff59522",
-      "redistributionStatus": "internal-only-unverified-provenance",
+      "redistributionStatus": "development-only-not-production-packaged",
       "artifacts": [
         {
           "path": "assets/mpv/licenses/ffmpeg-LICENSE.md",
@@ -233,12 +237,12 @@
     },
     {
       "category": "native",
-      "name": "Vulkan Loader",
+      "name": "Legacy development prebuilt Vulkan Loader",
       "version": "runtime-associated; exact revision not recorded upstream",
       "license": "Apache-2.0",
       "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
       "sourceRevision": null,
-      "redistributionStatus": "internal-only-unverified-provenance",
+      "redistributionStatus": "development-only-not-production-packaged",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/Vulkan-Loader-LICENSE.txt",
@@ -247,12 +251,12 @@
     },
     {
       "category": "native",
-      "name": "AMD Advanced Media Framework headers",
+      "name": "Legacy development prebuilt AMD Advanced Media Framework headers",
       "version": "runtime-associated; exact revision not recorded upstream",
       "license": "MIT",
       "projectUrl": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
       "sourceRevision": null,
-      "redistributionStatus": "internal-only-unverified-provenance",
+      "redistributionStatus": "development-only-not-production-packaged",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/AMD-AMF-LICENSE.txt",

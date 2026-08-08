@@ -11,6 +11,8 @@ All release assets must have an identified source and redistribution basis.
 | `src/renderer/assets/fonts/Spectral-SemiBold.ttf` | Google Fonts snapshot `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5` | OFL-1.1; SHA-256 `5f86915a744832ecf6e4a17ab04bea091b9fa992ef5164ff65ae34c1da2fe94b` |
 | Inter and Spectral license texts | Family-specific upstream OFL notices beside the font assets | OFL-1.1; hashes recorded in `legal-components.json` |
 | Runtime test media under `.runtime/` | Local acceptance fixtures; excluded from Git and release packages | Not distributed |
+| Production mpv/libmpv runtime | Controlled mpv 0.41.0 and FFmpeg 8.1.2 source build recorded in `native/libmpv-runtime/source-lock.json`, `native/libmpv-runtime/build-result.json`, and `libmpv-runtime.json` | Internal package only; public redistribution review remains incomplete |
+| Legacy `.runtime/mpv` binaries | Historical pinned prebuilt runtime for explicit development/regression adapters | Development only; excluded from production packages |
 | `assets/fixtures/live-tv/*` | Original synthetic test patterns and tones generated from FFmpeg `lavfi` sources for Seeing Stone’s Live TV acceptance fixture | Test-only and excluded from release packages; exact hashes and generation details recorded in `assets/fixtures/live-tv/provenance.json` |
 | Approved UI mockup | User-provided visual direction | Reference only; not packaged |
 

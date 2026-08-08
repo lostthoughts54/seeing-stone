@@ -53,6 +53,7 @@ export class PlayerControllerRouter implements PlayerController {
     private readonly embeddedFactory: RouteFactory,
     private readonly legacyFactory: RouteFactory,
     private readonly onStatusChanged: (status: PlayerAdapterLaunchStatus) => void = () => undefined,
+    private readonly allowAdapterFallback = true,
   ) {
     this.route = initial;
     this.attachRoute();
@@ -89,6 +90,7 @@ export class PlayerControllerRouter implements PlayerController {
     try {
       return await this.route.controller.loadItem(itemId, resumeMode, context);
     } catch (libmpvError) {
+      if (!this.allowAdapterFallback) throw libmpvError;
       if (this.status.launchSelection !== "libmpv") throw libmpvError;
       if (this.route.mode === "embedded") {
         if (!isEngineFailure(libmpvError, "embedded")) throw libmpvError;

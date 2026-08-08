@@ -22,7 +22,7 @@ void main().catch((error) => {
 
 async function main() {
   assert.equal(existsSync(executable), true, "Run pnpm setup:mpv first.");
-  const manifest = JSON.parse(readFileSync(join(root, "mpv-runtime.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(root, "legacy-mpv-runtime.json"), "utf8"));
   const executableHash = createHash("sha256").update(readFileSync(executable)).digest("hex");
   assert.equal(executableHash, manifest.executableSha256, "Pinned mpv.exe checksum mismatch.");
   if (!existsSync(fixture)) createFixture();

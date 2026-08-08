@@ -169,6 +169,8 @@ const REDISTRIBUTION_STATUSES = new Set([
   "source-only",
   "source-and-binary",
   "internal-only-unverified-provenance",
+  "internal-only-controlled-source-build",
+  "development-only-not-production-packaged",
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -254,7 +256,10 @@ export async function loadLegalComponents(manifestPath = componentsManifest, roo
     if (!REDISTRIBUTION_STATUSES.has(redistributionStatus)) {
       throw new LicenseAuditError(`Legal component ${name} has an unknown redistribution status: ${redistributionStatus}.`);
     }
-    if (!sourceRevision && category !== "application" && redistributionStatus !== "internal-only-unverified-provenance") {
+    if (!sourceRevision && category !== "application" && ![
+      "internal-only-unverified-provenance",
+      "development-only-not-production-packaged",
+    ].includes(redistributionStatus)) {
       throw new LicenseAuditError(`Legal component ${name} must record an immutable source revision.`);
     }
 
@@ -390,7 +395,7 @@ function renderArtifacts(packages, components) {
     ...components.map((entry) => `| ${entry.category} | ${entry.name.replaceAll("|", "\\|")} | ${entry.version.replaceAll("|", "\\|")} | ${entry.license.replaceAll("|", "\\|")} | ${entry.redistributionStatus} |`),
     "",
     "Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.",
-    "The current native runtime remains internal-only because upstream did not record a complete linked-dependency source bill of materials.",
+    "The controlled native runtime remains internal-only until complete companion provenance, corresponding source, notices, and release acceptance are verified.",
     "",
     "## JavaScript dependencies",
     "",
@@ -400,7 +405,7 @@ function renderArtifacts(packages, components) {
     "",
     "## Native playback runtime details",
     "",
-    "See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `mpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.",
+    "See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `libmpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.",
     "The current Windows binary is not approved for public redistribution.",
     "",
   ].join("\n");

@@ -1,10 +1,10 @@
 # Native player provenance and build policy
 
 Seeing Stone's public source release targets a GPL-enabled mpv and FFmpeg stack.
-The current internal Windows runtime remains pinned by `mpv-runtime.json`, but its
-upstream archive is not approved for public redistribution because it does not
-provide a complete corresponding-source bundle for every statically linked
-component.
+The production Windows runtime is the pinned source-built closure recorded by
+`libmpv-runtime.json`. The historical prebuilt runtime is recorded separately in
+`legacy-mpv-runtime.json` for development/regression adapters and is never a
+production package input.
 
 ## Required reproducible build
 
@@ -14,8 +14,9 @@ The release build must use only freely available tools and must:
    runtime manifest, verify its archive hash, and never build from a moving branch.
 2. Build FFmpeg with GPL support and without nonfree components or optional
    proprietary encoder SDKs.
-3. Build the pinned mpv source as `mpv.exe` for the unchanged embedded and
-   legacy adapters. A libmpv build is a separate gated artifact: its manifest
+3. Build the pinned mpv source with `libmpv` and `cplayer` enabled. Libmpv is the
+   production playback engine; the same build's `mpv.exe` is a headless media
+   probe only. The controlled manifest
    must name the exact library file, client ABI, headers, companion DLLs,
    source revisions, build flags, toolchain, patches, hashes, and corresponding
    source. No arbitrary prebuilt libmpv binary is accepted.

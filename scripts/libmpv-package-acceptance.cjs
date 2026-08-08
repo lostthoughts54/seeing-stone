@@ -28,7 +28,7 @@ const output = join(runtimeRoot, outputDirectoryName);
 const unpacked = join(output, "win-unpacked");
 const resources = join(unpacked, "resources");
 const libmpvDirectory = join(resources, "libmpv");
-const manifestPath = join(resources, "mpv", "mpv-runtime.json");
+const manifestPath = join(resources, "libmpv", "runtime-manifest.json");
 const packagedExecutable = join(unpacked, "Seeing Stone Libmpv Test.exe");
 const installer = join(
   output,
@@ -140,7 +140,7 @@ function assertRuntimeLayout(resourcesRoot, manifest, artifacts, expectedFiles) 
   const runtimeLibMpvDirectory = join(resourcesRoot, "libmpv");
   requireFile(join(resourcesRoot, "app.asar"), "packaged application archive");
   requireFile(join(runtimeLibMpvDirectory, "INTERNAL_TESTING_ONLY.md"), "internal-build marker");
-  requireFile(join(resourcesRoot, "mpv", "mpv-runtime.json"), "mpv runtime manifest");
+  requireFile(join(resourcesRoot, "libmpv", "runtime-manifest.json"), "controlled runtime manifest");
   requireFile(join(resourcesRoot, "mpv", "mpv.exe"), "legacy fallback player");
   for (const artifact of artifacts) {
     const path = join(runtimeLibMpvDirectory, artifact.filename);
@@ -215,7 +215,7 @@ async function main() {
   requireFile(manifestPath, "mpv runtime manifest");
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  assert.equal(manifest.redistributionStatus, "internal-testing-only");
+  assert.equal(manifest.redistributionStatus, "internal-only-release-review-required");
   assert.equal(manifest.libmpv?.status, "ready");
   assert.equal(manifest.libmpv.realVideoGatePassed, true);
 
@@ -223,9 +223,11 @@ async function main() {
     manifest.libmpv.library,
     manifest.libmpv.nativeAddon,
     ...manifest.libmpv.companionDlls,
+    manifest.mediaProbe.executable,
   ];
   const expectedFiles = new Set([
     "INTERNAL_TESTING_ONLY.md",
+    "runtime-manifest.json",
     ...artifacts.map((artifact) => artifact.filename),
   ]);
 

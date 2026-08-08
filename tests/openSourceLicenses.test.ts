@@ -8,7 +8,8 @@ describe("OpenSourceLicensesService", () => {
     expect(inventory.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ category: "font", name: "Inter", license: "OFL-1.1" }),
       expect.objectContaining({ category: "font", name: "Spectral", license: "OFL-1.1" }),
-      expect.objectContaining({ category: "native", name: "mpv", redistributionStatus: "internal-only-unverified-provenance" }),
+      expect.objectContaining({ category: "native", name: "Controlled source-built mpv/libmpv runtime", redistributionStatus: "internal-only-controlled-source-build" }),
+      expect.objectContaining({ category: "native", name: "Legacy development prebuilt mpv", redistributionStatus: "development-only-not-production-packaged" }),
       expect.objectContaining({ category: "dependency", name: "electron", license: "MIT" }),
     ]));
     const serialized = JSON.stringify(inventory);

@@ -54,7 +54,7 @@ import { CompanionRemoteManager } from "./services/companionRemoteManager";
 import { CompanionArtworkService } from "./services/companionArtwork";
 import { LiveTvContextService } from "./services/liveTvContext";
 import { requestedPlayerAdapterMode, resolvePlayerAdapterLaunch } from "./services/playerAdapterSelection";
-import { detectLibMpvRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "./services/libMpvRuntime";
+import { detectLibMpvRuntime, detectMediaProbeRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "./services/libMpvRuntime";
 import { LibMpvHost } from "./services/libMpvHost";
 import { ElectronLibMpvBridge } from "./services/libMpvElectronBridge";
 import { PlayerControllerRouter, type PlayerControllerRoute } from "./services/playerControllerRouter";
@@ -68,11 +68,13 @@ import {
   formatCleanMachineDiagnostics,
   probeControlledLibMpvRuntime,
 } from "./services/cleanMachineDiagnostics";
+import { UnavailablePlayerController } from "./services/unavailablePlayerController";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
 const internalLibMpvAcceptanceBuild = app.isPackaged
   && existsSync(join(process.resourcesPath, "libmpv", "INTERNAL_TESTING_ONLY.md"));
+const packagedProduction = app.isPackaged && !internalLibMpvAcceptanceBuild;
 const applicationId = internalLibMpvAcceptanceBuild
   ? "app.seeingstone.client.libmpv-test"
   : "app.seeingstone.client";
@@ -152,7 +154,8 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const playerPreferences = new PlayerPreferencesService(
     app.getPath("userData"),
     applicationPreferences,
-    internalLibMpvAcceptanceBuild ? "libmpv" : app.isPackaged ? "legacy" : "embedded",
+    app.isPackaged ? "libmpv" : "embedded",
+    packagedProduction ? "libmpv" : undefined,
   );
 
   await rendererSession.protocol.handle("app", serveRendererAsset);
@@ -161,12 +164,17 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   });
   mainWindow = createWindow();
   const trailerWindow = new TrailerWindowService();
-  const runtime = await resolveMpvRuntime({
+  const runtimeLocation = {
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     moduleDirectory: __dirname,
-  });
-  const mediaProbe = new MediaProbeService(runtime);
+  };
+  const manifestPath = libMpvManifestPath(runtimeLocation);
+  const runtimeDirectory = libMpvRuntimeDirectory(runtimeLocation);
+  const libmpvCapability = await detectLibMpvRuntime({ manifestPath, runtimeDirectory });
+  const mediaProbeRuntime = await detectMediaProbeRuntime({ manifestPath, runtimeDirectory });
+  const legacyRuntime = packagedProduction ? null : await resolveMpvRuntime(runtimeLocation);
+  const mediaProbe = new MediaProbeService(mediaProbeRuntime);
   const defaultDownloadStorageRoot = join(app.getPath("videos"), "Seeing Stone Downloads");
   const downloadLocation = new DownloadLocationService(app.getPath("userData"), defaultDownloadStorageRoot);
   const downloadStorageRoot = await downloadLocation.getActiveRoot();
@@ -224,33 +232,27 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.downloadsChanged, downloads);
   });
   const storedPlayerPreferences = await playerPreferences.get();
-  const requestedMode = requestedPlayerAdapterMode(process.env.SEEING_STONE_PLAYER, storedPlayerPreferences.adapterMode);
-  const libmpvCapability = await detectLibMpvRuntime({
-    manifestPath: libMpvManifestPath({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      moduleDirectory: __dirname,
-    }),
-    runtimeDirectory: libMpvRuntimeDirectory({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      moduleDirectory: __dirname,
-    }),
-  });
-  const adapterLaunch = resolvePlayerAdapterLaunch(requestedMode, libmpvCapability);
+  const requestedMode = requestedPlayerAdapterMode(
+    process.env.SEEING_STONE_PLAYER,
+    storedPlayerPreferences.adapterMode,
+    packagedProduction,
+  );
+  const adapterLaunch = resolvePlayerAdapterLaunch(requestedMode, libmpvCapability, !packagedProduction);
   const createLegacyRoute = (): PlayerControllerRoute => {
+    if (!legacyRuntime) throw new AppError("PLAYER_RUNTIME_UNAVAILABLE", "The legacy development player is unavailable.", 503);
     activeVideoHost = null;
     return {
       mode: "legacy",
-      controller: configureProgressiveFallback(new LegacyExternalMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime)),
+      controller: configureProgressiveFallback(new LegacyExternalMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, legacyRuntime)),
     };
   };
   const createEmbeddedRoute = (): PlayerControllerRoute => {
+    if (!legacyRuntime) throw new AppError("PLAYER_RUNTIME_UNAVAILABLE", "The embedded development player is unavailable.", 503);
     const host = new EmbeddedVideoHost(mainWindow!);
     activeVideoHost = host;
     return {
       mode: "embedded",
-      controller: configureProgressiveFallback(new EmbeddedMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, runtime, host)),
+      controller: configureProgressiveFallback(new EmbeddedMpvAdapter(mainWindow!, playbackSource, playbackReporting, playerPreferences, legacyRuntime, host)),
       updateViewport: (viewport) => host.updateViewport(viewport),
       dispose: () => {
         host.destroy();
@@ -258,6 +260,10 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       },
     };
   };
+  const createUnavailableRoute = (): PlayerControllerRoute => ({
+    mode: "libmpv",
+    controller: new UnavailablePlayerController(),
+  });
   let initialRoute: PlayerControllerRoute;
   if (adapterLaunch.active === "libmpv" && libmpvCapability.available && libmpvCapability.artifacts) {
     try {
@@ -271,7 +277,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       const host = new LibMpvHost(libmpvCapability, bridge);
       initialRoute = {
         mode: "libmpv",
-        controller: configureProgressiveFallback(new LibMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, runtime, host)),
+        controller: configureProgressiveFallback(new LibMpvAdapter(mainWindow, playbackSource, playbackReporting, playerPreferences, host)),
         updateViewport: (viewport) => bridge.updateViewport({
           width: viewport.width,
           height: viewport.height,
@@ -282,15 +288,24 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
         dispose: () => host.destroy(),
       };
     } catch {
-      adapterLaunch.active = "embedded";
       adapterLaunch.libmpvAvailable = false;
-      adapterLaunch.fallbackActive = true;
-      adapterLaunch.fallbackFrom = "libmpv";
       adapterLaunch.fallbackReason = "initialization-failed";
-      initialRoute = createEmbeddedRoute();
+      if (packagedProduction) {
+        adapterLaunch.active = "libmpv";
+        adapterLaunch.fallbackActive = false;
+        adapterLaunch.fallbackFrom = null;
+        initialRoute = createUnavailableRoute();
+      } else {
+        adapterLaunch.active = "embedded";
+        adapterLaunch.fallbackActive = true;
+        adapterLaunch.fallbackFrom = "libmpv";
+        initialRoute = createEmbeddedRoute();
+      }
     }
   } else {
-    initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute();
+    initialRoute = adapterLaunch.active === "libmpv"
+      ? createUnavailableRoute()
+      : adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute();
   }
   const recordPlayerEngineStatus = (): void => {
     void persistPlayerEngineDiagnostics(
@@ -306,6 +321,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     createEmbeddedRoute,
     createLegacyRoute,
     recordPlayerEngineStatus,
+    !packagedProduction,
   );
   recordPlayerEngineStatus();
   const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);

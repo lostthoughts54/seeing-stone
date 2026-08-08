@@ -1,7 +1,7 @@
 # Libmpv migration status
 
-The migration is gated. Passing an earlier rendering gate does not approve a
-public installer or make libmpv the default player.
+The production runtime migration is complete. This does not approve a public
+installer; the separate redistribution gate remains in force.
 
 ## Milestone 0 — architecture scaffolding: passed
 
@@ -9,15 +9,15 @@ public installer or make libmpv the default player.
   Initialization, stop, and destruction are idempotent and stale callbacks are
   rejected.
 - Runtime detection accepts only the exact files and hashes in
-  `mpv-runtime.json`, beneath a controlled application directory. It never
+  `libmpv-runtime.json`, beneath a controlled application directory. It never
   searches `PATH` or downloads a binary.
-- The saved preference accepts `libmpv`. An unavailable or failed startup falls
-  back without changing that preference or creating a restart loop.
+- Packaged production locks the saved preference to `libmpv`. An unavailable or
+  failed startup exposes a sanitized unavailable state without an engine switch.
 - Public fallback reasons are a finite sanitized enum. Renderer contracts do
   not expose media URLs, credentials, paths, DLL names, native handles, or
   pointers.
-- Existing embedded and legacy implementations retain their development and
-  packaged defaults.
+- Existing embedded and legacy implementations remain available only for
+  explicit development and regression use.
 
 ## Milestone 1 — synthetic Electron shared texture: passed
 
@@ -94,11 +94,18 @@ track, and SyncPlay tests pass. Authenticated Jellyfin direct-play,
 direct-stream, transcode, audio, subtitle, Next Up, and SyncPlay behavior still
 requires the manual acceptance checklist in `LIBMPV_EXPERIMENTAL.md`.
 
-## Milestone 5 — packaging and public release: no-go
+## Milestone 5 — production runtime migration complete; public release no-go
 
-Libmpv is intentionally not included in `electron-builder.yml`. The stable
-installer continues to package the existing player runtime and retains the
-legacy packaged default.
+The stable production package now contains only the controlled source-built
+libmpv runtime closure under `resources/libmpv`. It defaults to libmpv, migrates
+stale packaged legacy/embedded preferences to libmpv, and never falls back to
+the removed external or embedded-WID production adapters. A missing or failed
+runtime leaves the application open with a sanitized playback-unavailable state.
+
+The same source build's manifest-verified `mpv.exe` is packaged beside libmpv
+only for headless media validation. The historical prebuilt `.runtime/mpv`
+family, input configs, console launcher, and old manifest are absent from the
+production package. Development/regression adapters remain in source.
 
 A separate `electron-builder.libmpv-test.yml` path now produces an internal,
 self-contained Windows x64 acceptance product with a distinct application ID,
@@ -121,7 +128,7 @@ Public release remains blocked until all of the following are complete:
   verification from the installed layout;
 - authenticated controller parity, hardware/audio testing, device-loss stress,
   and the manual release checklist;
-- explicit approval to add libmpv resources to packaging or change defaults.
+- final release approval after all technical, licensing, and acceptance records pass.
 
 Run `pnpm run validate:libmpv-release` for the hard release gate. It must remain
 red until those records and acceptance artifacts genuinely exist.

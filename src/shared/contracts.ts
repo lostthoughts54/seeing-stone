@@ -332,7 +332,12 @@ export interface SoloSessionDiagnostics {
 }
 
 export type OpenSourceLicenseCategory = "application" | "dependency" | "font" | "native" | "plugin";
-export type RedistributionStatus = "source-only" | "source-and-binary" | "internal-only-unverified-provenance";
+export type RedistributionStatus =
+  | "source-only"
+  | "source-and-binary"
+  | "internal-only-unverified-provenance"
+  | "internal-only-controlled-source-build"
+  | "development-only-not-production-packaged";
 
 export interface OpenSourceLicenseEntry {
   category: OpenSourceLicenseCategory;

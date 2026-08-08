@@ -115,7 +115,7 @@ describe("renderer and preload security boundary", () => {
     expect(preload).not.toMatch(/new WebSocket|\bfetch\s*\(/);
   });
 
-  it("keeps legacy playback while gating a main-controlled Windows video overlay", async () => {
+  it("keeps development adapters while gating the production libmpv player", async () => {
     const player = await readFile("src/main/services/mpvPlayer.ts", "utf8");
     const host = await readFile("src/main/services/embeddedVideoHost.ts", "utf8");
     const main = await readFile("src/main/index.ts", "utf8");
@@ -140,8 +140,9 @@ describe("renderer and preload security boundary", () => {
     expect(host).toContain("readBigUInt64LE(0)");
     expect(host).toContain("GWLP_HWNDPARENT");
     expect(host).toContain("WS_EX_TRANSPARENT");
-    expect(main).toContain("requestedPlayerAdapterMode(process.env.SEEING_STONE_PLAYER");
-    expect(main).toContain('initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute()');
+    expect(main).toContain("requestedPlayerAdapterMode(");
+    expect(main).toContain("packagedProduction");
+    expect(main).toContain("createUnavailableRoute()");
     expect(main).toContain("new LibMpvAdapter(");
     expect(input).toContain("Ctrl+r script-message jellyfin-resync");
   });

@@ -52,6 +52,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
     userDataPath: string,
     private readonly durablePreferences?: AdapterPreferencePersistence,
     private readonly defaultAdapterMode: PlayerAdapterMode = "legacy",
+    private readonly lockedAdapterMode?: PlayerAdapterMode,
   ) {
     this.preferencesPath = join(userDataPath, "player-preferences.json");
   }
@@ -78,6 +79,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
 
   async setAdapterMode(adapterMode: PlayerAdapterMode): Promise<void> {
     await this.runExclusive(async () => {
+      adapterMode = this.applyAdapterPolicy(adapterMode);
       const current = await this.get();
       if (current.adapterMode === adapterMode && this.adapterModeExplicit) return;
       const next = { ...current, adapterMode };
@@ -96,7 +98,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
         this.adapterModeExplicit = parsed.data.adapterModeExplicit;
         this.cached = {
           windowMaximized: parsed.data.windowMaximized,
-          adapterMode: parsed.data.adapterModeExplicit ? parsed.data.adapterMode : this.defaultAdapterMode,
+          adapterMode: this.applyAdapterPolicy(parsed.data.adapterModeExplicit ? parsed.data.adapterMode : this.defaultAdapterMode),
         };
       } else {
         const versionThree = versionThreePreferencesSchema.safeParse(raw);
@@ -104,7 +106,7 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
           this.adapterModeExplicit = versionThree.data.adapterModeExplicit;
           this.cached = {
             windowMaximized: versionThree.data.windowMaximized,
-            adapterMode: versionThree.data.adapterModeExplicit ? versionThree.data.adapterMode : this.defaultAdapterMode,
+            adapterMode: this.applyAdapterPolicy(versionThree.data.adapterModeExplicit ? versionThree.data.adapterMode : this.defaultAdapterMode),
           };
           await this.persist(this.cached, this.adapterModeExplicit);
           return this.cached;
@@ -116,18 +118,20 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
         // Schema 1/2 never exposed an engine selector. Their stored adapter value was
         // an automatic launch default, not evidence of an intentional user choice.
         this.adapterModeExplicit = false;
-        this.cached = { windowMaximized, adapterMode: this.defaultAdapterMode };
+        this.cached = { windowMaximized, adapterMode: this.applyAdapterPolicy(this.defaultAdapterMode) };
       }
       await this.persist(this.cached, this.adapterModeExplicit);
     } catch {
       this.adapterModeExplicit = false;
-      this.cached = { windowMaximized: true, adapterMode: this.defaultAdapterMode };
+      this.cached = { windowMaximized: true, adapterMode: this.applyAdapterPolicy(this.defaultAdapterMode) };
       await this.persist(this.cached, false);
     }
     if (this.adapterModeExplicit) {
       const durableMode = await this.durablePreferences?.getAdapterMode().catch(() => null) ?? null;
       if (durableMode) {
-        this.cached = { ...this.cached, adapterMode: durableMode };
+        const effectiveMode = this.applyAdapterPolicy(durableMode);
+        this.cached = { ...this.cached, adapterMode: effectiveMode };
+        if (effectiveMode !== durableMode) await this.durablePreferences?.setAdapterMode(effectiveMode).catch(() => undefined);
         await this.persist(this.cached, true);
       } else if (this.durablePreferences && this.cached.adapterMode) {
         await this.durablePreferences.setAdapterMode(this.cached.adapterMode).catch(() => undefined);
@@ -136,11 +140,15 @@ export class PlayerPreferencesService implements PlayerPreferencesStore {
     return this.cached;
   }
 
+  private applyAdapterPolicy(mode: PlayerAdapterMode): PlayerAdapterMode {
+    return this.lockedAdapterMode ?? mode;
+  }
+
   private async persist(preferences: PlayerPreferences, adapterModeExplicit: boolean): Promise<void> {
     const safe = preferencesSchema.parse({
       schemaVersion: 4,
       ...preferences,
-      adapterMode: preferences.adapterMode ?? this.defaultAdapterMode,
+      adapterMode: this.applyAdapterPolicy(preferences.adapterMode ?? this.defaultAdapterMode),
       adapterModeExplicit,
     });
     await mkdir(dirname(this.preferencesPath), { recursive: true });

@@ -15,12 +15,12 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-const manifest = JSON.parse(await readFile(resolve(root, "mpv-runtime.json"), "utf8"));
+const manifest = JSON.parse(await readFile(resolve(root, "libmpv-runtime.json"), "utf8"));
 const config = await readFile(resolve(root, "electron-builder.libmpv-test.yml"), "utf8");
 const documentation = await readFile(resolve(root, "INTERNAL_LIBMPV_TESTING.md"), "utf8");
 await runLicenseAudit("--check");
 
-if (manifest.redistributionStatus !== "internal-testing-only") {
+if (manifest.redistributionStatus !== "internal-only-release-review-required") {
   reject("runtime manifest is not explicitly limited to internal testing");
 }
 if (manifest.libmpv?.status !== "ready" || manifest.libmpv.realVideoGatePassed !== true) {
@@ -38,6 +38,7 @@ const artifacts = [
   manifest.libmpv?.library,
   manifest.libmpv?.nativeAddon,
   ...(manifest.libmpv?.companionDlls ?? []),
+  manifest.mediaProbe?.executable,
 ].filter(Boolean);
 const declared = new Set();
 for (const artifact of artifacts) {

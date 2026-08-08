@@ -39,7 +39,7 @@ function hasPendingValue(value) {
   return false;
 }
 
-const manifest = await json("mpv-runtime.json", "runtime manifest");
+const manifest = await json("libmpv-runtime.json", "runtime manifest");
 const build = await json("native/libmpv-runtime/build-result.json", "native build inventory");
 const legal = await json("legal-components.json", "legal component manifest");
 const dependencyProvenance = await json(

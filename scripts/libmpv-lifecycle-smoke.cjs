@@ -5,7 +5,7 @@ const { resolve } = require("node:path");
 const root = resolve(__dirname, "..");
 const runtimeDirectory = resolve(root, ".runtime", "libmpv");
 const buildResult = JSON.parse(readFileSync(resolve(root, "native", "libmpv-runtime", "build-result.json"), "utf8"));
-const runtimeManifest = JSON.parse(readFileSync(resolve(root, "mpv-runtime.json"), "utf8"));
+const runtimeManifest = JSON.parse(readFileSync(resolve(root, "libmpv-runtime.json"), "utf8"));
 const library = buildResult.artifacts.find((artifact) => artifact.role === "library");
 const addon = buildResult.artifacts.find((artifact) => artifact.role === "native-addon");
 if (!library || !addon) throw new Error("LIBMPV_SMOKE_MANIFEST_INCOMPLETE");

@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { AppError } from "./errors";
-import type { MpvRuntimePaths } from "./mpvRuntime";
+
+export interface MediaProbeRuntime {
+  executable: string;
+}
 
 export interface MediaProbeResult {
   actualSize: number;
@@ -11,7 +14,7 @@ export interface MediaProbeResult {
 
 export class MediaProbeService {
   constructor(
-    private readonly runtime: MpvRuntimePaths,
+    private readonly runtime: MediaProbeRuntime | null,
     private readonly timeoutMilliseconds = 30000,
   ) {}
 
@@ -27,9 +30,13 @@ export class MediaProbeService {
       throw new AppError("MEDIA_PROBE_FAILED", "The downloaded media file is missing or empty.", 422);
     }
     if (signal?.aborted) throw new AppError("DOWNLOAD_CANCELLED", "The media check was cancelled.", 409);
+    if (!this.runtime) {
+      throw new AppError("MEDIA_PROBE_UNAVAILABLE", "The downloaded media file could not be validated.", 503);
+    }
+    const runtime = this.runtime;
 
     await new Promise<void>((resolveProbe, rejectProbe) => {
-      const process = spawn(this.runtime.executable, [
+      const process = spawn(runtime.executable, [
         "--no-config",
         "--terminal=no",
         "--msg-level=all=no",

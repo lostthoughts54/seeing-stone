@@ -30,6 +30,6 @@ Copy-Item -Path (Join-Path $zodSource "*") -Destination (Join-Path $appDirectory
 Copy-Item -Path (Join-Path $root ".runtime\mpv\*") -Destination $mpvDirectory -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root "assets\mpv\input.conf") -Destination $mpvDirectory -Force
 Copy-Item -LiteralPath (Join-Path $root "assets\mpv\NOTICE.md") -Destination $mpvDirectory -Force
-Copy-Item -LiteralPath (Join-Path $root "mpv-runtime.json") -Destination $mpvDirectory -Force
+Copy-Item -LiteralPath (Join-Path $root "legacy-mpv-runtime.json") -Destination $mpvDirectory -Force
 
 Write-Host "Unpacked mpv spike staged at $stage"

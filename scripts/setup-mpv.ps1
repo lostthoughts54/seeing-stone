@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$manifest = Get-Content (Join-Path $root "mpv-runtime.json") -Raw | ConvertFrom-Json
+$manifest = Get-Content (Join-Path $root "legacy-mpv-runtime.json") -Raw | ConvertFrom-Json
 $downloadDirectory = Join-Path $root ".runtime\mpv-download"
 $runtimeDirectory = Join-Path $root ".runtime\mpv"
 $licenseDirectory = Join-Path $root "assets\mpv\licenses"

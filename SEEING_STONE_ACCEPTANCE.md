@@ -17,11 +17,11 @@ This record contains only sanitized, synthetic, or repository-owned evidence. It
 
 ## Safety boundary
 
-- The packaged application always selects the legacy external mpv adapter.
+- The packaged production application always selects the controlled libmpv adapter; legacy and embedded-WID adapters are development/regression-only.
 - Unpackaged development builds default to the validated embedded adapter after the Gate 3 checks; the persisted developer preference or explicit development override can select the legacy fallback.
-- The legacy adapter remains implemented and selectable.
+- The legacy adapter remains implemented and selectable only outside normal packaged production.
 - No Windows binary or release is published by this work.
-- No libmpv artifact is built.
+- The controlled libmpv artifacts are built and packaged only for internal acceptance; no Windows binary or release is published by this work.
 - Enhanced participant telemetry remains disabled unless isolated-server compatibility and group-membership authorization can be proven.
 
 ## Gate 0 — Licensing, branding, and runtime provenance
@@ -219,7 +219,7 @@ Safety and limitations:
 - No authenticated or destructive request was sent to the user's Jellyfin server. No server, service, plugin, or production configuration was modified, restarted, upgraded, installed, or load-tested.
 - `Local playback available` is last-known catalog state; the file is freshly revalidated at open rather than polled continuously. A file deleted outside Seeing Stone can remain listed until that open attempt.
 - Offline artwork uses a placeholder because only safe artwork references, not image bytes, are cached in this milestone.
-- Packaged builds remain hard-wired to the legacy external adapter, unpackaged development builds default to embedded with the legacy fallback still selectable, enhanced telemetry remains disabled, no binary or release is published, and Gate 7 is not started.
+- Packaged production builds are hard-wired to libmpv with no legacy/embedded fallback; unpackaged development builds retain explicit adapter selection. Enhanced telemetry remains disabled, no binary or release is published, and Gate 7 is not started.
 
 Deferred manual evidence:
 

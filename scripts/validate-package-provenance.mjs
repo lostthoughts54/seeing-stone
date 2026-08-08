@@ -73,23 +73,30 @@ async function main() {
     }
   }
 
-  const runtimeManifest = JSON.parse(await readFile(resolve(root, "mpv-runtime.json"), "utf8"));
-  if (!Array.isArray(runtimeManifest.runtimeArtifacts)) fail("mpv-runtime.json lacks runtimeArtifacts.");
+  const runtimeManifest = JSON.parse(await readFile(resolve(root, "libmpv-runtime.json"), "utf8"));
+  if (runtimeManifest.runtimeFamily !== "controlled-source-built-libmpv") fail("production runtime family is not the controlled source build.");
+  if (runtimeManifest.productionPlaybackEngine !== "libmpv") fail("production playback engine is not libmpv.");
   const declaredRuntime = new Map();
-  for (const artifact of runtimeManifest.runtimeArtifacts) {
+  const artifacts = [
+    runtimeManifest.libmpv?.library,
+    runtimeManifest.libmpv?.nativeAddon,
+    ...(runtimeManifest.libmpv?.companionDlls ?? []),
+    runtimeManifest.mediaProbe?.executable,
+  ].filter(Boolean);
+  for (const artifact of artifacts) {
     const filename = controlledFilename(artifact.filename, "runtime artifact");
     if (!sha256Pattern.test(artifact.sha256)) fail(`${filename} has no valid SHA-256.`);
     if (declaredRuntime.has(filename)) fail(`duplicate runtime artifact: ${filename}`);
     declaredRuntime.set(filename, artifact.sha256);
   }
-  const packagedRuntimeNames = new Set(["mpv.exe", "mpv.com", "vulkan-1.dll"]);
-  for (const filename of packagedRuntimeNames) {
-    const expected = declaredRuntime.get(filename);
-    if (!expected) fail(`packaged runtime file is unmanifested: ${filename}`);
-    if (await hash(resolve(root, ".runtime/mpv", filename)) !== expected) fail(`runtime artifact hash mismatch: ${filename}`);
-  }
   for (const filename of declaredRuntime.keys()) {
-    if (!packagedRuntimeNames.has(filename)) fail(`runtime manifest contains an artifact not selected by packaging: ${filename}`);
+    const expected = declaredRuntime.get(filename);
+    if (await hash(resolve(root, ".runtime/libmpv", filename)) !== expected) fail(`runtime artifact hash mismatch: ${filename}`);
+  }
+  const builder = await readFile(resolve(root, "electron-builder.yml"), "utf8");
+  if (builder.includes(".runtime/mpv") || /\bto:\s*mpv\b/.test(builder)) fail("production packaging still references the legacy mpv runtime directory.");
+  if (!builder.includes("libmpv/runtime-manifest.json") || !builder.includes('      - "mpv.exe"')) {
+    fail("production packaging does not include the controlled runtime manifest and media probe executable.");
   }
 
   // Native build directories are development-only and excluded by electron-builder.

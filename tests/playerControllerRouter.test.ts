@@ -105,4 +105,28 @@ describe("PlayerControllerRouter", () => {
       fallbackReason: null,
     });
   });
+
+  it("does not route production libmpv initialization failures to legacy adapters", async () => {
+    const launch = status("libmpv");
+    const failure = new AppError("LIBMPV_INITIALIZATION_FAILED", "The playback runtime is unavailable.", 503);
+    const initial: PlayerControllerRoute = {
+      mode: "libmpv",
+      controller: fakeController(async () => { throw failure; }),
+    };
+    let embeddedCreated = false;
+    let legacyCreated = false;
+    const router = new PlayerControllerRouter(
+      initial,
+      launch,
+      () => { embeddedCreated = true; return initial; },
+      () => { legacyCreated = true; return initial; },
+      () => undefined,
+      false,
+    );
+
+    await expect(router.loadItem("item", "resume")).rejects.toBe(failure);
+    expect(embeddedCreated).toBe(false);
+    expect(legacyCreated).toBe(false);
+    expect(launch.active).toBe("libmpv");
+  });
 });

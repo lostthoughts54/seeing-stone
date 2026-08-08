@@ -13,8 +13,8 @@ const resourcesRoot = resourcesArgument
 const { LibMpvHost } = require(resolve(root, "dist", "main", "services", "libMpvHost.js"));
 const { ElectronLibMpvBridge } = require(resolve(root, "dist", "main", "services", "libMpvElectronBridge.js"));
 const manifest = require(resourcesRoot
-  ? resolve(resourcesRoot, "mpv", "mpv-runtime.json")
-  : resolve(root, "mpv-runtime.json"));
+  ? resolve(resourcesRoot, "libmpv", "runtime-manifest.json")
+  : resolve(root, "libmpv-runtime.json"));
 const libmpvRoot = resourcesRoot
   ? resolve(resourcesRoot, "libmpv")
   : resolve(root, ".runtime", "libmpv");

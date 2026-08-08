@@ -141,4 +141,25 @@ describe("PlayerPreferencesService", () => {
     });
     expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8")).schemaVersion).toBe(4);
   });
+
+  it.each(["legacy", "embedded"] as const)("migrates a stale packaged %s preference to libmpv", async (staleMode) => {
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-packaged-player-preferences-"));
+    await writeFile(join(directory, "player-preferences.json"), JSON.stringify({
+      schemaVersion: 4,
+      windowMaximized: false,
+      adapterMode: staleMode,
+      adapterModeExplicit: true,
+    }));
+    let durable: "legacy" | "embedded" | "libmpv" | null = staleMode;
+    const store = {
+      getAdapterMode: async () => durable,
+      setAdapterMode: async (mode: "legacy" | "embedded" | "libmpv") => { durable = mode; },
+    };
+    const service = new PlayerPreferencesService(directory, store, "libmpv", "libmpv");
+    await expect(service.get()).resolves.toEqual({ windowMaximized: false, adapterMode: "libmpv" });
+    expect(durable).toBe("libmpv");
+    expect(JSON.parse(await readFile(join(directory, "player-preferences.json"), "utf8")).adapterMode).toBe("libmpv");
+    await service.setAdapterMode(staleMode);
+    await expect(service.get()).resolves.toMatchObject({ adapterMode: "libmpv" });
+  });
 });

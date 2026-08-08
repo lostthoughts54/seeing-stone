@@ -39,7 +39,13 @@ const libMpvReadySchema = z.object({
 }).strict();
 
 const runtimeManifestSchema = z.object({
-  schemaVersion: z.number().int().min(2),
+  schemaVersion: z.number().int().min(4),
+  runtimeFamily: z.literal("controlled-source-built-libmpv"),
+  mediaProbe: z.object({
+    role: z.literal("headless-media-probe"),
+    playbackEngine: z.literal(false),
+    executable: artifactSchema,
+  }).strict(),
   libmpv: z.union([libMpvNotBuiltSchema, libMpvReadySchema]),
 }).passthrough();
 
@@ -120,14 +126,37 @@ export async function detectLibMpvRuntime(options: {
   };
 }
 
+/**
+ * Resolves the source-built mpv command-line player only for headless media
+ * validation. It is deliberately separate from the libmpv playback capability.
+ */
+export async function detectMediaProbeRuntime(options: {
+  manifestPath: string;
+  runtimeDirectory: string;
+}): Promise<{ executable: string } | null> {
+  let manifest: z.infer<typeof runtimeManifestSchema>;
+  try {
+    manifest = runtimeManifestSchema.parse(JSON.parse(await readFile(options.manifestPath, "utf8")));
+  } catch {
+    return null;
+  }
+  const verified = await verifyArtifact(
+    resolve(options.runtimeDirectory),
+    manifest.mediaProbe.executable,
+    "library-missing",
+    "library-hash-mismatch",
+  );
+  return verified.path ? { executable: verified.path } : null;
+}
+
 export function libMpvManifestPath(options: {
   packaged: boolean;
   resourcesPath: string;
   moduleDirectory: string;
 }): string {
   return options.packaged
-    ? join(options.resourcesPath, "mpv", "mpv-runtime.json")
-    : resolve(dirname(options.moduleDirectory), "../mpv-runtime.json");
+    ? join(options.resourcesPath, "libmpv", "runtime-manifest.json")
+    : resolve(dirname(options.moduleDirectory), "../libmpv-runtime.json");
 }
 
 export function libMpvRuntimeDirectory(options: {

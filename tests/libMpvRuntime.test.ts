@@ -3,14 +3,14 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectLibMpvRuntime, libMpvRuntimeDirectory } from "../src/main/services/libMpvRuntime";
+import { detectLibMpvRuntime, detectMediaProbeRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "../src/main/services/libMpvRuntime";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 describe("libmpv runtime detection", () => {
   it("reports the checked-in exact-hash runtime as available after the real-video gate", async () => {
     await expect(detectLibMpvRuntime({
-      manifestPath: join(process.cwd(), "mpv-runtime.json"),
+      manifestPath: join(process.cwd(), "libmpv-runtime.json"),
       runtimeDirectory: join(process.cwd(), ".runtime", "libmpv"),
     })).resolves.toMatchObject({
       available: true,
@@ -24,7 +24,16 @@ describe("libmpv runtime detection", () => {
     });
   }, 15_000);
 
+  it("verifies the source-built mpv executable only as the media probe", async () => {
+    await expect(detectMediaProbeRuntime({
+      manifestPath: join(process.cwd(), "libmpv-runtime.json"),
+      runtimeDirectory: join(process.cwd(), ".runtime", "libmpv"),
+    })).resolves.toEqual({ executable: join(process.cwd(), ".runtime", "libmpv", "mpv.exe") });
+  });
+
   it("keeps development and packaged libmpv artifacts in a dedicated controlled directory", () => {
+    expect(libMpvManifestPath({ packaged: true, resourcesPath: "C:\\app\\resources", moduleDirectory: "ignored" }))
+      .toBe(join("C:\\app\\resources", "libmpv", "runtime-manifest.json"));
     expect(libMpvRuntimeDirectory({ packaged: true, resourcesPath: "C:\\app\\resources", moduleDirectory: "ignored" }))
       .toBe(join("C:\\app\\resources", "libmpv"));
     expect(libMpvRuntimeDirectory({ packaged: false, resourcesPath: "ignored", moduleDirectory: join(process.cwd(), "dist", "main") }))
@@ -47,9 +56,12 @@ describe("libmpv runtime detection", () => {
     const runtime = join(root, "runtime");
     await writeFile(join(runtime, "custom-mpv.dll"), "library");
     await writeFile(join(runtime, "seeing-stone-libmpv.node"), "addon");
+    await writeFile(join(runtime, "mpv.exe"), "probe");
     const manifestPath = join(root, "runtime.json");
     await writeFile(manifestPath, JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
+      runtimeFamily: "controlled-source-built-libmpv",
+      mediaProbe: { role: "headless-media-probe", playbackEngine: false, executable: { filename: "mpv.exe", sha256: digest("probe") } },
       libmpv: {
         status: "ready",
         realVideoGatePassed: true,

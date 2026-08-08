@@ -27,29 +27,20 @@ extraResources:
     to: legal/fonts/Inter-OFL.txt
   - from: src/renderer/assets/fonts/Spectral-OFL.txt
     to: legal/fonts/Spectral-OFL.txt
-  - from: .runtime/mpv
-    to: mpv
-    filter:
-      - mpv.exe
-      - mpv.com
-      - vulkan-1.dll
-  - from: assets/mpv/input.conf
-    to: mpv/input.conf
-  - from: assets/mpv/progressive-input.conf
-    to: mpv/progressive-input.conf
   - from: assets/mpv/NOTICE.md
-    to: mpv/NOTICE.md
+    to: legal/mpv/NOTICE.md
   - from: assets/mpv/licenses
-    to: mpv/licenses
+    to: legal/mpv/licenses
     filter:
       - "**/*"
-  - from: mpv-runtime.json
-    to: mpv/mpv-runtime.json
+  - from: libmpv-runtime.json
+    to: libmpv/runtime-manifest.json
   - from: .runtime/libmpv
     to: libmpv
     filter:
       - "*.dll"
       - "*.node"
+      - "mpv.exe"
 
 afterPack: ./scripts/after-pack.cjs
 

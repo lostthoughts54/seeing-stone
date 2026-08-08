@@ -11,18 +11,18 @@ These tables are generated from pinned component provenance and the frozen insta
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
-| native | mpv libmpv source input | 0.41.0 | GPL-2.0-or-later | source-only |
+| native | Controlled source-built mpv/libmpv runtime | 0.41.0 | GPL-2.0-or-later | internal-only-controlled-source-build |
 | native | Seeing Stone libmpv bridge | 0.4.3 milestone-4 | GPL-2.0-or-later | source-and-binary |
 | native | ANGLE runtime from Electron | Electron 43.1.0 / Chromium 150.0.7871.47 | BSD-3-Clause | source-and-binary |
-| native | FFmpeg libmpv source input | 8.1.2 | LGPL-2.1-or-later | source-only |
-| native | mpv | v0.41.0-dev-ge5486b96d | GPL-2.0-or-later | internal-only-unverified-provenance |
-| native | FFmpeg | ff59522 | GPL-2.0-or-later | internal-only-unverified-provenance |
-| native | Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | internal-only-unverified-provenance |
-| native | AMD Advanced Media Framework headers | runtime-associated; exact revision not recorded upstream | MIT | internal-only-unverified-provenance |
+| native | Controlled source-built FFmpeg runtime | 8.1.2 | LGPL-2.1-or-later | internal-only-controlled-source-build |
+| native | Legacy development prebuilt mpv | v0.41.0-dev-ge5486b96d | GPL-2.0-or-later | development-only-not-production-packaged |
+| native | Legacy development prebuilt FFmpeg | ff59522 | GPL-2.0-or-later | development-only-not-production-packaged |
+| native | Legacy development prebuilt Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | development-only-not-production-packaged |
+| native | Legacy development prebuilt AMD Advanced Media Framework headers | runtime-associated; exact revision not recorded upstream | MIT | development-only-not-production-packaged |
 | plugin | Seeing Stone Participant Telemetry | protocol-v1-disabled | GPL-2.0-or-later | source-only |
 
 Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.
-The current native runtime remains internal-only because upstream did not record a complete linked-dependency source bill of materials.
+The controlled native runtime remains internal-only until complete companion provenance, corresponding source, notices, and release acceptance are verified.
 
 ## JavaScript dependencies
 
@@ -342,5 +342,5 @@ The current native runtime remains internal-only because upstream did not record
 
 ## Native playback runtime details
 
-See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `mpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.
+See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `libmpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.
 The current Windows binary is not approved for public redistribution.

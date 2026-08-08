@@ -199,7 +199,7 @@ export class MpvPlayerService implements PlayerController {
     private readonly playback: PlaybackSessionService,
     private readonly reporting: PlaybackReportingService,
     private readonly preferences: PlayerPreferencesStore,
-    private readonly runtime: MpvRuntimePaths,
+    private readonly runtime: MpvRuntimePaths | undefined,
     private readonly videoHost?: MpvVideoHost,
     private readonly libMpvHost?: LibMpvHost,
   ) {
@@ -838,6 +838,8 @@ export class MpvPlayerService implements PlayerController {
     windowMaximized: boolean,
     profile: Exclude<MpvRenderProfile, "libmpv-opengl-angle">,
   ): Promise<void> {
+    const runtime = this.runtime;
+    if (!runtime) throw new AppError("PLAYER_RUNTIME_UNAVAILABLE", "The playback runtime is unavailable.", 503);
     this.eofArmed = false;
     this.rawTimePositionSeconds = 0;
     this.demuxerCacheTimeSeconds = null;
@@ -857,15 +859,15 @@ export class MpvPlayerService implements PlayerController {
         ? embeddedVideoWindowArgs(windowTitle)
         : ["--title=Seeing Stone Player", "--geometry=1280x720", `--window-maximized=${windowMaximized ? "yes" : "no"}`]),
       `--input-conf=${this.source?.sourceKind === "downloading"
-        ? this.runtime.progressiveInputConfig ?? this.runtime.inputConfig
-        : this.runtime.inputConfig}`,
+        ? runtime.progressiveInputConfig ?? runtime.inputConfig
+        : runtime.inputConfig}`,
       `--input-ipc-server=${pipePath}`,
       `--start=${positionTicks / TICKS_PER_SECOND}`,
       ...(paused ? ["--pause=yes"] : []),
       "--",
       playbackTargets.media,
     ];
-    const child = this.spawnProcess(this.runtime.executable, args);
+    const child = this.spawnProcess(runtime.executable, args);
     this.process = child;
     let launchReady = false;
     let failureHandled = false;
@@ -1766,9 +1768,8 @@ export class LibMpvAdapter extends MpvPlayerService {
     playback: PlaybackSessionService,
     reporting: PlaybackReportingService,
     preferences: PlayerPreferencesStore,
-    runtime: MpvRuntimePaths,
     host: LibMpvHost,
   ) {
-    super(mainWindow, playback, reporting, preferences, runtime, undefined, host);
+    super(mainWindow, playback, reporting, preferences, undefined, undefined, host);
   }
 }

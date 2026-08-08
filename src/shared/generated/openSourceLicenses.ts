@@ -2520,14 +2520,6 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "native",
-      "name": "AMD Advanced Media Framework headers",
-      "version": "runtime-associated; exact revision not recorded upstream",
-      "license": "MIT",
-      "projectUrl": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
-      "redistributionStatus": "internal-only-unverified-provenance"
-    },
-    {
-      "category": "native",
       "name": "ANGLE runtime from Electron",
       "version": "Electron 43.1.0 / Chromium 150.0.7871.47",
       "license": "BSD-3-Clause",
@@ -2536,35 +2528,51 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "native",
-      "name": "FFmpeg libmpv source input",
+      "name": "Controlled source-built FFmpeg runtime",
       "version": "8.1.2",
       "license": "LGPL-2.1-or-later",
       "projectUrl": "https://ffmpeg.org",
-      "redistributionStatus": "source-only"
+      "redistributionStatus": "internal-only-controlled-source-build"
     },
     {
       "category": "native",
-      "name": "FFmpeg",
-      "version": "ff59522",
-      "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/FFmpeg/FFmpeg",
-      "redistributionStatus": "internal-only-unverified-provenance"
-    },
-    {
-      "category": "native",
-      "name": "mpv libmpv source input",
+      "name": "Controlled source-built mpv/libmpv runtime",
       "version": "0.41.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
-      "redistributionStatus": "source-only"
+      "redistributionStatus": "internal-only-controlled-source-build"
     },
     {
       "category": "native",
-      "name": "mpv",
+      "name": "Legacy development prebuilt AMD Advanced Media Framework headers",
+      "version": "runtime-associated; exact revision not recorded upstream",
+      "license": "MIT",
+      "projectUrl": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
+      "redistributionStatus": "development-only-not-production-packaged"
+    },
+    {
+      "category": "native",
+      "name": "Legacy development prebuilt FFmpeg",
+      "version": "ff59522",
+      "license": "GPL-2.0-or-later",
+      "projectUrl": "https://github.com/FFmpeg/FFmpeg",
+      "redistributionStatus": "development-only-not-production-packaged"
+    },
+    {
+      "category": "native",
+      "name": "Legacy development prebuilt mpv",
       "version": "v0.41.0-dev-ge5486b96d",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
-      "redistributionStatus": "internal-only-unverified-provenance"
+      "redistributionStatus": "development-only-not-production-packaged"
+    },
+    {
+      "category": "native",
+      "name": "Legacy development prebuilt Vulkan Loader",
+      "version": "runtime-associated; exact revision not recorded upstream",
+      "license": "Apache-2.0",
+      "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
+      "redistributionStatus": "development-only-not-production-packaged"
     },
     {
       "category": "native",
@@ -2581,14 +2589,6 @@ export const OPEN_SOURCE_LICENSES = {
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
       "redistributionStatus": "source-and-binary"
-    },
-    {
-      "category": "native",
-      "name": "Vulkan Loader",
-      "version": "runtime-associated; exact revision not recorded upstream",
-      "license": "Apache-2.0",
-      "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
-      "redistributionStatus": "internal-only-unverified-provenance"
     },
     {
       "category": "plugin",

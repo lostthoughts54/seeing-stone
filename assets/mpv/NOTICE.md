@@ -1,31 +1,25 @@
-# Bundled mpv runtime
+# Controlled mpv/libmpv runtime
 
-The Windows playback runtime is mpv `v0.41.0-dev-ge5486b96d`, built from
-commit `e5486b96d7d06dd148337899bfdc46bf25101663` by the mpv project's
-first-party GitHub Actions release workflow. The checked archive checksum and
-the checksums of every notice copied into this package are recorded in
-`mpv-runtime.json`.
+Seeing Stone's production Windows package uses a controlled source build of mpv
+0.41.0 and FFmpeg 8.1.2. The source archives, hashes, revisions, toolchain,
+configuration, build inventory, and packaged hashes are recorded in:
 
-- Project: https://mpv.io/
-- Source: https://github.com/mpv-player/mpv/tree/e5486b96d7d06dd148337899bfdc46bf25101663
-- Build archive and checksum: `mpv-runtime.json` in this repository
-- License information: `licenses/`
+- `native/libmpv-runtime/source-lock.json`
+- `native/libmpv-runtime/build-result.json`
+- `libmpv-runtime.json`
 
-The runtime reports `-Dgpl=true` and `-Dffmpeg:gpl=enabled`. The notice bundle
-therefore includes the exact mpv copyright and GPL/LGPL texts from the pinned
-commit, the exact FFmpeg licensing files from its embedded revision, and the
-identified Vulkan Loader and AMD AMF license texts.
+Libmpv and the Seeing Stone native bridge are the production playback engine.
+The `mpv.exe` produced by that same build is packaged only as a headless media
+probe for downloaded/local-file validation. It is not a playback fallback.
+
+License texts are provided in `licenses/`. The historical prebuilt mpv runtime
+is separately recorded by `legacy-mpv-runtime.json` for explicit development
+and regression adapters and is excluded from the production package.
 
 ## Redistribution status
 
-The upstream binary archive contains no license files or corresponding source
-archive. Its build recipe also fetched several statically linked dependencies
-from moving branches instead of recording every source revision. The files in
-this directory are a verified pragmatic notice set, but they are not a
-complete independently audited dependency bill of materials or corresponding
-source bundle.
-
-The unsigned installer produced by this repository is suitable for internal
-Milestone 8 acceptance. Do not publish or redistribute it until the runtime is
-rebuilt from fully pinned sources and the complete applicable notices and GPL
-corresponding source are prepared.
+Retiring the old prebuilt runtime removes a known provenance blocker, but it
+does not by itself approve public binary redistribution. Complete companion
+dependency provenance, corresponding-source archives, final notices,
+clean-machine/manual acceptance, signing, and every requirement enforced by
+`pnpm run validate:libmpv-release` remain outstanding.

@@ -4190,7 +4190,7 @@ function renderPlayerAdapterPreference(): void {
   const profileEmbeddedOption = profileAdapterSelect.querySelector<HTMLOptionElement>('option[value="embedded"]');
   if (profileEmbeddedOption) profileEmbeddedOption.disabled = !preference.embeddedAvailable;
   const activeLabel = preference.active === "libmpv"
-    ? "Libmpv experimental player"
+    ? "Libmpv player"
     : preference.active === "embedded" ? "Embedded player" : "Legacy external player";
   const fallbackReasons: Record<NonNullable<PlaybackAdapterPreference["fallbackReason"]>, string> = {
     "manifest-invalid": "its runtime manifest is invalid",
@@ -4213,6 +4213,14 @@ function renderPlayerAdapterPreference(): void {
     profileAdapterStatus.textContent = `${activeLabel} is active. Restart Seeing Stone to apply this change.`;
     playerAdapterStatus.dataset.tone = "amber";
     profileAdapterStatus.dataset.tone = "amber";
+  } else if (!preference.libmpvAvailable && preference.active === "libmpv" && preference.fallbackReason) {
+    const message = `Playback is unavailable because ${fallbackReasons[preference.fallbackReason]}. No legacy player was started.`;
+    playerAdapterStatus.textContent = message;
+    profileAdapterStatus.textContent = message;
+    playerAdapterStatus.dataset.tone = "amber";
+    profileAdapterStatus.dataset.tone = "amber";
+    playerFallbackNoticeMessage.textContent = message;
+    playerFallbackNotice.classList.remove("is-hidden");
   } else if (preference.fallbackActive && preference.fallbackReason) {
     const message = `Libmpv remains selected, but ${activeLabel} is active because ${fallbackReasons[preference.fallbackReason]}.`;
     playerAdapterStatus.textContent = message;

@@ -10,7 +10,7 @@ describe("Windows release packaging boundary", () => {
     };
     const config = await readFile("electron-builder.yml", "utf8");
 
-    expect(packageJson.scripts["package:windows"]).toContain("pnpm run setup:mpv");
+    expect(packageJson.scripts["package:windows"]).not.toContain("pnpm run setup:mpv");
     expect(packageJson.scripts["package:windows"]).toContain("pnpm run build");
     expect(packageJson.scripts["package:windows"]).toContain("pnpm run generate:worker-integrity");
     expect(packageJson.scripts["package:windows"]).toContain("electron-builder --win nsis --x64");
@@ -23,9 +23,11 @@ describe("Windows release packaging boundary", () => {
     expect(config).toContain('!dist/**/*.map');
     expect(config).toContain("dist/main/services/persistenceWorker.js");
     expect(config).toContain("dist/main/services/persistenceTypes.js");
-    expect(config).toContain("from: .runtime/mpv");
+    expect(config).not.toContain("from: .runtime/mpv");
     expect(config).toContain("from: assets/mpv/licenses");
-    expect(config).toContain("from: mpv-runtime.json");
+    expect(config).toContain("from: libmpv-runtime.json");
+    expect(config).toContain("to: libmpv/runtime-manifest.json");
+    expect(config).toContain('      - "mpv.exe"');
     expect(config).toContain("target: nsis");
     expect(config).toContain("- x64");
     expect(config).not.toContain("electronFuses:");
@@ -38,8 +40,9 @@ describe("Windows release packaging boundary", () => {
     const hook = await readFile("scripts/after-pack.cjs", "utf8");
 
     expect(main).toContain("await resolveVerifiedPersistenceWorkerPath(process.resourcesPath, __dirname)");
-    expect(main).toContain('app.isPackaged ? "legacy" : "embedded"');
-    expect(main).toContain('initialRoute = adapterLaunch.active === "embedded" ? createEmbeddedRoute() : createLegacyRoute()');
+    expect(main).toContain('app.isPackaged ? "libmpv" : "embedded"');
+    expect(main).toContain('packagedProduction ? "libmpv" : undefined');
+    expect(main).toContain("createUnavailableRoute()");
     expect(persistence).toContain("new Worker(this.workerPath");
     expect(workerIntegrity).toContain('"persistence-worker-integrity.json"');
     expect(workerIntegrity).toContain('createHash("sha256")');
@@ -71,6 +74,7 @@ describe("Windows release packaging boundary", () => {
     expect(config).toContain("to: libmpv");
     expect(config).toContain('"*.dll"');
     expect(config).toContain('"*.node"');
+    expect(config).toContain('"mpv.exe"');
     expect(packageJson.scripts["package:windows"]).toContain("stage:libmpv-runtime");
     expect(packageJson.scripts["package:windows:dir"]).toContain("validate:libmpv-package");
     expect(packageJson.scripts["validate:libmpv-release"]).toBe("node scripts/validate-libmpv-release.mjs");
@@ -114,6 +118,7 @@ describe("Windows release packaging boundary", () => {
 
   it("recreates verified mpv inputs only inside the workspace", async () => {
     const setup = await readFile("scripts/setup-mpv.ps1", "utf8");
+    expect(setup).toContain("legacy-mpv-runtime.json");
     expect(setup).toContain("Get-FileHash -Algorithm SHA256");
     expect(setup).toContain("Refusing to replace an mpv runtime outside the project workspace.");
     expect(setup).toContain("Remove-Item -LiteralPath $runtimePath -Recurse -Force");

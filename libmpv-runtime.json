@@ -1,41 +1,31 @@
 {
-    "schemaVersion":  3,
-    "version":  "v0.41.0-dev-ge5486b96d",
-    "commit":  "e5486b96d7d06dd148337899bfdc46bf25101663",
-    "platform":  "x86_64-pc-windows-msvc",
-    "archive":  "mpv-v0.41.0-dev-ge5486b96d-29054345280-x86_64-pc-windows-msvc.zip",
-    "url":  "https://github.com/mpv-player/mpv/releases/download/git-release/mpv-v0.41.0-dev-ge5486b96d-29054345280-x86_64-pc-windows-msvc.zip",
-    "sha256":  "356220c841b732d2497acad3385f66dd099744bb0b7ab67bd70382d5509fa358",
-    "executableSha256":  "ccc8dce5133ee4fab3f592a9b3922b3f2ab7dfff2d46a739482f24b470645830",
-    "runtimeArtifacts":  [
-                             {
-                                 "filename":  "mpv.exe",
-                                 "role":  "player",
-                                 "sha256":  "ccc8dce5133ee4fab3f592a9b3922b3f2ab7dfff2d46a739482f24b470645830"
-                             },
-                             {
-                                 "filename":  "mpv.com",
-                                 "role":  "console-launcher",
-                                 "sha256":  "b4edd30af9b9492da077434ca626a0043edd3caf6b6f208aefbb645622f4323a"
-                             },
-                             {
-                                 "filename":  "vulkan-1.dll",
-                                 "role":  "runtime-companion",
-                                 "sha256":  "77eaaa068510ac36736fcd903c76a7ec9e002e0b63a9c772b7f6262bfd916143"
-                             }
-                         ],
-    "sourceProject":  "https://github.com/mpv-player/mpv",
-    "sourceRevision":  "e5486b96d7d06dd148337899bfdc46bf25101663",
-    "ffmpegRevision":  "ff59522",
-    "license":  "GPL-2.0-or-later",
-    "redistributionStatus":  "internal-testing-only",
-    "consumerModes":  [
-                          "legacy-external",
-                          "embedded-wid"
-                      ],
-    "deferredOptions":  [
-                            "libmpv-render-api"
-                        ],
+    "schemaVersion":  4,
+    "runtimeFamily":  "controlled-source-built-libmpv",
+    "redistributionStatus":  "internal-only-release-review-required",
+    "productionPlaybackEngine":  "libmpv",
+    "sourceBuild":  {
+                        "configurationId":  "seeing-stone-libmpv-0.41.0-ffmpeg-8.1.2-v2",
+                        "sourceLock":  "native/libmpv-runtime/source-lock.json",
+                        "sourceLockSha256":  "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f",
+                        "mpv":  {
+                                    "version":  "0.41.0",
+                                    "commit":  "41f6a645068483470267271e1d09966ca3b9f413",
+                                    "archiveSha256":  "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209"
+                                },
+                        "ffmpeg":  {
+                                       "version":  "8.1.2",
+                                       "commit":  "38b88335f99e76ed89ff3c93f877fdefce736c13",
+                                       "archiveSha256":  "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+                                   }
+                    },
+    "mediaProbe":  {
+                       "role":  "headless-media-probe",
+                       "playbackEngine":  false,
+                       "executable":  {
+                                          "filename":  "mpv.exe",
+                                          "sha256":  "3b9ebe4afde274a5551b51e0eeb3d77e10bcfcbf08b9e8723f7ac9f7be855930"
+                                      }
+                   },
     "libmpv":  {
                    "status":  "ready",
                    "realVideoGatePassed":  true,
@@ -252,39 +242,5 @@
                                                },
                                  "correspondingSource":  ".runtime/libmpv-build/archives until the public-release source archive is produced"
                              }
-               },
-    "licenseFiles":  [
-                         {
-                             "path":  "mpv-Copyright.txt",
-                             "sha256":  "bfe9ee4cceabcb8ecbfadf208d04156f73d801e6a57369a5606bb8341e204a23"
-                         },
-                         {
-                             "path":  "mpv-GPL-2.0.txt",
-                             "sha256":  "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
-                         },
-                         {
-                             "path":  "mpv-LGPL-2.1.txt",
-                             "sha256":  "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
-                         },
-                         {
-                             "path":  "ffmpeg-LICENSE.md",
-                             "sha256":  "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
-                         },
-                         {
-                             "path":  "ffmpeg-GPL-2.0.txt",
-                             "sha256":  "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
-                         },
-                         {
-                             "path":  "ffmpeg-LGPL-2.1.txt",
-                             "sha256":  "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
-                         },
-                         {
-                             "path":  "Vulkan-Loader-LICENSE.txt",
-                             "sha256":  "43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
-                         },
-                         {
-                             "path":  "AMD-AMF-LICENSE.txt",
-                             "sha256":  "eb297397aaa455b5668ab67d216b83828466152dab123fa92384c6ec16b74170"
-                         }
-                     ]
+               }
 }

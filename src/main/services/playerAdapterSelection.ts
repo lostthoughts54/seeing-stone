@@ -16,7 +16,9 @@ export interface PlayerAdapterLaunchStatus {
 export function requestedPlayerAdapterMode(
   environmentMode: string | undefined,
   storedMode: PlayerAdapterMode | undefined,
+  packagedProduction = false,
 ): PlayerAdapterMode {
+  if (packagedProduction) return "libmpv";
   if (environmentMode === "embedded" || environmentMode === "legacy" || environmentMode === "libmpv") return environmentMode;
   return storedMode ?? "legacy";
 }
@@ -24,6 +26,7 @@ export function requestedPlayerAdapterMode(
 export function resolvePlayerAdapterLaunch(
   requested: PlayerAdapterMode,
   libmpv: LibMpvHostCapability,
+  allowFallback = true,
 ): PlayerAdapterLaunchStatus {
   if (requested !== "libmpv") {
     return {
@@ -45,6 +48,17 @@ export function resolvePlayerAdapterLaunch(
       fallbackActive: false,
       fallbackFrom: null,
       fallbackReason: null,
+    };
+  }
+  if (!allowFallback) {
+    return {
+      launchSelection: "libmpv",
+      active: "libmpv",
+      embeddedAvailable: false,
+      libmpvAvailable: false,
+      fallbackActive: false,
+      fallbackFrom: null,
+      fallbackReason: libmpv.reason ?? "initialization-failed",
     };
   }
   return {
