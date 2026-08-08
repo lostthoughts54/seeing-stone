@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { CompanionAuthenticationService } from "../src/main/services/companionAuthentication";
 import { normalizeCompanionDeviceName } from "../src/main/services/companionCredentialStore";
 import { CompanionPairingService } from "../src/main/services/companionPairing";
-import { assertCompanionRequestContext } from "../src/main/services/companionServer";
+import { assertCompanionRequestContext, CompanionServer } from "../src/main/services/companionServer";
 import { getLibrary, getLiveTvGuide, newCompanionCommandId } from "../src/companion/api";
-import { assertNoCompanionForbiddenFields, companionCommandEnvelopeSchema, companionPlayerStateSchema } from "../src/shared/companionSchemas";
+import { assertNoCompanionForbiddenFields, companionCommandEnvelopeSchema, companionPlayerStateSchema, companionSkipSegmentSchema } from "../src/shared/companionSchemas";
 
 describe("Companion security boundaries", () => {
   it("creates command UUIDs without secure-context randomUUID", () => {
@@ -136,13 +136,33 @@ describe("Companion security boundaries", () => {
       sequence: session.nextSequence,
       commandId: "73978915-594d-48b8-82e5-d44d5a8ba3ef",
     }, "wrong")).toThrowError(/refresh/i);
-    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v2.${session.webSocketTicket}`)).toBe(true);
-    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v2.${session.webSocketTicket}`)).toBe(false);
+    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v3.${session.webSocketTicket}`)).toBe(true);
+    expect(authentication.consumeWebSocketTicket(device.deviceId, `seeing-stone.v3.${session.webSocketTicket}`)).toBe(false);
   });
 
   it("rejects raw player DTO fields and malformed sanitized output", () => {
     expect(() => assertNoCompanionForbiddenFields({ media: { accessToken: "secret" } })).toThrowError("COMPANION_FORBIDDEN_FIELD");
     expect(() => assertNoCompanionForbiddenFields({ MediaSources: [] })).toThrowError("COMPANION_FORBIDDEN_FIELD");
     expect(companionPlayerStateSchema.safeParse({ protocolVersion: 1, AccessToken: "secret" }).success).toBe(false);
+  });
+
+  it("strictly validates the sanitized skip-segment presentation", () => {
+    expect(companionSkipSegmentSchema.safeParse({ type: "Intro", label: "Skip Intro", endTicks: 20, enabled: true }).success).toBe(true);
+    expect(companionSkipSegmentSchema.safeParse({ type: "Unknown", label: "Skip Intro", endTicks: 20, enabled: true }).success).toBe(false);
+    expect(companionSkipSegmentSchema.safeParse({ type: "Intro", label: "Skip Credits", endTicks: 20, enabled: true }).success).toBe(false);
+    expect(companionSkipSegmentSchema.safeParse({ type: "Intro", label: "Skip Intro", endTicks: -1, enabled: true }).success).toBe(false);
+    expect(companionSkipSegmentSchema.safeParse({ type: "Intro", label: "Skip Intro", endTicks: 20, enabled: true, itemId: "private" }).success).toBe(false);
+  });
+
+  it("routes the Companion segment action through the authoritative seek command", async () => {
+    const playbackId = "11111111-1111-4111-8111-111111111111";
+    const commands = { getState: vi.fn(() => ({ playbackId, positionTicks: 10 })), seek: vi.fn(async () => undefined) };
+    const server = new CompanionServer({ commands } as never);
+    await (server as any).execute({ playbackId, command: { type: "seek", positionTicks: 20 } });
+    expect(commands.seek).toHaveBeenCalledWith(playbackId, 20);
+    await expect((server as any).execute({
+      playbackId: "22222222-2222-4222-8222-222222222222",
+      command: { type: "seek", positionTicks: 20 },
+    })).rejects.toMatchObject({ code: "PLAYBACK_STALE" });
   });
 });

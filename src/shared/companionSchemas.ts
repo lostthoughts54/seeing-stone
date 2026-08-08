@@ -25,8 +25,14 @@ export const companionTrackSchema = z.object({
   selected: z.boolean(),
 }).strict();
 
+export const companionSkipSegmentSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("Intro"), label: z.literal("Skip Intro"), endTicks: ticks, enabled: z.boolean() }).strict(),
+  z.object({ type: z.literal("Recap"), label: z.literal("Skip Recap"), endTicks: ticks, enabled: z.boolean() }).strict(),
+  z.object({ type: z.literal("Outro"), label: z.literal("Skip Credits"), endTicks: ticks, enabled: z.boolean() }).strict(),
+]);
+
 export const companionPlayerStateSchema = z.object({
-  protocolVersion: z.literal(2),
+  protocolVersion: z.literal(3),
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   sentAtUnixMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   playbackId: z.string().uuid().nullable(),
@@ -47,6 +53,7 @@ export const companionPlayerStateSchema = z.object({
   buffering: z.boolean(),
   seekable: z.boolean(),
   seekableUntilTicks: ticks.nullable(),
+  skipSegment: companionSkipSegmentSchema.nullable(),
   volume: z.number().int().min(0).max(100),
   muted: z.boolean(),
   audioTracks: z.array(companionTrackSchema).max(128),

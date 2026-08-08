@@ -1,7 +1,7 @@
 import type { CompanionBootstrap, CompanionCommand, CompanionCommandEnvelope, CompanionLibraryPage, CompanionLibrarySort, CompanionLibrarySummary, CompanionLiveTvGuide } from "../shared/companionContracts";
 
 export interface RuntimeSession {
-  protocolVersion: 2;
+  protocolVersion: 3;
   sessionEpoch: string;
   csrfToken: string;
   nextSequence: number;

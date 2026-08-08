@@ -19,6 +19,15 @@ describe("PlaybackMetadataService", () => {
     await expect(service.getMediaSegments("22222222-2222-4222-8222-222222222222")).rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
   });
 
+  it("reuses active metadata without repeating optional Jellyfin requests", async () => {
+    const api = { getMediaSegments: vi.fn(async () => [{ type: "Intro" as const, startTicks: 0, endTicks: 10 }]) };
+    const service = new PlaybackMetadataService(api);
+    service.setPlaybackState(active());
+    await service.getActiveMediaSegments(active().playbackId!);
+    await service.getActiveMediaSegments(active().playbackId!);
+    expect(api.getMediaSegments).toHaveBeenCalledTimes(1);
+  });
+
   it("invalidates pending metadata on item replacement, stop, and Live TV", async () => {
     let resolve!: (segments: []) => void;
     const api = { getMediaSegments: vi.fn(() => new Promise<[]>(r => { resolve = r; })) };

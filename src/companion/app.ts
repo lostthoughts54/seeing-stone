@@ -77,6 +77,18 @@ function render(): void {
   byId("previous").textContent = player.live ? "Channel −" : "‹‹";
   byId("next").textContent = player.live ? "Channel +" : "››";
   byId("goLive").classList.toggle("hidden", !player.controls.canGoLive);
+  const skipSegment = byId<HTMLButtonElement>("skipSegment");
+  const skipSegmentFocused = document.activeElement === skipSegment;
+  skipSegment.classList.toggle("hidden", player.skipSegment === null);
+  if (!player.skipSegment && skipSegmentFocused) byId<HTMLButtonElement>("playPause").focus({ preventScroll: true });
+  if (player.skipSegment) {
+    skipSegment.textContent = player.skipSegment.label;
+    skipSegment.disabled = !player.skipSegment.enabled;
+    skipSegment.title = player.skipSegment.enabled
+      ? player.skipSegment.label
+      : `${player.skipSegment.label} is unavailable until more of the download is ready.`;
+    skipSegment.setAttribute("aria-label", skipSegment.title);
+  }
   const timing = byId("watchPartyTiming");
   timing.classList.toggle("hidden", !watchParty.joined);
   if (watchParty.joined) {
@@ -387,7 +399,7 @@ async function loadLiveTvGuide(): Promise<void> {
 function connectWebSocket(): void {
   if (!session || document.hidden) return;
   webSocket?.close();
-  const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/v1/events`, `seeing-stone.v2.${session.webSocketTicket}`);
+  const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/v1/events`, `seeing-stone.v3.${session.webSocketTicket}`);
   webSocket = socket;
   socket.addEventListener("open", () => {
     clearTimeout(reconnectTimer);
@@ -462,6 +474,10 @@ byId("goLive").addEventListener("click", () => void command({ type: "go-live" })
 byId("seekBack").addEventListener("click", () => void command({ type: "seek-relative", seconds: -10 }));
 byId("seekForward").addEventListener("click", () => void command({ type: "seek-relative", seconds: 30 }));
 byId<HTMLInputElement>("seek").addEventListener("change", (event) => void command({ type: "seek", positionTicks: Number((event.target as HTMLInputElement).value) }));
+byId("skipSegment").addEventListener("click", () => {
+  const skipSegment = model.bootstrap?.player.skipSegment;
+  if (skipSegment?.enabled) void command({ type: "seek", positionTicks: skipSegment.endTicks });
+});
 byId<HTMLInputElement>("volume").addEventListener("change", (event) => void command({ type: "set-volume", volume: Number((event.target as HTMLInputElement).value) }));
 byId("mute").addEventListener("click", () => void command({ type: "toggle-mute" }));
 byId("watchPartyEarlier").addEventListener("click", () => void command({

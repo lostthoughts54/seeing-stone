@@ -392,6 +392,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     () => activeSyncPlay?.isJoined() ?? false,
     liveTvContext,
     () => activeSyncPlay?.getState() ?? null,
+    playbackMetadata,
   );
   const companionCredentials = new CompanionCredentialStore(app.getPath("userData"), sessionProtector);
   const companionArtwork = new CompanionArtworkService(api, companionState);

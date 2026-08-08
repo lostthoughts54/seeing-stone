@@ -13,11 +13,13 @@ import {
   type CompanionWatchPartyState,
 } from "../../shared/companionContracts";
 import { companionLibraryPageSchema, companionLibrarySummarySchema, companionLiveTvGuideSchema, companionPlayerStateSchema, companionQueueStateSchema, companionWatchPartyStateSchema } from "../../shared/companionSchemas";
+import { activeMediaSegment, canSkipSegment, segmentLabel } from "../../shared/mediaSegments";
 import { AppError } from "./errors";
 import type { PlaybackQueueStore } from "./playbackQueue";
 import type { PlayerController } from "./playerController";
 import type { SoloSessionDiagnosticsService } from "./soloSessionDiagnostics";
 import type { LiveTvContextService } from "./liveTvContext";
+import type { PlaybackMetadataService } from "./playbackMetadata";
 
 const CAPABILITY_TTL_MS = 30 * 60_000;
 const CAPABILITY_LIMIT = 5_000;
@@ -114,6 +116,7 @@ export class CompanionStateService {
     private readonly isWatchPartyJoined: () => boolean,
     private readonly liveTv?: LiveTvContextService,
     private readonly getWatchPartyState?: () => WatchPartyViewState | null,
+    private readonly playbackMetadata?: PlaybackMetadataService,
   ) {
     player.onState((state) => this.schedulePlayerPush(state));
     queue.onChanged(() => this.pushQueue());
@@ -158,6 +161,7 @@ export class CompanionStateService {
     const live = state.contentKind === "live-tv" && state.itemId
       ? await this.liveTv?.getContext(state.itemId).catch(() => null) ?? null
       : null;
+    const skipSegment = await this.getSkipSegment(state);
     const value: CompanionPlayerState = {
       protocolVersion: COMPANION_PROTOCOL_VERSION,
       revision: ++this.playerRevision,
@@ -173,6 +177,7 @@ export class CompanionStateService {
       buffering: state.buffering,
       seekable: state.contentKind !== "live-tv" && state.seekable,
       seekableUntilTicks: state.seekableUntilTicks,
+      skipSegment,
       volume: Math.max(0, Math.min(100, Math.round(state.volume))),
       muted: state.volume === 0,
       audioTracks: state.audioTracks.map((track) => ({
@@ -201,6 +206,20 @@ export class CompanionStateService {
       },
     };
     return freezeDeep(companionPlayerStateSchema.parse(value) as CompanionPlayerState);
+  }
+
+  private async getSkipSegment(state: PlaybackState): Promise<CompanionPlayerState["skipSegment"]> {
+    if (!this.playbackMetadata || !state.playbackId || state.contentKind === "live-tv") return null;
+    const segments = await this.playbackMetadata.getActiveMediaSegments(state.playbackId).catch(() => null);
+    if (!segments || this.player.getState().playbackId !== state.playbackId) return null;
+    const segment = activeMediaSegment(segments, state.positionTicks);
+    if (!segment || !["Intro", "Recap", "Outro"].includes(segment.type) || !Number.isSafeInteger(segment.endTicks) || segment.endTicks < 0) return null;
+    return {
+      type: segment.type,
+      label: segmentLabel(segment.type),
+      endTicks: segment.endTicks,
+      enabled: state.seekable && canSkipSegment(segment, state.seekableUntilTicks),
+    };
   }
 
   getQueueState(): CompanionQueueState {

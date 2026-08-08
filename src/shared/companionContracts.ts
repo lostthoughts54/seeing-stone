@@ -1,4 +1,4 @@
-export const COMPANION_PROTOCOL_VERSION = 2 as const;
+export const COMPANION_PROTOCOL_VERSION = 3 as const;
 
 export type CompanionMediaType =
   | "movie" | "series" | "season" | "episode" | "video"
@@ -34,6 +34,13 @@ export interface CompanionLiveContext {
   programEndUtc: string | null;
 }
 
+export interface CompanionSkipSegment {
+  type: "Intro" | "Recap" | "Outro";
+  label: "Skip Intro" | "Skip Recap" | "Skip Credits";
+  endTicks: number;
+  enabled: boolean;
+}
+
 export interface CompanionLiveTvProgram {
   name: string;
   startUtc: string;
@@ -57,7 +64,7 @@ export interface CompanionLiveTvGuide {
 }
 
 export interface CompanionPlayerState {
-  protocolVersion: 2;
+  protocolVersion: 3;
   revision: number;
   sentAtUnixMs: number;
   playbackId: string | null;
@@ -71,6 +78,7 @@ export interface CompanionPlayerState {
   buffering: boolean;
   seekable: boolean;
   seekableUntilTicks: number | null;
+  skipSegment: CompanionSkipSegment | null;
   volume: number;
   muted: boolean;
   audioTracks: CompanionTrack[];
@@ -116,7 +124,7 @@ export interface CompanionLibrarySummary {
 }
 
 export interface CompanionBootstrap {
-  protocolVersion: 2;
+  protocolVersion: 3;
   player: CompanionPlayerState;
   queue: CompanionQueueState;
   watchParty: CompanionWatchPartyState;

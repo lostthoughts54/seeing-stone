@@ -1,6 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { CompanionStateService } from "../src/main/services/companionState";
+import type { PlaybackState } from "../src/shared/contracts";
+
+const playbackState = (overrides: Partial<PlaybackState> = {}): PlaybackState => ({
+  playbackId: "11111111-1111-4111-8111-111111111111", itemId: "item-a", phase: "playing", source: "server",
+  positionTicks: 10, durationTicks: 100, paused: false, buffering: false, seekable: true, seekableUntilTicks: null,
+  volume: 100, fullscreen: false, audioTracks: [], subtitleTracks: [], error: null, contentKind: "on-demand", ...overrides,
+});
+
+function companionStateFor(state: PlaybackState, segments: unknown) {
+  const player = { onState: vi.fn(), getState: vi.fn(() => state) };
+  const service = new CompanionStateService(
+    player as never,
+    { onChanged: vi.fn(), getPrevious: vi.fn(() => null), peekNext: vi.fn(() => null) } as never,
+    { getSnapshot: vi.fn(async () => ({ playback: state, item: null, nextUp: null })) } as never,
+    {} as never,
+    () => false,
+    undefined,
+    undefined,
+    { getActiveMediaSegments: vi.fn(async () => segments) } as never,
+  );
+  return { service, player };
+}
 
 describe("Companion library browsing", () => {
   it("ships a searchable phone guide that can switch channels without leaving the view", async () => {
@@ -15,6 +37,52 @@ describe("Companion library browsing", () => {
     expect(app).toContain('command({ type: "start-live", channelRef: channel.channelRef })');
     expect(app).toContain("...channel.programs.map((program) => program.name)");
     expect(app).toContain("matches.slice(0, 200)");
+  });
+
+  it("shows only a sanitized active segment with desktop timing semantics", async () => {
+    const segments = [
+      { type: "Outro" as const, startTicks: 5, endTicks: 30 },
+      { type: "Recap" as const, startTicks: 10, endTicks: 20 },
+      { type: "Intro" as const, startTicks: 10, endTicks: 20 },
+    ];
+    const { service } = companionStateFor(playbackState({ positionTicks: 10 }), segments);
+    await expect(service.getPlayerState()).resolves.toMatchObject({
+      skipSegment: { type: "Intro", label: "Skip Intro", endTicks: 20, enabled: true },
+    });
+
+    const recap = companionStateFor(playbackState({ positionTicks: 11 }), [{ type: "Recap" as const, startTicks: 10, endTicks: 20 }]);
+    await expect(recap.service.getPlayerState()).resolves.toMatchObject({ skipSegment: { label: "Skip Recap" } });
+    const outro = companionStateFor(playbackState({ positionTicks: 11 }), [{ type: "Outro" as const, startTicks: 10, endTicks: 20 }]);
+    await expect(outro.service.getPlayerState()).resolves.toMatchObject({ skipSegment: { label: "Skip Credits" } });
+    const boundary = companionStateFor(playbackState({ positionTicks: 20 }), [{ type: "Intro" as const, startTicks: 10, endTicks: 20 }]);
+    await expect(boundary.service.getPlayerState()).resolves.toMatchObject({ skipSegment: null });
+    const malformed = companionStateFor(playbackState({ positionTicks: 10 }), [{ type: "Unknown", startTicks: 10, endTicks: 20 }]);
+    await expect(malformed.service.getPlayerState()).resolves.toMatchObject({ skipSegment: null });
+  });
+
+  it("keeps optional segment state safe across progressive, Live TV, and playback replacement", async () => {
+    const segment = [{ type: "Intro" as const, startTicks: 10, endTicks: 20 }];
+    const progressive = companionStateFor(playbackState({ seekableUntilTicks: 19 }), segment);
+    await expect(progressive.service.getPlayerState()).resolves.toMatchObject({ skipSegment: { enabled: false } });
+    const available = companionStateFor(playbackState({ seekableUntilTicks: 20 }), segment);
+    await expect(available.service.getPlayerState()).resolves.toMatchObject({ skipSegment: { enabled: true } });
+    const live = companionStateFor(playbackState({ contentKind: "live-tv" }), segment);
+    await expect(live.service.getPlayerState()).resolves.toMatchObject({ skipSegment: null });
+
+    const replacement = companionStateFor(playbackState(), segment);
+    replacement.player.getState.mockReturnValue(playbackState({ playbackId: "22222222-2222-4222-8222-222222222222", itemId: "item-b" }));
+    await expect(replacement.service.getPlayerState()).resolves.toMatchObject({ skipSegment: null });
+  });
+
+  it("uses the existing typed seek command for the phone segment button", async () => {
+    const [html, app, api] = await Promise.all([
+      readFile("src/companion/index.html", "utf8"),
+      readFile("src/companion/app.ts", "utf8"),
+      readFile("src/companion/api.ts", "utf8"),
+    ]);
+    expect(html).toContain('id="skipSegment"');
+    expect(app).toContain('command({ type: "seek", positionTicks: skipSegment.endTicks })');
+    expect(api).toContain("playbackId: session.bootstrap.player.playbackId");
   });
 
   it("keeps Jellyfin libraries separate and pages TV-style libraries as series with the selected sort", async () => {
