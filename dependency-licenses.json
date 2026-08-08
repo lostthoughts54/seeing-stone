@@ -45,7 +45,7 @@
         },
         {
           "path": "native/libmpv-runtime/build-result.json",
-          "sha256": "ed89616afbdd1799ea11d522e717300f3b0ec674e5cacfc4d38b4597335d6b88"
+          "sha256": "40d696c15c5c96e147e83e750f3c8af8957640cd13bd09913dd785788abcda2c"
         },
         {
           "path": "libmpv-runtime.json",
@@ -140,7 +140,7 @@
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "41f6a645068483470267271e1d09966ca3b9f413",
-      "redistributionStatus": "internal-only-controlled-source-build",
+      "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
@@ -150,7 +150,7 @@
     {
       "category": "native",
       "name": "Seeing Stone libmpv bridge",
-      "version": "0.4.3 milestone-4",
+      "version": "0.7.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
@@ -182,7 +182,7 @@
       "license": "LGPL-2.1-or-later",
       "projectUrl": "https://ffmpeg.org",
       "sourceRevision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
-      "redistributionStatus": "internal-only-controlled-source-build",
+      "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",
@@ -285,6 +285,551 @@
         "path": "LICENSE",
         "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
       }
+    }
+  ],
+  "redistributionComponents": [
+    {
+      "id": "seeing-stone",
+      "owner": "Seeing Stone 0.7.0",
+      "name": "Seeing Stone application and libmpv bridge",
+      "version": "0.7.0",
+      "license": "GPL-2.0-or-later",
+      "obligation": "source-required",
+      "source": "Release tag plus native/libmpv-bridge and checked-in build scripts",
+      "noticeFiles": [
+        "LICENSE"
+      ],
+      "artifacts": [
+        "Seeing Stone.exe",
+        "resources/libmpv/seeing_stone_libmpv_bridge.node"
+      ]
+    },
+    {
+      "id": "mpv",
+      "owner": "mpv 0.41.0",
+      "name": "mpv/libmpv",
+      "version": "0.41.0",
+      "revision": "41f6a645068483470267271e1d09966ca3b9f413",
+      "license": "GPL-2.0-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mpv-v0.41.0.tar.gz",
+      "noticeFiles": [
+        "assets/mpv/licenses/mpv-GPL-2.0.txt",
+        "assets/mpv/licenses/mpv-Copyright.txt"
+      ],
+      "artifacts": [
+        "resources/libmpv/libmpv-2.dll",
+        "resources/libmpv/mpv.exe"
+      ]
+    },
+    {
+      "id": "ffmpeg-controlled",
+      "owner": "FFmpeg 8.1.2",
+      "name": "FFmpeg controlled runtime",
+      "version": "8.1.2",
+      "revision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "configurationRule": "must not contain --enable-gpl or --enable-nonfree",
+      "sourceArchive": "ffmpeg-8.1.2.tar.xz",
+      "noticeFiles": [
+        "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt"
+      ],
+      "artifacts": [
+        "resources/libmpv/avcodec-62.dll",
+        "resources/libmpv/avdevice-62.dll",
+        "resources/libmpv/avfilter-11.dll",
+        "resources/libmpv/avformat-62.dll",
+        "resources/libmpv/avutil-60.dll",
+        "resources/libmpv/swresample-6.dll",
+        "resources/libmpv/swscale-9.dll"
+      ]
+    },
+    {
+      "id": "electron-ffmpeg",
+      "owner": "Electron FFmpeg",
+      "name": "Chromium/Electron FFmpeg",
+      "version": "Electron 43.1.0 / Chromium 150.0.7871.47",
+      "revision": "ad41607c61898cf7150e0fb20fe4bbabd44922a3",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "electron-ffmpeg-ad41607c61898cf7150e0fb20fe4bbabd44922a3.tar.gz",
+      "buildMetadataArchive": "electron-v43.1.0.tar.gz",
+      "noticeFiles": [
+        "LICENSES.chromium.html"
+      ],
+      "artifacts": [
+        "ffmpeg.dll"
+      ]
+    },
+    {
+      "id": "electron-runtime",
+      "owner": "Electron 43.1.0",
+      "name": "Electron runtime (Electron, Chromium, ANGLE, SwiftShader, Vulkan loader and DirectX redistributables)",
+      "version": "43.1.0 / Chromium 150.0.7871.47",
+      "license": "MIT and component licenses in LICENSES.chromium.html",
+      "obligation": "notice-only",
+      "sourceArchive": "angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/electron/LICENSE",
+        "LICENSES.chromium.html"
+      ],
+      "artifacts": [
+        "Seeing Stone.exe",
+        "d3dcompiler_47.dll",
+        "dxcompiler.dll",
+        "dxil.dll",
+        "libEGL.dll",
+        "libGLESv2.dll",
+        "vk_swiftshader.dll",
+        "vulkan-1.dll"
+      ]
+    },
+    {
+      "id": "koffi",
+      "owner": "Koffi 3.1.1",
+      "name": "Koffi native addon",
+      "version": "3.1.1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "source": "Full Koffi source is already present in app.asar; extra source is not required",
+      "noticeFiles": [
+        "native-licenses/koffi/LICENSE.txt"
+      ],
+      "artifacts": [
+        "resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node"
+      ]
+    },
+    {
+      "id": "libass",
+      "owner": "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+      "name": "libass",
+      "version": "0.17.5-1",
+      "license": "ISC",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-libass-0.17.5-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/libass/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libass-9.dll"
+      ]
+    },
+    {
+      "id": "brotli",
+      "owner": "mingw-w64-ucrt-x86_64-brotli 1.2.0-1",
+      "name": "Brotli",
+      "version": "1.2.0-1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-brotli-1.2.0-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/brotli/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libbrotlicommon.dll",
+        "resources/libmpv/libbrotlidec.dll"
+      ]
+    },
+    {
+      "id": "bzip2",
+      "owner": "mingw-w64-ucrt-x86_64-bzip2 1.0.8-3",
+      "name": "bzip2",
+      "version": "1.0.8-3",
+      "license": "bzip2-1.0.6",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-bzip2-1.0.8-3.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/bzip2/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libbz2-1.dll"
+      ]
+    },
+    {
+      "id": "libdovi",
+      "owner": "mingw-w64-ucrt-x86_64-libdovi 3.4.0-1",
+      "name": "libdovi",
+      "version": "3.4.0-1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-libdovi-3.4.0-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/libdovi/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libdovi.dll"
+      ]
+    },
+    {
+      "id": "expat",
+      "owner": "mingw-w64-ucrt-x86_64-expat 2.8.2-1",
+      "name": "Expat",
+      "version": "2.8.2-1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-expat-2.8.2-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/expat/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libexpat-1.dll"
+      ]
+    },
+    {
+      "id": "fontconfig",
+      "owner": "mingw-w64-ucrt-x86_64-fontconfig 2.18.2-1",
+      "name": "fontconfig",
+      "version": "2.18.2-1",
+      "license": "MIT-style fontconfig license",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-fontconfig-2.18.2-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/fontconfig/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libfontconfig-1.dll"
+      ]
+    },
+    {
+      "id": "freetype",
+      "owner": "mingw-w64-ucrt-x86_64-freetype 2.14.3-1",
+      "name": "FreeType",
+      "version": "2.14.3-1",
+      "license": "FTL",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-freetype-2.14.3-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/freetype/FTL.TXT"
+      ],
+      "artifacts": [
+        "resources/libmpv/libfreetype-6.dll"
+      ]
+    },
+    {
+      "id": "fribidi",
+      "owner": "mingw-w64-ucrt-x86_64-fribidi 1.0.16-1",
+      "name": "FriBidi",
+      "version": "1.0.16-1",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-fribidi-1.0.16-1.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/fribidi/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libfribidi-0.dll"
+      ]
+    },
+    {
+      "id": "gcc-libs",
+      "owner": "mingw-w64-ucrt-x86_64-gcc-libs 16.1.0-5",
+      "name": "GCC runtime libraries",
+      "version": "16.1.0-5",
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 AND LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-gcc-16.1.0-5.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/gcc-libs/COPYING.RUNTIME",
+        "native-licenses/gcc-libs/COPYING3",
+        "native-licenses/gcc-libs/COPYING.LIB"
+      ],
+      "artifacts": [
+        "resources/libmpv/libgcc_s_seh-1.dll",
+        "resources/libmpv/libstdc++-6.dll"
+      ]
+    },
+    {
+      "id": "glib2",
+      "owner": "mingw-w64-ucrt-x86_64-glib2 2.88.2-1",
+      "name": "GLib",
+      "version": "2.88.2-1",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-glib2-2.88.2-1.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/glib2/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libglib-2.0-0.dll"
+      ]
+    },
+    {
+      "id": "graphite2",
+      "owner": "mingw-w64-ucrt-x86_64-graphite2 1.3.15-1",
+      "name": "Graphite2",
+      "version": "1.3.15-1",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-graphite2-1.3.15-1.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/graphite2/LICENSE",
+        "native-licenses/graphite2/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libgraphite2.dll"
+      ]
+    },
+    {
+      "id": "harfbuzz",
+      "owner": "mingw-w64-ucrt-x86_64-harfbuzz 14.2.1-1",
+      "name": "HarfBuzz",
+      "version": "14.2.1-1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-harfbuzz-14.2.1-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/harfbuzz/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libharfbuzz-0.dll"
+      ]
+    },
+    {
+      "id": "libiconv",
+      "owner": "mingw-w64-ucrt-x86_64-libiconv 1.19-1",
+      "name": "GNU libiconv",
+      "version": "1.19-1",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-libiconv-1.19-1.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/libiconv/COPYING.LIB"
+      ],
+      "artifacts": [
+        "resources/libmpv/libiconv-2.dll"
+      ]
+    },
+    {
+      "id": "gettext-runtime",
+      "owner": "mingw-w64-ucrt-x86_64-gettext-runtime 1.0-1",
+      "name": "GNU libintl/gettext runtime",
+      "version": "1.0-1",
+      "license": "LGPL-2.1-or-later for distributed libintl",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-gettext-1.0-1.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/gettext-runtime/intl/COPYING.LIB"
+      ],
+      "artifacts": [
+        "resources/libmpv/libintl-8.dll"
+      ]
+    },
+    {
+      "id": "lcms2",
+      "owner": "mingw-w64-ucrt-x86_64-lcms2 2.19.1-1",
+      "name": "Little CMS 2 library",
+      "version": "2.19.1-1",
+      "license": "MIT",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-lcms2-2.19.1-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/lcms2/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/liblcms2-2.dll"
+      ]
+    },
+    {
+      "id": "pcre2",
+      "owner": "mingw-w64-ucrt-x86_64-pcre2 10.47-1",
+      "name": "PCRE2",
+      "version": "10.47-1",
+      "license": "BSD-3-Clause",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-pcre2-10.47-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/pcre2/LICENCE.md"
+      ],
+      "artifacts": [
+        "resources/libmpv/libpcre2-8-0.dll"
+      ]
+    },
+    {
+      "id": "libplacebo",
+      "owner": "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+      "name": "libplacebo",
+      "version": "7.360.1-2",
+      "license": "LGPL-2.1-or-later",
+      "obligation": "source-required",
+      "sourceArchive": "mingw-w64-libplacebo-7.360.1-2.src.tar.zst",
+      "noticeFiles": [
+        "native-licenses/libplacebo/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libplacebo-360.dll"
+      ]
+    },
+    {
+      "id": "libpng",
+      "owner": "mingw-w64-ucrt-x86_64-libpng 1.6.58-1",
+      "name": "libpng",
+      "version": "1.6.58-1",
+      "license": "Libpng",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-libpng-1.6.58-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/libpng/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libpng16-16.dll"
+      ]
+    },
+    {
+      "id": "shaderc",
+      "owner": "mingw-w64-ucrt-x86_64-shaderc 2026.2-1",
+      "name": "shaderc",
+      "version": "2026.2-1",
+      "license": "Apache-2.0",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-shaderc-2026.2-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/shaderc/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libshaderc_shared.dll"
+      ]
+    },
+    {
+      "id": "glslang-static",
+      "owner": "mingw-w64-ucrt-x86_64-glslang 16.2.0-3",
+      "name": "glslang (statically linked into shaderc)",
+      "version": "16.2.0-3",
+      "license": "BSD-3-Clause",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-glslang-16.2.0-3.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/glslang/LICENSE.txt"
+      ],
+      "artifacts": [
+        "resources/libmpv/libshaderc_shared.dll"
+      ]
+    },
+    {
+      "id": "spirv-tools-static",
+      "owner": "mingw-w64-ucrt-x86_64-spirv-tools 3~1.4.350.0-1",
+      "name": "SPIRV-Tools (statically linked into shaderc)",
+      "version": "3~1.4.350.0-1",
+      "license": "Apache-2.0",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-spirv-tools-3~1.4.350.0-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/spirv-tools/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libshaderc_shared.dll"
+      ]
+    },
+    {
+      "id": "spirv-headers-static",
+      "owner": "mingw-w64-ucrt-x86_64-spirv-headers 2~1.4.350.0-1",
+      "name": "SPIRV-Headers (compiled into shaderc toolchain)",
+      "version": "2~1.4.350.0-1",
+      "license": "MIT and ancillary file licenses",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-spirv-headers-2~1.4.350.0-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/spirv-headers/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libshaderc_shared.dll"
+      ]
+    },
+    {
+      "id": "spirv-cross",
+      "owner": "mingw-w64-ucrt-x86_64-spirv-cross 1~1.4.350.1-1",
+      "name": "SPIRV-Cross",
+      "version": "1~1.4.350.1-1",
+      "license": "Apache-2.0",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-spirv-cross-1~1.4.350.1-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/spirv-cross/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libspirv-cross-c-shared.dll"
+      ]
+    },
+    {
+      "id": "libunibreak",
+      "owner": "mingw-w64-ucrt-x86_64-libunibreak 7.0-1",
+      "name": "libunibreak",
+      "version": "7.0-1",
+      "license": "Zlib",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-libunibreak-7.0-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/libunibreak/LICENCE"
+      ],
+      "artifacts": [
+        "resources/libmpv/libunibreak-7.dll"
+      ]
+    },
+    {
+      "id": "winpthreads",
+      "owner": "mingw-w64-ucrt-x86_64-libwinpthread 14.0.0.r190.g96fb1bff7-1",
+      "name": "MinGW-w64 winpthreads",
+      "version": "14.0.0.r190.g96fb1bff7-1",
+      "license": "MIT AND BSD-3-Clause-Clear",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-winpthreads-14.0.0.r190.g96fb1bff7-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/libwinpthread/COPYING"
+      ],
+      "artifacts": [
+        "resources/libmpv/libwinpthread-1.dll"
+      ]
+    },
+    {
+      "id": "vulkan-loader",
+      "owner": "mingw-w64-ucrt-x86_64-vulkan-loader 1~1.4.350.1-1",
+      "name": "Vulkan loader",
+      "version": "1~1.4.350.1-1",
+      "license": "Apache-2.0",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-vulkan-loader-1~1.4.350.1-1.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/vulkan-loader/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/vulkan-1.dll"
+      ]
+    },
+    {
+      "id": "zlib",
+      "owner": "mingw-w64-ucrt-x86_64-zlib 1.3.2-2",
+      "name": "zlib",
+      "version": "1.3.2-2",
+      "license": "Zlib",
+      "obligation": "notice-only",
+      "sourceArchive": "mingw-w64-zlib-1.3.2-2.src.tar.zst",
+      "sourceInclusion": "voluntary",
+      "noticeFiles": [
+        "native-licenses/zlib/LICENSE"
+      ],
+      "artifacts": [
+        "resources/libmpv/zlib1.dll"
+      ]
     }
   ],
   "packages": [

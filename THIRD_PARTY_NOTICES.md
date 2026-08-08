@@ -11,18 +11,52 @@ These tables are generated from pinned component provenance and the frozen insta
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
-| native | Controlled source-built mpv/libmpv runtime | 0.41.0 | GPL-2.0-or-later | internal-only-controlled-source-build |
-| native | Seeing Stone libmpv bridge | 0.4.3 milestone-4 | GPL-2.0-or-later | source-and-binary |
+| native | Controlled source-built mpv/libmpv runtime | 0.41.0 | GPL-2.0-or-later | source-and-binary |
+| native | Seeing Stone libmpv bridge | 0.7.0 | GPL-2.0-or-later | source-and-binary |
 | native | ANGLE runtime from Electron | Electron 43.1.0 / Chromium 150.0.7871.47 | BSD-3-Clause | source-and-binary |
-| native | Controlled source-built FFmpeg runtime | 8.1.2 | LGPL-2.1-or-later | internal-only-controlled-source-build |
-| native | Legacy development prebuilt mpv | v0.41.0-dev-ge5486b96d | GPL-2.0-or-later | development-only-not-production-packaged |
-| native | Legacy development prebuilt FFmpeg | ff59522 | GPL-2.0-or-later | development-only-not-production-packaged |
-| native | Legacy development prebuilt Vulkan Loader | runtime-associated; exact revision not recorded upstream | Apache-2.0 | development-only-not-production-packaged |
-| native | Legacy development prebuilt AMD Advanced Media Framework headers | runtime-associated; exact revision not recorded upstream | MIT | development-only-not-production-packaged |
+| native | Controlled source-built FFmpeg runtime | 8.1.2 | LGPL-2.1-or-later | source-and-binary |
 | plugin | Seeing Stone Participant Telemetry | protocol-v1-disabled | GPL-2.0-or-later | source-only |
 
 Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.
-The controlled native runtime remains internal-only until complete companion provenance, corresponding source, notices, and release acceptance are verified.
+The production native binary-to-source mapping, exact binary hashes, source-archive hashes, and source/notice classifications are recorded in `redistribution-compliance.json` and `native/redistribution-inventory.json`.
+
+## Production native redistribution inventory
+
+| Component | Version | License | Requirement | Source included |
+| --- | --- | --- | --- | --- |
+| Seeing Stone application and libmpv bridge | 0.7.0 | GPL-2.0-or-later | source-required | required corresponding source |
+| mpv/libmpv | 0.41.0 | GPL-2.0-or-later | source-required | required corresponding source |
+| FFmpeg controlled runtime | 8.1.2 | LGPL-2.1-or-later | source-required | required corresponding source |
+| Chromium/Electron FFmpeg | Electron 43.1.0 / Chromium 150.0.7871.47 | LGPL-2.1-or-later | source-required | required corresponding source |
+| Electron runtime (Electron, Chromium, ANGLE, SwiftShader, Vulkan loader and DirectX redistributables) | 43.1.0 / Chromium 150.0.7871.47 | MIT and component licenses in LICENSES.chromium.html | notice-only | voluntarily |
+| Koffi native addon | 3.1.1 | MIT | notice-only | not required |
+| libass | 0.17.5-1 | ISC | notice-only | voluntarily |
+| Brotli | 1.2.0-1 | MIT | notice-only | voluntarily |
+| bzip2 | 1.0.8-3 | bzip2-1.0.6 | notice-only | voluntarily |
+| libdovi | 3.4.0-1 | MIT | notice-only | voluntarily |
+| Expat | 2.8.2-1 | MIT | notice-only | voluntarily |
+| fontconfig | 2.18.2-1 | MIT-style fontconfig license | notice-only | voluntarily |
+| FreeType | 2.14.3-1 | FTL | notice-only | voluntarily |
+| FriBidi | 1.0.16-1 | LGPL-2.1-or-later | source-required | required corresponding source |
+| GCC runtime libraries | 16.1.0-5 | GPL-3.0-or-later WITH GCC-exception-3.1 AND LGPL-2.1-or-later | source-required | required corresponding source |
+| GLib | 2.88.2-1 | LGPL-2.1-or-later | source-required | required corresponding source |
+| Graphite2 | 1.3.15-1 | LGPL-2.1-or-later | source-required | required corresponding source |
+| HarfBuzz | 14.2.1-1 | MIT | notice-only | voluntarily |
+| GNU libiconv | 1.19-1 | LGPL-2.1-or-later | source-required | required corresponding source |
+| GNU libintl/gettext runtime | 1.0-1 | LGPL-2.1-or-later for distributed libintl | source-required | required corresponding source |
+| Little CMS 2 library | 2.19.1-1 | MIT | notice-only | voluntarily |
+| PCRE2 | 10.47-1 | BSD-3-Clause | notice-only | voluntarily |
+| libplacebo | 7.360.1-2 | LGPL-2.1-or-later | source-required | required corresponding source |
+| libpng | 1.6.58-1 | Libpng | notice-only | voluntarily |
+| shaderc | 2026.2-1 | Apache-2.0 | notice-only | voluntarily |
+| glslang (statically linked into shaderc) | 16.2.0-3 | BSD-3-Clause | notice-only | voluntarily |
+| SPIRV-Tools (statically linked into shaderc) | 3~1.4.350.0-1 | Apache-2.0 | notice-only | voluntarily |
+| SPIRV-Headers (compiled into shaderc toolchain) | 2~1.4.350.0-1 | MIT and ancillary file licenses | notice-only | voluntarily |
+| SPIRV-Cross | 1~1.4.350.1-1 | Apache-2.0 | notice-only | voluntarily |
+| libunibreak | 7.0-1 | Zlib | notice-only | voluntarily |
+| MinGW-w64 winpthreads | 14.0.0.r190.g96fb1bff7-1 | MIT AND BSD-3-Clause-Clear | notice-only | voluntarily |
+| Vulkan loader | 1~1.4.350.1-1 | Apache-2.0 | notice-only | voluntarily |
+| zlib | 1.3.2-2 | Zlib | notice-only | voluntarily |
 
 ## JavaScript dependencies
 
@@ -343,4 +377,4 @@ The controlled native runtime remains internal-only until complete companion pro
 ## Native playback runtime details
 
 See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `libmpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.
-The current Windows binary is not approved for public redistribution.
+The controlled production runtime is covered by the attached notice files and the separately generated corresponding-source archive described in `PUBLIC_RELEASE_COMPLIANCE.md`.

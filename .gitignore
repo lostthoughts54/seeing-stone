@@ -5,6 +5,8 @@ dist/
 /native/libmpv-bridge/build/
 /artifacts/*.exe
 /artifacts/*.exe.sha256.txt
+/artifacts/*-corresponding-source.zip
+/artifacts/*-corresponding-source.zip.sha256.txt
 coverage/
 *.log
 *.tsbuildinfo

@@ -11,6 +11,7 @@ $resultPath = Join-Path $root "native\libmpv-runtime\build-result.json"
 $runtimeManifestPath = Join-Path $root "libmpv-runtime.json"
 $sourceLockPath = Join-Path $root "native\libmpv-runtime\source-lock.json"
 $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
+$applicationVersion = (Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
 
 if (-not (Test-Path -LiteralPath $addon)) { throw "LIBMPV_NATIVE_ADDON_MISSING" }
 if (Test-Path -LiteralPath $stageRoot) {
@@ -96,7 +97,7 @@ $artifacts = @(Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name | 
     role = $role
     sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     bytes = $_.Length
-    owner = if ($packageOwners.ContainsKey($_.Name)) { $packageOwners[$_.Name] } elseif ($role -eq "ffmpeg-companion") { "FFmpeg 8.1.2" } elseif ($role -eq "native-addon") { "Seeing Stone 0.4.3" } else { "mpv 0.41.0" }
+    owner = if ($packageOwners.ContainsKey($_.Name)) { $packageOwners[$_.Name] } elseif ($role -eq "ffmpeg-companion") { "FFmpeg 8.1.2" } elseif ($role -eq "native-addon") { "Seeing Stone $applicationVersion" } else { "mpv 0.41.0" }
   }
 })
 

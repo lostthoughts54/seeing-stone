@@ -1,0 +1,380 @@
+{
+  "schemaVersion": 1,
+  "applicationVersion": "0.7.0",
+  "packageDirectory": ".runtime/release/win-unpacked",
+  "generatedFrom": "production package plus redistribution-compliance.json",
+  "artifacts": [
+    {
+      "packagePath": "Seeing Stone.exe",
+      "sha256": "4218b3589711b0fe486a90b14c2b7d601cb153315276566552bc5a2f4846d1b0",
+      "bytes": 225526272,
+      "componentIds": [
+        "seeing-stone",
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "d3dcompiler_47.dll",
+      "sha256": "a05f99734f7c4822fefc12b367af21fd0976ed6608752fb1e1e80b6ece7ecbbb",
+      "bytes": 4741488,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "dxcompiler.dll",
+      "sha256": "1085707889573af5b32e7644d47a7c5f0809ed0818217d75f6eaedee37a2a767",
+      "bytes": 25616896,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "dxil.dll",
+      "sha256": "77e039c905030a641e53658a008b74e90635a5ea9b6b79eabd0f2003bdfca59a",
+      "bytes": 1509760,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "ffmpeg.dll",
+      "sha256": "8b7cbc841fd42443cfa4011badb5cf6b9fb41a7a2c277ccbf8e0c321ae44af37",
+      "bytes": 3067904,
+      "componentIds": [
+        "electron-ffmpeg"
+      ]
+    },
+    {
+      "packagePath": "libEGL.dll",
+      "sha256": "c459e2cf46578da98ba8955e94f29fde8001ba3f44197a3ec521a9c91b538e7c",
+      "bytes": 474624,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "libGLESv2.dll",
+      "sha256": "39955886b88e2c2978c8472225430c497abf90b1fad906d7b3b6fdf581ce9ddf",
+      "bytes": 8023552,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node",
+      "sha256": "eb0587c804bb76262968bf83028528da4dc2d4322f558845cce205c709e2ba20",
+      "bytes": 1042944,
+      "componentIds": [
+        "koffi"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/avcodec-62.dll",
+      "sha256": "bdc0abb8de26982f61f678748b3d00a3eaa0ce79c509c680f78bb2236431f25b",
+      "bytes": 18744832,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/avdevice-62.dll",
+      "sha256": "374f4f34884bc51896f123ba5ffba6567f3f95e9de28c4157442a0536659eaa5",
+      "bytes": 153088,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/avfilter-11.dll",
+      "sha256": "0ae13588a723df2a9322d22ec1090bcdf2c5dacff723ffabede0a928942eb218",
+      "bytes": 5775872,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/avformat-62.dll",
+      "sha256": "ac1c3c5c5d94bee86f924b81aa86956197b8cbb9656662983c59136165e09ddf",
+      "bytes": 2834944,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/avutil-60.dll",
+      "sha256": "c31af31be6d9d513db5f4858e00863a41772b02c6a9a1ba835e89541447371a6",
+      "bytes": 1071104,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libass-9.dll",
+      "sha256": "cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b",
+      "bytes": 345174,
+      "componentIds": [
+        "libass"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libbrotlicommon.dll",
+      "sha256": "c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c",
+      "bytes": 144565,
+      "componentIds": [
+        "brotli"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libbrotlidec.dll",
+      "sha256": "e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896",
+      "bytes": 62619,
+      "componentIds": [
+        "brotli"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libbz2-1.dll",
+      "sha256": "669a4bf9266d5f020e843aa5fd75b93ce8ebde27014d5ac466a8b3cf39d8aba7",
+      "bytes": 78774,
+      "componentIds": [
+        "bzip2"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libdovi.dll",
+      "sha256": "75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb",
+      "bytes": 1370861,
+      "componentIds": [
+        "libdovi"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libexpat-1.dll",
+      "sha256": "f13a04c298b0290e722f2c1936ea076de769f8f32fa235bb17c02984e6e45fc1",
+      "bytes": 237300,
+      "componentIds": [
+        "expat"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libfontconfig-1.dll",
+      "sha256": "292fe24f957d961d6d9ac11dc79cfc0922f2925b1107e5d37a0ab17bea2adee5",
+      "bytes": 500237,
+      "componentIds": [
+        "fontconfig"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libfreetype-6.dll",
+      "sha256": "a3271784f8366b3c6412e0c35474884fa12899c392bacb08bc8eac00f4be7e64",
+      "bytes": 791593,
+      "componentIds": [
+        "freetype"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libfribidi-0.dll",
+      "sha256": "73a712fd51fa0085e8660084743a821ae7388de138069cd6cd8c171d4487da84",
+      "bytes": 155504,
+      "componentIds": [
+        "fribidi"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libgcc_s_seh-1.dll",
+      "sha256": "ff139cfe956709283f7b70a06af8bc8bb9d1c3bef60ec1bc8d363c91351cfeb2",
+      "bytes": 153412,
+      "componentIds": [
+        "gcc-libs"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libglib-2.0-0.dll",
+      "sha256": "f606ad14f15d822a21a2e15f9f22a37318a269afab5d4c6020677acfae720b7f",
+      "bytes": 1564508,
+      "componentIds": [
+        "glib2"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libgraphite2.dll",
+      "sha256": "93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18",
+      "bytes": 167857,
+      "componentIds": [
+        "graphite2"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libharfbuzz-0.dll",
+      "sha256": "2e1523eddd3a7c5be5fb8ad9a8e8eee819664356752d18c56f7c8f5896126ddb",
+      "bytes": 1540489,
+      "componentIds": [
+        "harfbuzz"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libiconv-2.dll",
+      "sha256": "94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a",
+      "bytes": 1141951,
+      "componentIds": [
+        "libiconv"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libintl-8.dll",
+      "sha256": "0e5a178731e6be6d115442a6ade3df7f03265cd1fc4338f8b6f86a8001cbf582",
+      "bytes": 298164,
+      "componentIds": [
+        "gettext-runtime"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/liblcms2-2.dll",
+      "sha256": "03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65",
+      "bytes": 448202,
+      "componentIds": [
+        "lcms2"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libmpv-2.dll",
+      "sha256": "54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
+      "bytes": 2807509,
+      "componentIds": [
+        "mpv"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libpcre2-8-0.dll",
+      "sha256": "52ccc7e4ec5ad0aecf307c0328826340f5d504aa59f7c4143b9a1b9fff16ccda",
+      "bytes": 718625,
+      "componentIds": [
+        "pcre2"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libplacebo-360.dll",
+      "sha256": "8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8",
+      "bytes": 1235613,
+      "componentIds": [
+        "libplacebo"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libpng16-16.dll",
+      "sha256": "5c1dd5410af563f4a3c4aee10d1f749aa71e0d7fb3b4fac240eb9e96cadebd26",
+      "bytes": 258972,
+      "componentIds": [
+        "libpng"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libshaderc_shared.dll",
+      "sha256": "887d422382f18be097c447ed3922db04397d50ddf7e34f3cc18d2e2abde740b0",
+      "bytes": 10440625,
+      "componentIds": [
+        "shaderc",
+        "glslang-static",
+        "spirv-tools-static",
+        "spirv-headers-static"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libspirv-cross-c-shared.dll",
+      "sha256": "99cb3de4832bbafe8a353e55dfe399e038ec9e3f6eed3e4723ab9796f824bf1f",
+      "bytes": 3393880,
+      "componentIds": [
+        "spirv-cross"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libstdc++-6.dll",
+      "sha256": "d9a58184f6bb27936ef03c3a3286950e4aa61c66a9f74dfa94a532b1433b368d",
+      "bytes": 2667044,
+      "componentIds": [
+        "gcc-libs"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libunibreak-7.dll",
+      "sha256": "f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283",
+      "bytes": 141442,
+      "componentIds": [
+        "libunibreak"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/libwinpthread-1.dll",
+      "sha256": "c7844629395e7813508fc9bb58c068ca9240a04d6d8529db0a75b6efc53590e7",
+      "bytes": 64703,
+      "componentIds": [
+        "winpthreads"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/mpv.exe",
+      "sha256": "3b9ebe4afde274a5551b51e0eeb3d77e10bcfcbf08b9e8723f7ac9f7be855930",
+      "bytes": 2847963,
+      "componentIds": [
+        "mpv"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/seeing_stone_libmpv_bridge.node",
+      "sha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
+      "bytes": 337408,
+      "componentIds": [
+        "seeing-stone"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/swresample-6.dll",
+      "sha256": "47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
+      "bytes": 178176,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/swscale-9.dll",
+      "sha256": "8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96",
+      "bytes": 2012672,
+      "componentIds": [
+        "ffmpeg-controlled"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/vulkan-1.dll",
+      "sha256": "ff17ce3db007aed762838de913e0a52a4bbce6eb43cc8a5e706650a5ad3d949f",
+      "bytes": 687964,
+      "componentIds": [
+        "vulkan-loader"
+      ]
+    },
+    {
+      "packagePath": "resources/libmpv/zlib1.dll",
+      "sha256": "11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d",
+      "bytes": 127291,
+      "componentIds": [
+        "zlib"
+      ]
+    },
+    {
+      "packagePath": "vk_swiftshader.dll",
+      "sha256": "dc150d40c7ca24dc1d132990bdefa1168e3af5244e8c6e5e84a7d3f2ae20ead4",
+      "bytes": 5502464,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    },
+    {
+      "packagePath": "vulkan-1.dll",
+      "sha256": "db1ca92ddd19d5e02cf336a781c3770a9cead750c4cab780898f174f41d598d1",
+      "bytes": 930304,
+      "componentIds": [
+        "electron-runtime"
+      ]
+    }
+  ]
+}

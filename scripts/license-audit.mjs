@@ -8,6 +8,7 @@ const modules = join(root, "node_modules");
 const output = join(root, "dependency-licenses.json");
 const notices = join(root, "THIRD_PARTY_NOTICES.md");
 const componentsManifest = join(root, "legal-components.json");
+const redistributionManifest = join(root, "redistribution-compliance.json");
 const generatedModule = join(root, "src", "shared", "generated", "openSourceLicenses.ts");
 
 // Every automatically approved value is an SPDX license identifier. Keep this
@@ -345,7 +346,8 @@ async function installedPackages() {
   return packages;
 }
 
-function renderArtifacts(packages, components) {
+function renderArtifacts(packages, components, redistribution) {
+  const publicComponents = components.filter((entry) => entry.redistributionStatus !== "development-only-not-production-packaged");
   const inventory = {
     schemaVersion: 2,
     generatedFrom: {
@@ -354,10 +356,11 @@ function renderArtifacts(packages, components) {
     },
     projectLicense: "GPL-2.0-or-later",
     components,
+    redistributionComponents: redistribution.components,
     packages,
   };
   const publicEntries = [
-    ...components.map((entry) => ({
+    ...publicComponents.map((entry) => ({
       category: entry.category,
       name: entry.name,
       version: entry.version,
@@ -392,10 +395,16 @@ function renderArtifacts(packages, components) {
     "",
     "| Category | Component | Version/revision | License | Redistribution status |",
     "| --- | --- | --- | --- | --- |",
-    ...components.map((entry) => `| ${entry.category} | ${entry.name.replaceAll("|", "\\|")} | ${entry.version.replaceAll("|", "\\|")} | ${entry.license.replaceAll("|", "\\|")} | ${entry.redistributionStatus} |`),
+    ...publicComponents.map((entry) => `| ${entry.category} | ${entry.name.replaceAll("|", "\\|")} | ${entry.version.replaceAll("|", "\\|")} | ${entry.license.replaceAll("|", "\\|")} | ${entry.redistributionStatus} |`),
     "",
     "Available source revisions, artifact hashes, and every license-file hash are recorded in `dependency-licenses.json`.",
-    "The controlled native runtime remains internal-only until complete companion provenance, corresponding source, notices, and release acceptance are verified.",
+    "The production native binary-to-source mapping, exact binary hashes, source-archive hashes, and source/notice classifications are recorded in `redistribution-compliance.json` and `native/redistribution-inventory.json`.",
+    "",
+    "## Production native redistribution inventory",
+    "",
+    "| Component | Version | License | Requirement | Source included |",
+    "| --- | --- | --- | --- | --- |",
+    ...redistribution.components.map((entry) => `| ${entry.name.replaceAll("|", "\\|")} | ${entry.version.replaceAll("|", "\\|")} | ${entry.license.replaceAll("|", "\\|")} | ${entry.obligation} | ${entry.sourceInclusion === "voluntary" ? "voluntarily" : entry.obligation === "source-required" ? "required corresponding source" : "not required"} |`),
     "",
     "## JavaScript dependencies",
     "",
@@ -406,7 +415,7 @@ function renderArtifacts(packages, components) {
     "## Native playback runtime details",
     "",
     "See `assets/mpv/NOTICE.md`, `assets/mpv/licenses/`, `libmpv-runtime.json`, and `NATIVE_PLAYER_BUILD.md`.",
-    "The current Windows binary is not approved for public redistribution.",
+    "The controlled production runtime is covered by the attached notice files and the separately generated corresponding-source archive described in `PUBLIC_RELEASE_COMPLIANCE.md`.",
     "",
   ].join("\n");
   const generated = [
@@ -424,14 +433,18 @@ export async function runLicenseAudit(mode = "--check") {
     throw new LicenseAuditError(`Unsupported license-audit mode: ${mode}.`);
   }
 
-  const [packages, components] = await Promise.all([installedPackages(), loadLegalComponents()]);
+  const [packages, components, redistribution] = await Promise.all([
+    installedPackages(),
+    loadLegalComponents(),
+    readFile(redistributionManifest, "utf8").then(JSON.parse),
+  ]);
   assertLicensePolicy(packages);
   const projectManifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const applicationComponent = components.find((entry) => entry.category === "application");
   if (!applicationComponent || applicationComponent.version !== projectManifest.version || applicationComponent.license !== projectManifest.license) {
     throw new LicenseAuditError("The application legal component must match package.json version and license.");
   }
-  const artifacts = renderArtifacts(packages, components);
+  const artifacts = renderArtifacts(packages, components, redistribution);
 
   if (mode === "--write") {
     await writeFile(output, artifacts.inventory);

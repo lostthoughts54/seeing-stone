@@ -40,7 +40,7 @@
         },
         {
           "path": "native/libmpv-runtime/build-result.json",
-          "sha256": "ed89616afbdd1799ea11d522e717300f3b0ec674e5cacfc4d38b4597335d6b88"
+          "sha256": "40d696c15c5c96e147e83e750f3c8af8957640cd13bd09913dd785788abcda2c"
         },
         {
           "path": "libmpv-runtime.json",
@@ -150,7 +150,7 @@
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
       "sourceRevision": "41f6a645068483470267271e1d09966ca3b9f413",
-      "redistributionStatus": "internal-only-controlled-source-build",
+      "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/mpv-GPL-2.0.txt",
@@ -183,7 +183,7 @@
     {
       "category": "native",
       "name": "Seeing Stone libmpv bridge",
-      "version": "0.4.3 milestone-4",
+      "version": "0.7.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
@@ -249,7 +249,7 @@
       "license": "LGPL-2.1-or-later",
       "projectUrl": "https://ffmpeg.org",
       "sourceRevision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
-      "redistributionStatus": "internal-only-controlled-source-build",
+      "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
         "path": "assets/mpv/licenses/ffmpeg-LGPL-2.1.txt",

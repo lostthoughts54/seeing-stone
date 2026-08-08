@@ -2532,7 +2532,7 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "8.1.2",
       "license": "LGPL-2.1-or-later",
       "projectUrl": "https://ffmpeg.org",
-      "redistributionStatus": "internal-only-controlled-source-build"
+      "redistributionStatus": "source-and-binary"
     },
     {
       "category": "native",
@@ -2540,39 +2540,7 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "0.41.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/mpv-player/mpv",
-      "redistributionStatus": "internal-only-controlled-source-build"
-    },
-    {
-      "category": "native",
-      "name": "Legacy development prebuilt AMD Advanced Media Framework headers",
-      "version": "runtime-associated; exact revision not recorded upstream",
-      "license": "MIT",
-      "projectUrl": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
-      "redistributionStatus": "development-only-not-production-packaged"
-    },
-    {
-      "category": "native",
-      "name": "Legacy development prebuilt FFmpeg",
-      "version": "ff59522",
-      "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/FFmpeg/FFmpeg",
-      "redistributionStatus": "development-only-not-production-packaged"
-    },
-    {
-      "category": "native",
-      "name": "Legacy development prebuilt mpv",
-      "version": "v0.41.0-dev-ge5486b96d",
-      "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/mpv-player/mpv",
-      "redistributionStatus": "development-only-not-production-packaged"
-    },
-    {
-      "category": "native",
-      "name": "Legacy development prebuilt Vulkan Loader",
-      "version": "runtime-associated; exact revision not recorded upstream",
-      "license": "Apache-2.0",
-      "projectUrl": "https://github.com/KhronosGroup/Vulkan-Loader",
-      "redistributionStatus": "development-only-not-production-packaged"
+      "redistributionStatus": "source-and-binary"
     },
     {
       "category": "native",
@@ -2585,7 +2553,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "native",
       "name": "Seeing Stone libmpv bridge",
-      "version": "0.4.3 milestone-4",
+      "version": "0.7.0",
       "license": "GPL-2.0-or-later",
       "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
       "redistributionStatus": "source-and-binary"

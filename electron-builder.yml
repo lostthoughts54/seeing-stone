@@ -23,6 +23,14 @@ extraResources:
     to: legal/THIRD_PARTY_NOTICES.md
   - from: dependency-licenses.json
     to: legal/dependency-licenses.json
+  - from: redistribution-compliance.json
+    to: legal/redistribution-compliance.json
+  - from: native/redistribution-inventory.json
+    to: legal/redistribution-native-inventory.json
+  - from: native-licenses
+    to: legal/native-licenses
+    filter:
+      - "**/*"
   - from: src/renderer/assets/fonts/Inter-OFL.txt
     to: legal/fonts/Inter-OFL.txt
   - from: src/renderer/assets/fonts/Spectral-OFL.txt
@@ -63,3 +71,4 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Seeing Stone
   buildUniversalInstaller: false
+  packElevateHelper: false

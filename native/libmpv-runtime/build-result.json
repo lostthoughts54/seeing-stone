@@ -257,7 +257,7 @@
                           "role":  "native-addon",
                           "sha256":  "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
                           "bytes":  337408,
-                          "owner":  "Seeing Stone 0.4.3"
+                          "owner":  "Seeing Stone 0.7.0"
                       },
                       {
                           "filename":  "swresample-6.dll",
