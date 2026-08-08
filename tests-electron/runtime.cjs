@@ -251,6 +251,14 @@ async function runElectronChild() {
       async getLibraryItems(_libraryId, type) {
         return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
       },
+      async browse(query) {
+        let items = query.type === "Series" ? [runtimeSeries] : query.type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie, runtimeSeries];
+        if (typeof query.watched === "boolean") items = items.filter((item) => item.userData.played === query.watched);
+        if (query.sort === "title-ascending") items.sort((left, right) => left.name.localeCompare(right.name));
+        if (query.sort === "title-descending") items.sort((left, right) => right.name.localeCompare(left.name));
+        if (query.sort === "rating-descending") items.sort((left, right) => (right.communityRating || 0) - (left.communityRating || 0));
+        return { items, totalRecordCount: items.length };
+      },
       async search() { return [runtimeOtherMovie]; },
       async getHome() {
         homeGetCount += 1;
@@ -831,6 +839,7 @@ async function runElectronChild() {
         session: ["getState", "login", "logout", "restore"],
         home: ["get"],
         libraries: ["getItems", "list"],
+        browse: ["get"],
         search: ["query"],
         items: ["getDetails", "openTrailer", "setWatched"],
         shows: ["getEpisodes", "getSeasons"],

@@ -4,6 +4,8 @@ import type {
   ExternalSubtitleTrack,
   HomePayload,
   LibrarySummary,
+  BrowseQuery,
+  BrowsePage,
   MediaItem,
   MediaSourceCapabilities,
   JellyfinConnectionDiagnostics,
@@ -43,6 +45,7 @@ const ITEM_FIELDS = [
   "PremiereDate",
   "OfficialRating",
   "CommunityRating",
+  "People",
 ].join(",");
 
 type JsonRecord = Record<string, unknown>;
@@ -258,6 +261,7 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
   const userData = asRecord(item.UserData);
   const remoteTrailers = Array.isArray(item.RemoteTrailers) ? item.RemoteTrailers : [];
   const type = asString(item.Type, "Video") as MediaItem["type"];
+  const people = Array.isArray(item.People) ? item.People : [];
   return {
     id: asString(item.Id),
     name: asString(item.Name, "Untitled"),
@@ -269,6 +273,13 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
     communityRating: nullableNumber(item.CommunityRating),
     runTimeTicks: asNumber(item.RunTimeTicks),
     genres: Array.isArray(item.Genres) ? item.Genres.filter((entry): entry is string => typeof entry === "string").slice(0, 32) : [],
+    people: people.map(asRecord).map((person) => ({
+      id: safeOpaqueIdentifier(person.Id) ?? "",
+      name: boundedNullableString(person.Name, 1024) ?? "",
+      role: boundedNullableString(person.Role, 256) ?? "",
+      type: boundedNullableString(person.Type, 64) ?? "",
+      primaryImageTag: safeOpaqueIdentifier(person.PrimaryImageTag),
+    })).filter((person) => person.id && person.name).slice(0, 32),
     primaryImageAspectRatio: nullableNumber(item.PrimaryImageAspectRatio),
     imageTags: {
       Primary: nullableString(imageTags.Primary) ?? undefined,
@@ -737,6 +748,30 @@ export class JellyfinApi {
       items,
       totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))),
     };
+  }
+
+  async browse(query: BrowseQuery): Promise<BrowsePage> {
+    const session = this.requireSession();
+    const sorts: Record<BrowseQuery["sort"], { SortBy: string; SortOrder: string }> = {
+      "title-ascending": { SortBy: "SortName", SortOrder: "Ascending" },
+      "title-descending": { SortBy: "SortName", SortOrder: "Descending" },
+      "date-added-descending": { SortBy: "DateCreated,SortName", SortOrder: "Descending" },
+      "release-date-descending": { SortBy: "PremiereDate,SortName", SortOrder: "Descending" },
+      "release-date-ascending": { SortBy: "PremiereDate,SortName", SortOrder: "Ascending" },
+      "rating-descending": { SortBy: "CommunityRating,SortName", SortOrder: "Descending" },
+    };
+    const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+      ...(query.libraryId ? { ParentId: query.libraryId } : {}),
+      Recursive: "true",
+      IncludeItemTypes: query.type === "Mixed" ? "Movie,Series,Episode,Video" : query.type,
+      ...(query.genre ? { Genres: query.genre } : {}),
+      ...(query.personId ? { PersonIds: query.personId } : {}),
+      ...(query.watched === undefined ? {} : { IsPlayed: String(query.watched) }),
+      ...sorts[query.sort], Fields: ITEM_FIELDS,
+      StartIndex: String(query.startIndex), Limit: String(query.limit), EnableTotalRecordCount: "true",
+    }));
+    const items = this.items(result).map(sanitizeMediaItem);
+    return { items, totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))) };
   }
 
   async search(query: string): Promise<MediaItem[]> {

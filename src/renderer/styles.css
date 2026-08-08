@@ -1741,6 +1741,11 @@ button.danger:hover:not(:disabled) {
   font-size: 0.84rem;
 }
 
+.genre-button, .episode-title-button { background: transparent; border: 0; color: #c5c5cc; font: inherit; min-height: 0; padding: 0; text-align: left; }
+.genre-button:hover:not(:disabled), .genre-button:focus-visible, .episode-title-button:hover:not(:disabled), .episode-title-button:focus-visible { color: var(--text); text-decoration: underline; }
+.detail-cast { margin: 0 0 18px; }
+.detail-cast h2 { font-size: 1rem; margin: 0 0 8px; }
+
 .detail-actions button {
   min-width: 116px;
 }

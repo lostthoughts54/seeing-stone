@@ -14,6 +14,7 @@ function fallbackItem(record: MediaItemRecord): MediaItem {
     communityRating: null,
     runTimeTicks: record.runTimeTicks,
     genres: [],
+    people: [],
     primaryImageAspectRatio: null,
     imageTags: {},
     backdropImageTag: null,
@@ -67,7 +68,7 @@ export function materializeCachedMediaItem(
   const parsed = cachedMediaItemSchema.safeParse(record.metadata);
   const hasValidMetadata = parsed.success && parsed.data.id === record.itemId;
   const item = hasValidMetadata
-    ? structuredClone(parsed.data)
+    ? { ...structuredClone(parsed.data), people: parsed.data.people ?? [] }
     : fallbackItem(record);
   return mergePlaybackHead(item, head, !hasValidMetadata);
 }

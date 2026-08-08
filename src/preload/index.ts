@@ -3,6 +3,8 @@ import {
   IPC,
   type ArtworkInput,
   type BufferingPolicyPreferenceInput,
+  type BrowseInput,
+  type BrowsePage,
   type CleanMachineDiagnosticActionResult,
   type CleanMachineDiagnostics,
   type DiscoveredServer,
@@ -103,6 +105,7 @@ const bridge: JellyfinBridge = {
     list: () => invoke<LibrarySummary[]>(IPC.librariesList),
     getItems: (input: LibraryItemsInput) => invoke<MediaItem[]>(IPC.librariesGetItems, input),
   },
+  browse: { get: (input: BrowseInput) => invoke<BrowsePage>(IPC.browseGet, input) },
   search: { query: (input: SearchInput) => invoke<MediaItem[]>(IPC.searchQuery, input) },
   items: {
     getDetails: (input: ItemIdInput) => invoke<MediaItem>(IPC.itemsGetDetails, input),

@@ -56,7 +56,7 @@ type MediaRow = {
 };
 type ImageOptions = { width?: number; height?: number };
 type LibraryFilter = "all" | "unwatched" | "watched" | "downloaded";
-type LibrarySort = "title-ascending" | "title-descending" | "year-descending" | "year-ascending" | "rating-descending";
+type LibrarySort = "title-ascending" | "title-descending" | "date-added-descending" | "year-descending" | "year-ascending" | "rating-descending";
 
 function byId<T extends Element>(id: string): T {
   const element = document.getElementById(id);
@@ -153,6 +153,8 @@ const detailTitle = byId<HTMLElement>("detailTitle");
 const detailMeta = byId<HTMLElement>("detailMeta");
 const detailOverview = byId<HTMLElement>("detailOverview");
 const detailGenres = byId<HTMLElement>("detailGenres");
+const detailCast = byId<HTMLElement>("detailCast");
+const detailPeople = byId<HTMLElement>("detailPeople");
 const detailPlayButton = byId<HTMLButtonElement>("detailPlayButton");
 const detailPlayLabel = byId<HTMLElement>("detailPlayLabel");
 const detailDownloadButton = byId<HTMLButtonElement>("detailDownloadButton");
@@ -668,7 +670,7 @@ function metadataParts(item: MediaItem): string[] {
   if (itemYear(item)) parts.push(String(itemYear(item)));
   if (item.officialRating) parts.push(item.officialRating);
   if (runtime(item)) parts.push(runtime(item));
-  if (item.communityRating) parts.push(`${item.communityRating.toFixed(1)}/10`);
+  if (typeof item.communityRating === "number" && Number.isFinite(item.communityRating)) parts.push(`★ ${item.communityRating.toFixed(1)}`);
   return parts;
 }
 
@@ -889,7 +891,7 @@ function setLiveTvTab(tab: LiveTvTab): void {
 function liveChannelItem(channelId: string, name: string): MediaItem {
   return {
     id: channelId, name, type: "TvChannel", overview: "", productionYear: null, premiereYear: null,
-    officialRating: null, communityRating: null, runTimeTicks: 0, genres: [], primaryImageAspectRatio: null,
+    officialRating: null, communityRating: null, runTimeTicks: 0, genres: [], people: [], primaryImageAspectRatio: null,
     imageTags: {}, backdropImageTag: null, parentThumbItemId: null, parentThumbImageTag: null,
     seriesId: null, seriesName: null, seasonId: null, indexNumber: null, parentIndexNumber: null,
     userData: { played: false, playbackPositionTicks: 0, playedPercentage: 0 }, hasTrailer: false, playable: true,
@@ -1770,9 +1772,21 @@ function renderDetails(item: MediaItem): void {
 
   detailGenres.innerHTML = "";
   for (const genre of item.genres || []) {
-    const span = document.createElement("span");
-    span.textContent = genre;
-    detailGenres.append(span);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "genre-button";
+    button.textContent = genre;
+    button.addEventListener("click", () => { void openBrowse(`Genre: ${genre}`, { type: "Mixed", genre, sort: "title-ascending", startIndex: 0, limit: 60 }); });
+    detailGenres.append(button);
+  }
+  detailPeople.replaceChildren();
+  detailCast.classList.toggle("is-hidden", !(item.people?.length));
+  for (const person of item.people ?? []) {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "genre-button";
+    button.textContent = person.role ? `${person.name} · ${person.role}` : person.name;
+    button.addEventListener("click", () => { void openBrowse(person.name, { type: "Mixed", personId: person.id, sort: "title-ascending", startIndex: 0, limit: 60 }); });
+    detailPeople.append(button);
   }
 
   const backdropKind = hasImage(item, "Backdrop") ? "Backdrop" : hasImage(item, "Primary") ? "Primary" : "";
@@ -2149,8 +2163,13 @@ function renderEpisodes(): void {
     }
 
     copy.className = "episode-copy";
-    title.textContent = episode.name || `Episode ${episode.indexNumber || ""}`;
-    meta.textContent = [episodeCode(episode), runtime(episode)].filter(Boolean).join(" - ");
+    const details = document.createElement("button");
+    details.type = "button";
+    details.className = "episode-title-button";
+    details.textContent = episode.name || `Episode ${episode.indexNumber || ""}`;
+    details.addEventListener("click", () => { void openDetails(episode); });
+    title.append(details);
+    meta.textContent = [episodeCode(episode), runtime(episode), typeof episode.communityRating === "number" ? `★ ${episode.communityRating.toFixed(1)}` : ""].filter(Boolean).join(" - ");
     overview.textContent = episode.overview || "";
     copy.append(title, meta, overview);
 
@@ -2250,7 +2269,13 @@ async function refreshLibrary(library: LibrarySummary, showLoading = false): Pro
   const requestId = (state.libraryRequestIds.get(library.id) || 0) + 1;
   state.libraryRequestIds.set(library.id, requestId);
   try {
-    const items = await window.jellyfin.libraries.getItems({ libraryId: library.id, type, limit: 500 });
+    const page = await window.jellyfin.browse.get({
+      libraryId: library.id, type,
+      watched: state.libraryFilter === "all" || state.libraryFilter === "downloaded" ? undefined : state.libraryFilter === "watched",
+      sort: state.librarySort === "year-descending" ? "release-date-descending" : state.librarySort === "year-ascending" ? "release-date-ascending" : state.librarySort,
+      startIndex: 0, limit: 100,
+    });
+    const items = page.items;
     if (state.libraryRequestIds.get(library.id) !== requestId) return;
     const itemsChanged = !cachedItems || !mediaItemsEqual(cachedItems, items);
     state.libraryCache.set(library.id, items);
@@ -2433,7 +2458,7 @@ function renderLibraryGrid(items: MediaItem[]): void {
     numeric: true,
     sensitivity: "base",
   });
-  filtered.sort((left, right) => {
+  if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) filtered.sort((left, right) => {
     if (state.librarySort === "title-descending") return -titleCompare(left, right);
     if (state.librarySort === "year-descending") return (itemYear(right) || 0) - (itemYear(left) || 0) || titleCompare(left, right);
     if (state.librarySort === "year-ascending") return (itemYear(left) || Number.MAX_SAFE_INTEGER) - (itemYear(right) || Number.MAX_SAFE_INTEGER) || titleCompare(left, right);
@@ -2514,6 +2539,23 @@ async function runSearch(query: string): Promise<void> {
   } catch (error) {
     if (requestId !== state.searchRequestId) return;
     renderMessage(searchRows, errorMessage(error, "Search could not be completed."));
+  }
+}
+
+async function openBrowse(title: string, input: Parameters<typeof window.jellyfin.browse.get>[0]): Promise<void> {
+  state.searchRequestId += 1;
+  const requestId = state.searchRequestId;
+  state.searchReturnRoute = state.currentRoute === "details" ? "home" : state.currentRoute;
+  state.searchReturnScrollTop = contentScroller.scrollTop;
+  searchTitle.textContent = title;
+  setRoute("search");
+  renderLoadingRows(searchRows);
+  try {
+    const page = await window.jellyfin.browse.get(input);
+    if (requestId !== state.searchRequestId) return;
+    renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items: page.items, shape: "poster" }]);
+  } catch (error) {
+    if (requestId === state.searchRequestId) renderMessage(searchRows, errorMessage(error, "Browse results could not be loaded."));
   }
 }
 
@@ -4598,6 +4640,8 @@ function resetSignedInState(): void {
   detailMeta.replaceChildren();
   detailOverview.textContent = "";
   detailGenres.replaceChildren();
+  detailPeople.replaceChildren();
+  detailCast.classList.add("is-hidden");
   detailHero.classList.add("has-no-poster");
   detailPosterFrame.classList.add("is-hidden");
   detailPosterFallback.textContent = "";
@@ -4712,11 +4756,15 @@ closeApplicationButton.addEventListener("click", () => {
 });
 libraryFilter.addEventListener("change", () => {
   state.libraryFilter = libraryFilter.value as LibraryFilter;
-  renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
+  const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
+  if (library && library.id !== DOWNLOADED_LIBRARY_ID) void refreshLibrary(library, true);
+  else renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
 });
 librarySort.addEventListener("change", () => {
   state.librarySort = librarySort.value as LibrarySort;
-  renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
+  const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
+  if (library && library.id !== DOWNLOADED_LIBRARY_ID) void refreshLibrary(library, true);
+  else renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
 });
 selectDownloadedButton.addEventListener("click", () => {
   state.downloadedSelectionMode = true;

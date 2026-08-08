@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceIdentity } from "../src/main/services/deviceIdentity";
-import { JellyfinApi, normalizeServerUrl } from "../src/main/services/jellyfinApi";
+import { JellyfinApi, normalizeServerUrl, sanitizeMediaItem } from "../src/main/services/jellyfinApi";
 import { SecureSessionStore, type SessionProtector } from "../src/main/services/secureSession";
+import { browseSchema } from "../src/shared/schemas";
 
 const identity: DeviceIdentity = {
   deviceId: "11111111-1111-4111-8111-111111111111",
@@ -85,6 +86,20 @@ describe("JellyfinApi main-side boundary", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("sanitizes cast metadata and ignores malformed people", () => {
+    const item = sanitizeMediaItem({ ...unsafeItem, People: [
+      { Id: "person-1", Name: "Actor", Role: "Lead", Type: "Actor", PrimaryImageTag: "image-1", Path: "D:\\secret" },
+      { Id: "../../bad", Name: "Bad" }, { Id: "person-2", Name: 42 },
+    ] });
+    expect(item.people).toEqual([{ id: "person-1", name: "Actor", role: "Lead", type: "Actor", primaryImageTag: "image-1" }]);
+    expect(JSON.stringify(item)).not.toContain("secret");
+  });
+
+  it("validates bounded browse input before it reaches Jellyfin", () => {
+    expect(browseSchema.parse({ type: "Movie", sort: "rating-descending", startIndex: 0, limit: 50 }).sort).toBe("rating-descending");
+    expect(() => browseSchema.parse({ type: "Movie", sort: "bad", startIndex: -1, limit: 5000 })).toThrow();
   });
 
   it("rejects credentials, queries, fragments, and non-HTTP server addresses", () => {

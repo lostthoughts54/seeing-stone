@@ -18,6 +18,7 @@ import {
   episodesSchema,
   itemIdSchema,
   libraryItemsSchema,
+  browseSchema,
   liveTvCancelScheduleSchema,
   liveTvCreateRecordingSchema,
   liveTvDeleteRecordingSchema,
@@ -218,6 +219,7 @@ export function registerIpcHandlers(
     const value = libraryItemsSchema.strict().parse(input);
     return api.getLibraryItems(value.libraryId, value.type, value.limit);
   });
+  register(IPC.browseGet, (input) => api.browse(browseSchema.parse(input)));
   register(IPC.searchQuery, (input) => api.search(searchSchema.strict().parse(input).query));
   register(IPC.itemsGetDetails, (input) => api.getDetails(itemIdSchema.strict().parse(input).itemId));
   register(IPC.itemsOpenTrailer, async (input) => {

@@ -6,6 +6,26 @@ export interface SafeUserData {
   playbackPositionTicks: number;
   playedPercentage: number;
 }
+export interface MediaPerson {
+  id: string;
+  name: string;
+  role: string;
+  type: string;
+  primaryImageTag: string | null;
+}
+
+export type BrowseSort = "title-ascending" | "title-descending" | "date-added-descending" | "release-date-descending" | "release-date-ascending" | "rating-descending";
+export interface BrowseQuery {
+  libraryId?: string;
+  type: "Movie" | "Series" | "Episode" | "Mixed";
+  genre?: string;
+  personId?: string;
+  watched?: boolean;
+  sort: BrowseSort;
+  startIndex: number;
+  limit: number;
+}
+export interface BrowsePage { items: MediaItem[]; totalRecordCount: number; }
 
 export interface MediaItem {
   id: string;
@@ -18,6 +38,7 @@ export interface MediaItem {
   communityRating: number | null;
   runTimeTicks: number;
   genres: string[];
+  people?: MediaPerson[];
   primaryImageAspectRatio: number | null;
   imageTags: Partial<Record<ImageKind, string>>;
   backdropImageTag: string | null;
@@ -376,6 +397,7 @@ export interface TrailerOpenResult {
   embedUrl: string | null;
 }
 export interface LibraryItemsInput { libraryId: string; type: "Movie" | "Series" | "Mixed"; limit: number }
+export type BrowseInput = BrowseQuery;
 export interface SearchInput { query: string }
 export interface EpisodesInput { seriesId: string; seasonId: string }
 export interface ArtworkInput { itemId: string; kind: ImageKind; tag?: string; width?: number; height?: number }
@@ -613,6 +635,7 @@ export interface JellyfinBridge {
     list(): Promise<LibrarySummary[]>;
     getItems(input: LibraryItemsInput): Promise<MediaItem[]>;
   };
+  browse: { get(input: BrowseInput): Promise<BrowsePage> };
   search: { query(input: SearchInput): Promise<MediaItem[]> };
   items: {
     getDetails(input: ItemIdInput): Promise<MediaItem>;
@@ -724,6 +747,7 @@ export const IPC = {
   homeGet: "home:get",
   librariesList: "libraries:list",
   librariesGetItems: "libraries:get-items",
+  browseGet: "browse:get",
   searchQuery: "search:query",
   itemsGetDetails: "items:get-details",
   itemsOpenTrailer: "items:open-trailer",

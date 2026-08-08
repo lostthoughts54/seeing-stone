@@ -22,6 +22,16 @@ export const libraryItemsSchema = z.object({
   type: z.enum(["Movie", "Series", "Mixed"]),
   limit: z.number().int().min(1).max(500),
 });
+export const browseSchema = z.object({
+  libraryId: z.string().min(1).max(128).optional(),
+  type: z.enum(["Movie", "Series", "Episode", "Mixed"]),
+  genre: z.string().trim().min(1).max(256).optional(),
+  personId: z.string().min(1).max(128).optional(),
+  watched: z.boolean().optional(),
+  sort: z.enum(["title-ascending", "title-descending", "date-added-descending", "release-date-descending", "release-date-ascending", "rating-descending"]),
+  startIndex: z.number().int().min(0).max(100_000),
+  limit: z.number().int().min(1).max(100),
+}).strict();
 
 export const searchSchema = z.object({ query: z.string().trim().min(1).max(256) });
 
@@ -166,6 +176,9 @@ export const cachedMediaItemSchema = z.object({
   communityRating: z.number().finite().min(0).max(100).nullable(),
   runTimeTicks: cachedNonnegativeInteger,
   genres: z.array(z.string().trim().min(1).max(256).refine((value) => !value.includes("\0"))).max(32),
+  people: z.array(z.object({
+    id: cachedIdentity, name: z.string().trim().min(1).max(1024), role: z.string().max(256), type: z.string().max(64), primaryImageTag: cachedOptionalText(256),
+  }).strict()).max(32).optional(),
   primaryImageAspectRatio: z.number().finite().positive().max(100).nullable(),
   imageTags: z.object({
     Primary: z.string().min(1).max(256).optional(),
