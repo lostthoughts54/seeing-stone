@@ -4820,6 +4820,7 @@ function resetSignedInState(): void {
   playerNextCard.classList.add("is-hidden");
   playerTimeline.value = "0";
   playerTimeline.disabled = true;
+  playerTimeline.removeAttribute("aria-valuetext");
   playerCurrentTime.textContent = "0:00";
   playerDuration.textContent = "0:00";
   sessionPanelContent.replaceChildren();
@@ -5151,6 +5152,9 @@ playerTimeline.addEventListener("input", () => {
   const position = Math.min(maximum, requested);
   if (position !== requested) playerTimeline.value = String(safeTimelineValue(position, playback.durationTicks));
   playerCurrentTime.textContent = formatPlaybackTime(position);
+  playerTimeline.setAttribute("aria-valuetext", playback.seekableUntilTicks === null || playback.seekableUntilTicks === undefined
+    ? formatPlaybackTime(position)
+    : `${formatPlaybackTime(position)}; available through ${formatPlaybackTime(playback.seekableUntilTicks)}`);
   presentTimelinePreview(position);
 });
 playerTimeline.addEventListener("change", () => {
