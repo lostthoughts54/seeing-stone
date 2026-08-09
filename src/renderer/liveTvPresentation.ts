@@ -2,7 +2,7 @@ import type { LiveTvProgram } from "../shared/contracts";
 
 export const LIVE_TV_HALF_HOUR_MS = 30 * 60_000;
 export const LIVE_TV_HALF_HOUR_PX = 200;
-export const LIVE_TV_GUIDE_WINDOW_MS = 12 * 60 * 60_000;
+export const LIVE_TV_GUIDE_WINDOW_MS = 24 * 60 * 60_000;
 
 export type TimedProgram = Pick<LiveTvProgram, "startUtc" | "endUtc">;
 

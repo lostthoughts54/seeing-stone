@@ -41,17 +41,17 @@ describe("Live TV guide presentation", () => {
     expect(visibleChannelSlice(channels, "a", 5).map((channel) => channel.id)).toEqual(["a", "b", "c", "d", "e"]);
   });
 
-  it("keeps the normal 12-hour guide open across midnight without using end-of-day bounds", () => {
+  it("keeps the normal 24-hour guide open across midnight without using end-of-day bounds", () => {
     const window = normalGuideWindow(localAt(8, 19));
     expect(window.endMs - window.startMs).toBe(LIVE_TV_GUIDE_WINDOW_MS);
     expect(new Date(window.startMs).getHours()).toBe(19);
     expect(new Date(window.endMs).getDate()).toBe(9);
-    expect(new Date(window.endMs).getHours()).toBe(7);
+    expect(new Date(window.endMs).getHours()).toBe(19);
     const labels = timeAxisLabels(window.startMs, window.endMs);
-    expect(labels).toHaveLength(24);
+    expect(labels).toHaveLength(48);
     expect(labels).toContain(localAt(9, 0));
     expect(labels.some((label, index) => index > 0 && isLocalDateTransition(labels[index - 1], label))).toBe(true);
-    expect(labels.length * 200).toBe(4800);
+    expect(labels.length * 200).toBe(9600);
     const daytimeWindow = normalGuideWindow(localAt(8, 10));
     expect(daytimeWindow.endMs - daytimeWindow.startMs).toBe(LIVE_TV_GUIDE_WINDOW_MS);
   });
@@ -62,13 +62,13 @@ describe("Live TV guide presentation", () => {
       startUtc: new Date(localAt(8, 23, 30)).toISOString(),
       endUtc: new Date(localAt(9, 0, 30)).toISOString(),
     }, window.startMs, window.endMs);
-    expect(placement?.leftPercent).toBe(37.5);
-    expect(placement?.widthPercent).toBeCloseTo(100 / 12);
+    expect(placement?.leftPercent).toBe(18.75);
+    expect(placement?.widthPercent).toBeCloseTo(100 / 24);
   });
 
   it("uses timestamp duration through a local daylight-saving date change", () => {
     const window = normalGuideWindow(new Date(2026, 10, 1, 0, 0).getTime());
-    expect(window.endMs - window.startMs).toBe(12 * 60 * 60_000);
+    expect(window.endMs - window.startMs).toBe(24 * 60 * 60_000);
   });
 
   it("distinguishes a currently airing program without inferring a LIVE label", () => {
