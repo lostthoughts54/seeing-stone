@@ -1007,7 +1007,10 @@ function programsByLiveTvChannel(guide: LiveTvGuide): Map<string, LiveTvProgram[
 function setLiveTvChannelLogo(image: HTMLImageElement, fallback: HTMLElement, channel: LiveTvGuide["channels"][number], width: number, height: number): void {
   fallback.textContent = initials(channel.name);
   image.alt = `${channel.name} logo`;
-  image.loading = "lazy";
+  // These are small, visible identity assets. Chromium's lazy loader may discard and
+  // later restart a no-store custom-protocol request while this scroll container moves.
+  // Keep each session-scoped artwork reference eagerly loaded for the life of this row.
+  image.loading = "eager";
   image.decoding = "async";
   if (!channel.imageTag) return;
   const key = `${channel.id}:${channel.imageTag}:${width}x${height}`;
@@ -1015,6 +1018,7 @@ function setLiveTvChannelLogo(image: HTMLImageElement, fallback: HTMLElement, ch
     if (!url || !image.isConnected) return;
     image.src = url;
     image.classList.remove("is-hidden");
+    fallback.classList.add("is-hidden");
     image.onerror = () => { image.removeAttribute("src"); image.classList.add("is-hidden"); fallback.classList.remove("is-hidden"); };
   };
   const cached = liveTvArtworkUrls.get(key);
@@ -2622,7 +2626,9 @@ async function refreshVisibleCatalog(): Promise<void> {
       const library = supportedLibraries().find((candidate) => candidate.id === state.selectedLibraryId);
       if (library) await refreshLibrary(library);
     } else if (state.currentRoute === "live-tv") {
-      await refreshLiveTv(false);
+      // The guide has a dedicated five-minute data refresh. Its one-minute refresh
+      // should only advance the time indicator, never replace scrolling image rows.
+      updateLiveTvTimeMarkers();
     }
   } catch {
     // Background refresh keeps the last successfully rendered catalog.
@@ -5042,6 +5048,8 @@ function closeCleanMachineDiagnostics(): void {
 function resetSignedInState(): void {
   if (smartDownloadDialog.open) smartDownloadDialog.close("cancel");
   if (smartUnfollowDialog.open) smartUnfollowDialog.close("cancel");
+  liveTvArtworkUrls.clear();
+  miniGuideSelection = { channelId: "", programIndex: 0 };
   if (state.searchTimer) clearTimeout(state.searchTimer);
   if (state.toastTimer) clearTimeout(state.toastTimer);
   state.searchTimer = null;

@@ -52,6 +52,23 @@ describe("Seeing Stone player shell", () => {
     expect(`${html}\n${app}`).not.toMatch(/AccessToken|api_key|X-Emby-Token/);
   });
 
+  it("keeps guide artwork stable across scroll and time-marker updates", async () => {
+    const [renderer, styles] = await Promise.all([
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+    ]);
+    const artwork = renderer.slice(renderer.indexOf("function setLiveTvChannelLogo"), renderer.indexOf("function createLiveTvChannelIdentity"));
+    const markerUpdate = renderer.slice(renderer.indexOf("function updateLiveTvTimeMarkers"), renderer.indexOf("async function refreshLiveTv"));
+    const catalogRefresh = renderer.slice(renderer.indexOf("async function refreshVisibleCatalog"), renderer.indexOf("function downloadForItem"));
+    expect(artwork).toContain('image.loading = "eager"');
+    expect(artwork).not.toContain('image.loading = "lazy"');
+    expect(artwork).toContain("liveTvArtworkUrls.get(key)");
+    expect(markerUpdate).not.toContain("renderLiveTv()");
+    expect(catalogRefresh).toContain("updateLiveTvTimeMarkers();");
+    expect(catalogRefresh).not.toContain("await refreshLiveTv(false);");
+    expect(styles).toMatch(/\.live-tv-channel-number \{[\s\S]*?min-width: 3\.25rem;[\s\S]*?white-space: nowrap;/);
+  });
+
   it("uses a dedicated inert native viewport with sibling controls", async () => {
     const html = await readFile("src/renderer/index.html", "utf8");
     const player = html.slice(html.indexOf('<section id="playerView"'), html.indexOf('<div id="downloadsScrim"'));
