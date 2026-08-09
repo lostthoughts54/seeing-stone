@@ -571,6 +571,31 @@ describe("JellyfinApi main-side boundary", () => {
     await expect(api.getLiveTvProgramSearch("love island")).rejects.toMatchObject({ code: "NOT_AUTHENTICATED" });
   });
 
+  it("passes a guide window across midnight through to Jellyfin without a date clamp", async () => {
+    let programQuery: URLSearchParams | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      if (url.pathname === "/LiveTv/Info") return Response.json({ IsEnabled: true });
+      if (url.pathname === "/LiveTv/Channels") return Response.json({ Items: [{ Id: "channel-1", Name: "Channel" }] });
+      if (url.pathname === "/LiveTv/Programs") {
+        programQuery = url.searchParams;
+        return Response.json({ Items: [] });
+      }
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-live-tv-midnight-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    const startUtc = "2026-08-09T02:00:00.000Z";
+    const endUtc = "2026-08-09T14:00:00.000Z";
+    await api.getLiveTvGuide(startUtc, endUtc);
+    expect(programQuery?.get("MinStartDate")).toBe(startUtc);
+    expect(programQuery?.get("MaxStartDate")).toBe(endUtc);
+  });
+
   it("serializes logout behind an in-flight login so logout remains authoritative", async () => {
     let releaseLogin: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

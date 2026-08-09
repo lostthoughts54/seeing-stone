@@ -4722,6 +4722,9 @@ button.danger:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
   padding: .7rem .7rem;
 }
+.live-tv-axis-track > span.is-date-transition { padding-block: .36rem; }
+.live-tv-axis-track > span.is-date-transition b { color: #ddc8ff; display: block; font-size: .58rem; letter-spacing: .06em; margin-bottom: .12rem; text-transform: uppercase; }
+.live-tv-axis-track > span time { display: block; }
 .live-tv-now-label {
   background: #7140b7;
   border: 1px solid rgba(235, 212, 255, .44);

@@ -46,7 +46,7 @@ import {
 import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
 import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
 import { loadAllBrowseItems } from "./browsePagination";
-import { LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
+import { LIVE_TV_GUIDE_WINDOW_MS, LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, isLocalDateTransition, normalGuideWindow, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
 import { presentPeople } from "../shared/personPresentation";
 
 const TICKS_PER_SECOND = 10000000;
@@ -958,6 +958,10 @@ function liveTvDateTime(value: string | null): string {
   return new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 
+function liveTvDay(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(new Date(value));
+}
+
 function setLiveTvTab(tab: LiveTvTab): void {
   state.liveTvTab = tab;
   setButtonActive(liveTvGuideTab, tab === "guide");
@@ -1293,7 +1297,7 @@ function showProgramDetails(program: LiveTvProgram): void {
 
 function guideWindowForTime(timeMs: number): { startUtc: string; endUtc: string } {
   const start = Math.floor(timeMs / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS - LIVE_TV_HALF_HOUR_MS;
-  return { startUtc: new Date(start).toISOString(), endUtc: new Date(start + 6 * 60 * 60_000).toISOString() };
+  return { startUtc: new Date(start).toISOString(), endUtc: new Date(start + LIVE_TV_GUIDE_WINDOW_MS).toISOString() };
 }
 
 function scrollLiveTvGuideToTime(timeMs: number, behavior: ScrollBehavior = "smooth"): void {
@@ -1525,9 +1529,19 @@ function renderLiveTvGuide(): void {
   axisChannel.textContent = "Channels";
   const axisTrack = document.createElement("div");
   axisTrack.className = "live-tv-axis-track";
-  for (const time of labels) {
+  for (const [index, time] of labels.entries()) {
     const label = document.createElement("span");
-    label.textContent = liveTvTime(new Date(time).toISOString());
+    const timestamp = new Date(time).toISOString();
+    if (index === 0 || isLocalDateTransition(labels[index - 1], time)) {
+      const day = document.createElement("b");
+      day.textContent = liveTvDay(timestamp);
+      label.classList.add("is-date-transition");
+      label.append(day);
+    }
+    const timeLabel = document.createElement("time");
+    timeLabel.dateTime = timestamp;
+    timeLabel.textContent = liveTvTime(timestamp);
+    label.append(timeLabel);
     axisTrack.append(label);
   }
   if (marker !== null) {
@@ -1687,9 +1701,9 @@ async function refreshLiveTv(showLoading = true, windowOverride?: { startUtc: st
   const requestId = ++state.liveTvRequestId;
   if (showLoading) { liveTvStatus.textContent = "Loading Live TV…"; refreshLiveTvButton.disabled = true; }
   const now = Date.now();
-  const windowStart = Math.floor(now / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS - LIVE_TV_HALF_HOUR_MS;
-  const start = windowOverride?.startUtc || new Date(windowStart).toISOString();
-  const end = windowOverride?.endUtc || new Date(windowStart + 6 * 60 * 60_000).toISOString();
+  const guideWindow = normalGuideWindow(now);
+  const start = windowOverride?.startUtc || new Date(guideWindow.startMs).toISOString();
+  const end = windowOverride?.endUtc || new Date(guideWindow.endMs).toISOString();
   try {
     const guide = await window.jellyfin.liveTv.getGuide({ startUtc: start, endUtc: end });
     const [recordings, timers, seriesTimers] = guide.status.availability === "available"

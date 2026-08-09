@@ -2,6 +2,7 @@ import type { LiveTvProgram } from "../shared/contracts";
 
 export const LIVE_TV_HALF_HOUR_MS = 30 * 60_000;
 export const LIVE_TV_HALF_HOUR_PX = 200;
+export const LIVE_TV_GUIDE_WINDOW_MS = 12 * 60 * 60_000;
 
 export type TimedProgram = Pick<LiveTvProgram, "startUtc" | "endUtc">;
 
@@ -36,11 +37,24 @@ export function guideScrollLeftForTime(timeMs: number, windowStartMs: number, tr
   return Math.max(0, trackOffsetPx + guideTimeOffsetPixels(timeMs, windowStartMs) - viewportWidthPx * placement);
 }
 
+export function normalGuideWindow(nowMs: number): { startMs: number; endMs: number } {
+  const startMs = Math.floor(nowMs / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS;
+  return { startMs, endMs: startMs + LIVE_TV_GUIDE_WINDOW_MS };
+}
+
 export function timeAxisLabels(windowStartMs: number, windowEndMs: number): number[] {
   const first = Math.ceil(windowStartMs / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS;
   const values: number[] = [];
   for (let value = first; value < windowEndMs; value += LIVE_TV_HALF_HOUR_MS) values.push(value);
   return values;
+}
+
+export function isLocalDateTransition(previousMs: number, currentMs: number): boolean {
+  const previous = new Date(previousMs);
+  const current = new Date(currentMs);
+  return previous.getFullYear() !== current.getFullYear()
+    || previous.getMonth() !== current.getMonth()
+    || previous.getDate() !== current.getDate();
 }
 
 export function visibleChannelSlice<T extends { id: string }>(channels: T[], selectedChannelId: string, maximum = 5): T[] {
