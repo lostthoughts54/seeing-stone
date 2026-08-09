@@ -36,6 +36,22 @@ describe("Seeing Stone player shell", () => {
     expect(app).toContain("programsByChannel");
   });
 
+  it("keeps Live TV artwork authenticated and the Mini Guide above auto-hiding controls", async () => {
+    const [html, styles, app] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(app).toContain('window.jellyfin.artwork.getUrl({ itemId: channel.id, kind: "Primary", tag: channel.imageTag');
+    expect(app).toContain("handlePlayerMiniGuideKey");
+    expect(app).toContain('event.key === "ArrowUp"');
+    expect(app).toContain('event.key === "ArrowLeft"');
+    expect(app).toContain('event.key === "Enter"');
+    expect(html.indexOf('id="playerMiniGuide"')).toBeLessThan(html.indexOf('id="playerControls"'));
+    expect(styles).toMatch(/\.player-mini-guide \{[\s\S]*?position: absolute[\s\S]*?z-index: 9/s);
+    expect(`${html}\n${app}`).not.toMatch(/AccessToken|api_key|X-Emby-Token/);
+  });
+
   it("uses a dedicated inert native viewport with sibling controls", async () => {
     const html = await readFile("src/renderer/index.html", "utf8");
     const player = html.slice(html.indexOf('<section id="playerView"'), html.indexOf('<div id="downloadsScrim"'));
