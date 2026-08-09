@@ -147,6 +147,12 @@
               <small>Built-in playback engine</small>
             </div>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
+            <section class="application-update-settings" aria-labelledby="applicationUpdateTitle">
+              <strong id="applicationUpdateTitle">Seeing Stone</strong>
+              <small>Version 0.7.0</small>
+              <button id="checkForUpdatesButton" type="button">Check for updates</button>
+              <p id="updateCheckStatus" aria-live="polite">Last checked: Never</p>
+            </section>
             <button id="downloadsButton" type="button">Downloads</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
@@ -576,6 +582,11 @@
           </div>
         </div>
       </section>
+
+      <aside id="updateBanner" class="update-banner is-hidden" aria-live="polite">
+        <strong id="updateBannerText"></strong>
+        <div><button id="viewUpdateButton" class="primary" type="button">View update</button><button id="dismissUpdateButton" type="button">Later</button></div>
+      </aside>
 
       <div id="downloadsScrim" class="downloads-scrim is-hidden"></div>
       <section id="downloadsPanel" class="downloads-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="downloadsTitle">

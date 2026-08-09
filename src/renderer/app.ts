@@ -29,6 +29,7 @@ import type {
   SoloSessionDiagnostics,
   WatchPartyViewState,
   TrickplayManifest,
+  UpdateCheckStatus,
 } from "../shared/contracts";
 import type { CompanionSettingsState } from "../shared/companionContracts";
 import { BRANDING } from "../shared/branding";
@@ -109,6 +110,12 @@ const profileAdapterStatus = byId<HTMLElement>("profileAdapterStatus");
 const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
+const checkForUpdatesButton = byId<HTMLButtonElement>("checkForUpdatesButton");
+const updateCheckStatus = byId<HTMLElement>("updateCheckStatus");
+const updateBanner = byId<HTMLElement>("updateBanner");
+const updateBannerText = byId<HTMLElement>("updateBannerText");
+const viewUpdateButton = byId<HTMLButtonElement>("viewUpdateButton");
+const dismissUpdateButton = byId<HTMLButtonElement>("dismissUpdateButton");
 
 const contentScroller = byId<HTMLElement>("contentScroller");
 const homeView = byId<HTMLElement>("homeView");
@@ -3224,6 +3231,35 @@ function closeDownloads(): void {
   downloadsPanel.classList.add("is-hidden");
 }
 
+function updateLabel(status: UpdateCheckStatus): string {
+  return status.releaseName || status.latestVersion || "A new Seeing Stone version";
+}
+
+function showAvailableUpdate(status: UpdateCheckStatus): void {
+  if (!status.isUpdateAvailable) return;
+  updateBannerText.textContent = `${updateLabel(status)} is available`;
+  updateBanner.classList.remove("is-hidden");
+  viewUpdateButton.onclick = () => { void window.jellyfin.updates.open().catch(() => showToast("The update page could not be opened.")); };
+}
+
+async function checkForUpdates(): Promise<void> {
+  checkForUpdatesButton.disabled = true;
+  updateCheckStatus.textContent = "Checking for updates…";
+  try {
+    const status = await window.jellyfin.updates.check();
+    if (status.status === "available") {
+      updateCheckStatus.textContent = `${updateLabel(status)} is available.`;
+      showAvailableUpdate(status);
+    } else if (status.status === "current") {
+      updateCheckStatus.textContent = "✓ You're running the latest version.";
+    } else {
+      updateCheckStatus.textContent = status.error || "Couldn't check for updates. Check your internet connection and try again.";
+    }
+  } catch {
+    updateCheckStatus.textContent = "Couldn't check for updates. Check your internet connection and try again.";
+  } finally { checkForUpdatesButton.disabled = false; }
+}
+
 function renderCompanion(status: CompanionSettingsState): void {
   renderCompanionNavStatus(status);
   companionEnabled.checked = status.enabled;
@@ -5695,6 +5731,8 @@ document.addEventListener("visibilitychange", () => {
 });
 
 downloadsButton.addEventListener("click", () => openDownloads());
+checkForUpdatesButton.addEventListener("click", () => { void checkForUpdates(); });
+dismissUpdateButton.addEventListener("click", () => updateBanner.classList.add("is-hidden"));
 checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });
 closeDownloadsButton.addEventListener("click", closeDownloads);
 downloadsScrim.addEventListener("click", closeDownloads);
@@ -6131,6 +6169,11 @@ document.addEventListener("keydown", (event) => {
   } else if (state.currentRoute === "details") {
     returnFromDetails();
   }
+});
+
+window.jellyfin.updates.subscribe((status) => {
+  // Automatic failures are deliberately silent; only an available update gets UI.
+  if (status.source === "automatic" && status.status === "available") showAvailableUpdate(status);
 });
 
 window.jellyfin.downloads.subscribe((downloads) => {

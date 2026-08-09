@@ -8,6 +8,7 @@ import {
   type OpenSourceLicenseInventory,
   type RpcResult,
   type SoloSessionDiagnostics,
+  type UpdateCheckStatus,
 } from "../shared/contracts";
 import {
   artworkSchema,
@@ -76,6 +77,11 @@ export interface DownloadLocationController {
   getSummary(): Promise<DownloadLocationSummary>;
   choose(): Promise<DownloadLocationSummary | null>;
   useDefault(): Promise<DownloadLocationSummary>;
+  open(): Promise<{ opened: boolean }>;
+}
+
+export interface UpdateCheckerController {
+  check(source: "automatic" | "manual"): Promise<UpdateCheckStatus>;
   open(): Promise<{ opened: boolean }>;
 }
 
@@ -153,6 +159,7 @@ export function registerIpcHandlers(
   playbackMetadata?: PlaybackMetadataService,
   trickplay?: TrickplayService,
   adapterSelectionAvailable = true,
+  updates?: UpdateCheckerController,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -350,6 +357,16 @@ export function registerIpcHandlers(
   register(IPC.downloadsSetKeep, (input) => {
     const value = downloadKeepSchema.strict().parse(input);
     return downloads.setKeep(value.downloadId, value.keepDownloaded);
+  });
+  register(IPC.updatesCheck, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Update checking is unavailable.", 503);
+    return updates.check("manual");
+  });
+  register(IPC.updatesOpen, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Update checking is unavailable.", 503);
+    return updates.open();
   });
   register(IPC.smartDownloadsGetState, (input) => {
     emptySchema.strict().parse(input ?? {});

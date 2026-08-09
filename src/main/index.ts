@@ -69,6 +69,7 @@ import {
   probeControlledLibMpvRuntime,
 } from "./services/cleanMachineDiagnostics";
 import { UnavailablePlayerController } from "./services/unavailablePlayerController";
+import { UpdateChecker } from "./services/updateChecker";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -373,6 +374,23 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       return { completed: true };
     },
   };
+  const updateChecker = new UpdateChecker(app.getVersion(), logger);
+  let latestUpdatePageUrl: string | null = null;
+  const updateController = {
+    check: async (source: "automatic" | "manual") => {
+      const status = await updateChecker.check(source);
+      latestUpdatePageUrl = status.releasePageUrl;
+      return status;
+    },
+    open: async () => {
+      const page = latestUpdatePageUrl;
+      if (!page) return { opened: false };
+      const url = new URL(page);
+      if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/lostthoughts54/seeing-stone/releases/tag/")) return { opened: false };
+      await shell.openExternal(url.toString());
+      return { opened: true };
+    },
+  };
   activePlayback = playback;
   activeSmartDownloads = new SmartDownloadService(
     api,
@@ -485,12 +503,19 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     playbackMetadata,
     trickplay,
     !packagedProduction,
+    updateController,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the
   // sandboxed renderer is warming up. Loading has completed at this point, so
   // make the primary window visible as a reliable fallback.
   if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+  // Update discovery starts after the renderer has loaded and never affects startup.
+  setTimeout(() => {
+    void updateController.check("automatic").then((status) => {
+      if (status.status === "available" && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.updatesChanged, status);
+    });
+  }, 1500);
 }).catch((error) => {
   logger.error("Application startup failed.", error);
   app.quit();

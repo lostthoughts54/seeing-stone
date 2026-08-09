@@ -71,6 +71,7 @@ import {
   type SmartDownloadUnfollowResult,
   type WatchedStateInput,
   type WatchedStateResult,
+  type UpdateCheckStatus,
   type WatchPartyCreateInput,
   type WatchPartyGroupInput,
   type WatchPartySyncOffsetInput,
@@ -178,6 +179,15 @@ const bridge: JellyfinBridge = {
       const receive = (_event: Electron.IpcRendererEvent, state: SmartDownloadsState) => listener(state);
       ipcRenderer.on(IPC.smartDownloadsChanged, receive);
       return () => ipcRenderer.removeListener(IPC.smartDownloadsChanged, receive);
+    },
+  },
+  updates: {
+    check: () => invoke<UpdateCheckStatus>(IPC.updatesCheck),
+    open: () => invoke<{ opened: boolean }>(IPC.updatesOpen),
+    subscribe: (listener: (status: UpdateCheckStatus) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, status: UpdateCheckStatus) => listener(status);
+      ipcRenderer.on(IPC.updatesChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.updatesChanged, receive);
     },
   },
   playback: {

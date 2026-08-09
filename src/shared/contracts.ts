@@ -439,6 +439,18 @@ export interface DownloadLocationSummary {
   label: string;
 }
 
+export interface UpdateCheckStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseName: string | null;
+  publishedAt: string | null;
+  isUpdateAvailable: boolean;
+  releasePageUrl: string | null;
+  source: "automatic" | "manual";
+  status: "current" | "available" | "failed";
+  error?: string;
+}
+
 export type RpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string; retryable: boolean } };
@@ -771,6 +783,11 @@ export interface JellyfinBridge {
     setKeep(input: DownloadKeepInput): Promise<DownloadSummary>;
     subscribe(listener: (downloads: DownloadSummary[]) => void): () => void;
   };
+  updates: {
+    check(): Promise<UpdateCheckStatus>;
+    open(): Promise<{ opened: boolean }>;
+    subscribe(listener: (status: UpdateCheckStatus) => void): () => void;
+  };
   smartDownloads: {
     getState(): Promise<SmartDownloadsState>;
     follow(input: SmartDownloadFollowInput): Promise<SmartDownloadsState>;
@@ -877,6 +894,9 @@ export const IPC = {
   downloadsDelete: "downloads:delete",
   downloadsSetKeep: "downloads:set-keep",
   downloadsChanged: "downloads:changed",
+  updatesCheck: "updates:check",
+  updatesOpen: "updates:open",
+  updatesChanged: "updates:changed",
   smartDownloadsGetState: "smart-downloads:get-state",
   smartDownloadsFollow: "smart-downloads:follow",
   smartDownloadsSetLimit: "smart-downloads:set-limit",

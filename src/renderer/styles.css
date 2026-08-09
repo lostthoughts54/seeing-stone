@@ -4890,6 +4890,15 @@ button.danger:hover:not(:disabled) {
 .mini-guide-program.is-selected, .mini-guide-program:focus-visible { border-color: #b86cff; box-shadow: 0 0 0 1px rgba(184,108,255,.35); z-index: 5; }
 .player-view.is-controls-idle .player-mini-guide { cursor: default; }
 
+.application-update-settings { border-top: 1px solid rgba(216,192,255,.12); display: grid; gap: .35rem; margin-top: .65rem; padding-top: .75rem; }
+.application-update-settings strong { color: #ece3f7; font-size: .75rem; }
+.application-update-settings small, .application-update-settings p { color: #b9b0c5; font-size: .68rem; margin: 0; }
+.application-update-settings button { font-size: .72rem; justify-self: start; padding: .38rem .58rem; }
+.update-banner { align-items: center; background: #21152f; border: 1px solid rgba(199,142,255,.55); border-radius: .65rem; bottom: 1.25rem; box-shadow: 0 14px 38px rgba(0,0,0,.42); display: flex; gap: 1rem; max-width: min(32rem, calc(100vw - 2rem)); padding: .8rem; position: fixed; right: 1.25rem; z-index: 80; }
+.update-banner strong { color: #f5effb; font-size: .82rem; }
+.update-banner div { display: flex; gap: .45rem; flex: none; }
+@media (max-width: 560px) { .update-banner { align-items: stretch; flex-direction: column; left: 1rem; right: 1rem; } }
+
 @media (max-width: 760px) {
   .live-tv-guide-tools { grid-template-columns: 1fr; }
   .live-tv-guide-tools span { grid-column: 1; grid-row: auto; }
