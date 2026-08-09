@@ -235,6 +235,7 @@ describe("IPC authorization and allowlist", () => {
     const invokeChannels = Object.values(IPC).filter((channel) => ![
       IPC.playbackStateChanged,
       IPC.downloadsChanged,
+      IPC.updatesChanged,
       IPC.smartDownloadsChanged,
       IPC.sessionPanelSoloChanged,
       IPC.watchPartiesChanged,
