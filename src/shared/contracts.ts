@@ -261,6 +261,19 @@ export interface LiveTvGuide {
   windowEndUtc: string;
 }
 
+export interface LiveTvProgramSearchResult {
+  program: LiveTvProgram;
+  channel: LiveTvChannel;
+}
+
+export interface LiveTvProgramSearch {
+  channels: LiveTvChannel[];
+  programs: LiveTvProgramSearchResult[];
+  horizonStartUtc: string;
+  horizonEndUtc: string;
+  truncated: boolean;
+}
+
 export interface LiveTvTimer {
   id: string;
   programId: string | null;
@@ -296,6 +309,7 @@ export interface LiveTvRecording {
 }
 
 export interface LiveTvGuideInput { startUtc: string; endUtc: string }
+export interface LiveTvProgramSearchInput { query: string }
 export interface LiveTvPageInput { startIndex?: number; limit?: number }
 export interface LiveTvScheduleOptions {
   recordNewOnly?: boolean;
@@ -697,6 +711,7 @@ export interface JellyfinBridge {
   liveTv: {
     getStatus(): Promise<LiveTvStatus>;
     getGuide(input: LiveTvGuideInput): Promise<LiveTvGuide>;
+    searchPrograms(input: LiveTvProgramSearchInput): Promise<LiveTvProgramSearch>;
     getRecordings(input?: LiveTvPageInput): Promise<LiveTvRecording[]>;
     getTimers(): Promise<LiveTvTimer[]>;
     getSeriesTimers(): Promise<LiveTvSeriesTimer[]>;
@@ -804,6 +819,7 @@ export const IPC = {
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
   liveTvGetStatus: "live-tv:get-status",
   liveTvGetGuide: "live-tv:get-guide",
+  liveTvSearchPrograms: "live-tv:search-programs",
   liveTvGetRecordings: "live-tv:get-recordings",
   liveTvGetTimers: "live-tv:get-timers",
   liveTvGetSeriesTimers: "live-tv:get-series-timers",

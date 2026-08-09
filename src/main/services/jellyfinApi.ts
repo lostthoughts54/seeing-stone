@@ -14,6 +14,8 @@ import type {
   JellyfinConnectionDiagnostics,
   LiveTvGuide,
   LiveTvProgram,
+  LiveTvProgramSearch,
+  LiveTvChannel,
   LiveTvRecording,
   LiveTvScheduleOptions,
   LiveTvSeriesTimer,
@@ -24,6 +26,7 @@ import type {
   ServerConnection,
 } from "../../shared/contracts";
 import { groupPersonMediaResults } from "../../shared/personPresentation";
+import { searchLiveTvGuide } from "../../shared/liveTvSearch";
 import type { PlaybackActionKind } from "./persistenceTypes";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
@@ -379,6 +382,35 @@ function sanitizeLiveTvProgram(value: unknown): LiveTvProgram {
   };
 }
 
+function sanitizeLiveTvChannel(value: unknown): LiveTvChannel {
+  const channel = asRecord(value);
+  const imageTags = asRecord(channel.ImageTags);
+  const userData = asRecord(channel.UserData);
+  const current = asRecord(channel.CurrentProgram);
+  return {
+    id: safeOpaqueIdentifier(channel.Id) ?? "",
+    name: safeLiveTvText(channel.Name, "Channel", 1024),
+    number: boundedNullableString(channel.Number, 32),
+    imageTag: boundedNullableString(imageTags.Primary, 256),
+    isFavorite: userData.IsFavorite === true,
+    currentProgramId: safeOpaqueIdentifier(current.Id),
+  };
+}
+
+const LIVE_TV_SEARCH_TTL_MS = 5 * 60_000;
+const LIVE_TV_SEARCH_HORIZON_MS = 7 * 24 * 60 * 60_000;
+const LIVE_TV_SEARCH_PAGE_SIZE = 1000;
+const LIVE_TV_SEARCH_MAX_PAGES = 10;
+
+interface LiveTvSearchCache {
+  expiresAt: number;
+  channels: LiveTvChannel[];
+  programs: LiveTvProgram[];
+  horizonStartUtc: string;
+  horizonEndUtc: string;
+  truncated: boolean;
+}
+
 function sanitizeLiveTvTimer(value: unknown): LiveTvTimer {
   const timer = asRecord(value);
   return {
@@ -495,6 +527,8 @@ export class JellyfinApi {
   private readonly pendingConnections = new Map<string, PendingConnection>();
   private requestMeasurementSequence = 0;
   private connectionMeasurement: ConnectionMeasurement | null = null;
+  private liveTvSearchCache: LiveTvSearchCache | null = null;
+  private liveTvSearchCachePromise: Promise<LiveTvSearchCache> | null = null;
   private readonly connectionListeners = new Set<(diagnostics: JellyfinConnectionDiagnostics) => void>();
 
   constructor(
@@ -960,6 +994,7 @@ export class JellyfinApi {
   }
 
   async getLiveTvGuide(startUtc: string, endUtc: string): Promise<LiveTvGuide> {
+    this.liveTvSearchCache = null;
     const session = this.requireSession();
     const status = await this.getLiveTvStatus();
     if (status.availability !== "available") return { status, channels: [], programs: [], windowStartUtc: startUtc, windowEndUtc: endUtc };
@@ -973,23 +1008,65 @@ export class JellyfinApi {
         StartIndex: "0", Limit: "10000", Fields: "Overview", EnableTotalRecordCount: "false",
       }),
     ]);
-    const channels = this.items(asRecord(channelResult)).map((value) => {
-      const channel = asRecord(value);
-      const imageTags = asRecord(channel.ImageTags);
-      const userData = asRecord(channel.UserData);
-      const current = asRecord(channel.CurrentProgram);
-      return {
-        id: safeOpaqueIdentifier(channel.Id) ?? "",
-        name: safeLiveTvText(channel.Name, "Channel", 1024),
-        number: boundedNullableString(channel.Number, 32),
-        imageTag: boundedNullableString(imageTags.Primary, 256),
-        isFavorite: userData.IsFavorite === true,
-        currentProgramId: safeOpaqueIdentifier(current.Id),
-      };
-    }).filter((channel) => channel.id);
+    const channels = this.items(asRecord(channelResult)).map(sanitizeLiveTvChannel).filter((channel) => channel.id);
     const programs = this.items(asRecord(programResult)).map(sanitizeLiveTvProgram)
       .filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
     return { status, channels, programs, windowStartUtc: startUtc, windowEndUtc: endUtc };
+  }
+
+  async getLiveTvProgramSearch(query: string): Promise<LiveTvProgramSearch> {
+    const cache = await this.getLiveTvSearchCache();
+    const matches = searchLiveTvGuide(query, cache.channels, cache.programs);
+    return { channels: matches.channels.slice(0, 100), programs: matches.programs.slice(0, 300), horizonStartUtc: cache.horizonStartUtc, horizonEndUtc: cache.horizonEndUtc, truncated: cache.truncated };
+  }
+
+  private async getLiveTvSearchCache(): Promise<LiveTvSearchCache> {
+    const now = Date.now();
+    if (this.liveTvSearchCache && this.liveTvSearchCache.expiresAt > now) return this.liveTvSearchCache;
+    if (this.liveTvSearchCachePromise) return this.liveTvSearchCachePromise;
+    this.liveTvSearchCachePromise = (async () => {
+      const session = this.requireSession();
+      const sessionRevision = this.sessionRevision;
+      const windowStart = Math.floor(now / (30 * 60_000)) * 30 * 60_000 - 30 * 60_000;
+      const horizonStartUtc = new Date(windowStart).toISOString();
+      const horizonEndUtc = new Date(windowStart + LIVE_TV_SEARCH_HORIZON_MS).toISOString();
+      const channelResult = await this.request("/LiveTv/Channels", {
+        UserId: session.userId, StartIndex: "0", Limit: "5000", AddCurrentProgram: "true",
+        Fields: "ChannelInfo,PrimaryImageAspectRatio", EnableTotalRecordCount: "false",
+      });
+      const programs: LiveTvProgram[] = [];
+      let total = Number.POSITIVE_INFINITY;
+      let truncated = false;
+      for (let page = 0; page < LIVE_TV_SEARCH_MAX_PAGES && programs.length < total; page += 1) {
+        const result = asRecord(await this.request("/LiveTv/Programs", {
+          UserId: session.userId, MinStartDate: horizonStartUtc, MaxStartDate: horizonEndUtc,
+          StartIndex: String(page * LIVE_TV_SEARCH_PAGE_SIZE), Limit: String(LIVE_TV_SEARCH_PAGE_SIZE),
+          SortBy: "StartDate", SortOrder: "Ascending", Fields: "Overview", EnableTotalRecordCount: "true",
+        }));
+        const entries = this.items(result).map(sanitizeLiveTvProgram)
+          .filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
+        programs.push(...entries);
+        // Older/third-party Live TV providers occasionally omit the total. In
+        // that case, continue until the short final page rather than treating
+        // the unknown value as an empty result set.
+        const reportedTotal = asNumber(result.TotalRecordCount);
+        total = reportedTotal > 0 ? reportedTotal : Number.POSITIVE_INFINITY;
+        if (entries.length < LIVE_TV_SEARCH_PAGE_SIZE) break;
+        if (page === LIVE_TV_SEARCH_MAX_PAGES - 1 && programs.length < total) truncated = true;
+      }
+      if (sessionRevision !== this.sessionRevision) throw new AppError("SESSION_CHANGED", "Your Jellyfin session changed while the guide search was loading.");
+      const value: LiveTvSearchCache = {
+        expiresAt: Date.now() + LIVE_TV_SEARCH_TTL_MS,
+        channels: this.items(asRecord(channelResult)).map(sanitizeLiveTvChannel).filter((channel) => channel.id),
+        programs,
+        horizonStartUtc,
+        horizonEndUtc,
+        truncated,
+      };
+      this.liveTvSearchCache = value;
+      return value;
+    })().finally(() => { this.liveTvSearchCachePromise = null; });
+    return this.liveTvSearchCachePromise;
   }
 
   async getLiveTvRecordings(startIndex = 0, limit = 200): Promise<LiveTvRecording[]> {
@@ -1466,6 +1543,8 @@ export class JellyfinApi {
     this.sessionController.abort();
     this.sessionController = new AbortController();
     this.session = session;
+    this.liveTvSearchCache = null;
+    this.liveTvSearchCachePromise = null;
     this.sessionRevision += 1;
     this.connectionMeasurement = null;
     this.emitConnectionDiagnostics();

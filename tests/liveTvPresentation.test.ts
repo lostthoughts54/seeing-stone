@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   currentTimeMarkerPercent,
+  guideScrollLeftForTime,
+  guideTimeOffsetPixels,
   isCurrentProgram,
   placeProgramInWindow,
   timeAxisLabels,
@@ -20,6 +22,12 @@ describe("Live TV guide presentation", () => {
     expect(currentTimeMarkerPercent(Date.parse(at(30)), Date.parse(at(0)), Date.parse(at(60)))).toBe(50);
     expect(currentTimeMarkerPercent(Date.parse(at(-1)), Date.parse(at(0)), Date.parse(at(60)))).toBeNull();
     expect(currentTimeMarkerPercent(Date.parse(at(61)), Date.parse(at(0)), Date.parse(at(60)))).toBeNull();
+  });
+
+  it("uses a fixed 200px half-hour time scale and places Now inside the timeline", () => {
+    expect(guideTimeOffsetPixels(Date.parse(at(30)), Date.parse(at(0)))).toBe(200);
+    expect(guideTimeOffsetPixels(Date.parse(at(90)), Date.parse(at(0)))).toBe(600);
+    expect(guideScrollLeftForTime(Date.parse(at(60)), Date.parse(at(0)), 288, 1000)).toBe(368);
   });
 
   it("uses real half-hour boundaries and centers a bounded mini-guide channel slice", () => {

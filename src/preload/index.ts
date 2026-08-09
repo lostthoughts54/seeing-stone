@@ -24,6 +24,8 @@ import {
   type LiveTvDeleteRecordingInput,
   type LiveTvGuide,
   type LiveTvGuideInput,
+  type LiveTvProgramSearch,
+  type LiveTvProgramSearchInput,
   type LiveTvPageInput,
   type LiveTvPlaybackInput,
   type LiveTvRecording,
@@ -133,6 +135,7 @@ const bridge: JellyfinBridge = {
   liveTv: {
     getStatus: () => invoke<LiveTvStatus>(IPC.liveTvGetStatus),
     getGuide: (input: LiveTvGuideInput) => invoke<LiveTvGuide>(IPC.liveTvGetGuide, input),
+    searchPrograms: (input: LiveTvProgramSearchInput) => invoke<LiveTvProgramSearch>(IPC.liveTvSearchPrograms, input),
     getRecordings: (input?: LiveTvPageInput) => invoke<LiveTvRecording[]>(IPC.liveTvGetRecordings, input ?? {}),
     getTimers: () => invoke<LiveTvTimer[]>(IPC.liveTvGetTimers),
     getSeriesTimers: () => invoke<LiveTvSeriesTimer[]>(IPC.liveTvGetSeriesTimers),

@@ -66,6 +66,9 @@ export const liveTvGuideSchema = z.object({
   if (end <= start) context.addIssue({ code: z.ZodIssueCode.custom, message: "Guide end must be after start.", path: ["endUtc"] });
   if (end - start > 24 * 60 * 60 * 1000) context.addIssue({ code: z.ZodIssueCode.custom, message: "Guide windows cannot exceed 24 hours.", path: ["endUtc"] });
 });
+export const liveTvProgramSearchSchema = z.object({
+  query: z.string().trim().min(2).max(100),
+}).strict();
 export const liveTvPageSchema = z.object({
   startIndex: z.number().int().min(0).max(100_000).optional(),
   limit: z.number().int().min(1).max(500).optional(),

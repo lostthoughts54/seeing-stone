@@ -544,6 +544,33 @@ describe("JellyfinApi main-side boundary", () => {
     })]);
   });
 
+  it("searches sanitized Live TV guide data with one bounded cache fill and no Search/Hints dependency", async () => {
+    const requestedPaths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      requestedPaths.push(url.pathname);
+      if (url.pathname === "/System/Info/Public") return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      if (url.pathname === "/LiveTv/Channels") return Response.json({ Items: [{ Id: "channel-1", Name: "Island TV", Number: "5930", ImageTags: { Primary: "tag" } }] });
+      if (url.pathname === "/LiveTv/Programs") return Response.json({ TotalRecordCount: 2, Items: [
+        { Id: "program-now", ChannelId: "channel-1", Name: "Love Island", EpisodeTitle: "Episode 1", StartDate: "2026-08-09T18:00:00.000Z", EndDate: "2026-08-09T18:30:00.000Z", IsSeries: true },
+        { Id: "program-later", ChannelId: "channel-1", Name: "Love Island", StartDate: "2026-08-10T18:00:00.000Z", EndDate: "2026-08-10T18:30:00.000Z", IsSeries: true },
+      ] });
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-live-tv-search-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    const [first, second] = await Promise.all([api.getLiveTvProgramSearch("love island"), api.getLiveTvProgramSearch("episode 1")]);
+    expect(first.programs.map((entry) => entry.program.id)).toEqual(["program-now", "program-later"]);
+    expect(second.programs.map((entry) => entry.program.id)).toEqual(["program-now"]);
+    expect(requestedPaths.filter((path) => path === "/LiveTv/Programs")).toHaveLength(1);
+    expect(requestedPaths).not.toContain("/Search/Hints");
+    await api.logout();
+    await expect(api.getLiveTvProgramSearch("love island")).rejects.toMatchObject({ code: "NOT_AUTHENTICATED" });
+  });
+
   it("serializes logout behind an in-flight login so logout remains authoritative", async () => {
     let releaseLogin: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

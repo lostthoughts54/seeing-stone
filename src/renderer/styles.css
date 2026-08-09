@@ -4665,19 +4665,23 @@ button.danger:hover:not(:disabled) {
 .live-tv-guide-tools label { grid-row: 1; }
 .live-tv-guide-tools input { grid-row: 2; }
 .live-tv-guide-tools span { grid-column: 2 / -1; grid-row: 1 / -1; }
+.live-tv-guide-tools #liveTvNowButton { align-self: end; grid-column: 2; grid-row: 2; }
 .live-tv-grid {
   --live-tv-channel-width: 18rem;
-  --live-tv-track-width: 78rem;
+  --live-tv-half-hour-width: 200px;
+  --live-tv-track-width: 2400px;
   border-radius: .55rem;
   box-shadow: 0 18px 44px rgba(0, 0, 0, .2);
   max-height: calc(100vh - 16rem);
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 .live-tv-axis,
 .live-tv-row {
   display: grid;
-  grid-template-columns: var(--live-tv-channel-width) minmax(var(--live-tv-track-width), 1fr);
+  grid-template-columns: var(--live-tv-channel-width) var(--live-tv-track-width);
   min-width: calc(var(--live-tv-channel-width) + var(--live-tv-track-width));
+  width: calc(var(--live-tv-channel-width) + var(--live-tv-track-width));
 }
 .live-tv-axis {
   align-items: stretch;
@@ -4707,7 +4711,7 @@ button.danger:hover:not(:disabled) {
 .live-tv-axis-track {
   background: #0d0c18;
   display: grid;
-  grid-template-columns: repeat(var(--live-tv-columns), minmax(6.5rem, 1fr));
+  grid-template-columns: repeat(var(--live-tv-columns), var(--live-tv-half-hour-width));
   min-width: var(--live-tv-track-width);
   position: relative;
 }
@@ -4770,7 +4774,7 @@ button.danger:hover:not(:disabled) {
 .live-tv-channel-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-tv-favorite { color: #b768ff; font-size: .85rem; flex: none; }
 .live-tv-track {
-  background-size: calc(100% / var(--live-tv-columns)) 100%;
+  background-size: var(--live-tv-half-hour-width) 100%;
   min-width: var(--live-tv-track-width);
   overflow: hidden;
   position: relative;
@@ -4803,6 +4807,20 @@ button.danger:hover:not(:disabled) {
 .live-tv-program em { background: rgba(161, 91, 255, .28); border-radius: .22rem; color: #ead7ff; font-size: .58rem; font-style: normal; font-weight: 800; letter-spacing: .06em; padding: .15rem .22rem; }
 .live-tv-program.is-current { background: #211b30; box-shadow: inset 3px 0 #ad68ff; }
 .live-tv-program:hover, .live-tv-program:focus-visible { transform: none; }
+.live-tv-program.is-guide-target { border-color: #d1a2ff; box-shadow: 0 0 0 2px rgba(184,108,255,.55), inset 3px 0 #ad68ff; z-index: 6; }
+
+.live-tv-search-section { margin: 0 0 1.35rem; }
+.live-tv-search-section > h2 { color: #e8e0f1; font-size: .88rem; letter-spacing: .04em; margin: 0 0 .55rem; }
+.live-tv-search-list { display: grid; gap: .45rem; }
+.live-tv-search-section .live-tv-channel { min-height: 4.35rem; position: relative; width: min(100%, 28rem); }
+.live-tv-search-program { align-items: center; background: rgba(17,15,29,.92); border: 1px solid rgba(216,192,255,.13); border-radius: .45rem; display: grid; gap: .8rem; grid-template-columns: 8.8rem minmax(0, 1fr) auto; padding: .65rem .75rem; }
+.live-tv-search-channel { align-items: center; display: grid; gap: .45rem; grid-template-columns: 3.25rem 5.2rem; min-width: 0; }
+.live-tv-search-program h3 { font-size: .92rem; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-tv-search-program p { color: #bcb4c7; font-size: .73rem; margin: .15rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-tv-search-program > div:nth-child(2) { min-width: 0; }
+.live-tv-search-program > div:last-child { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
+.live-tv-search-badge { background: rgba(157,91,255,.22); border: 1px solid rgba(188,123,255,.46); border-radius: .25rem; color: #e8d5ff; display: inline-flex; font-size: .62rem; font-weight: 800; letter-spacing: .06em; margin-top: .35rem; padding: .14rem .32rem; }
+.live-tv-search-badge.is-scheduled { background: rgba(99,166,121,.16); border-color: rgba(119,198,146,.35); color: #c6efd2; }
 
 /* Mini Guide lives over the renderer video surface, not inside the auto-hiding controls. */
 .player-mini-guide {
@@ -4850,7 +4868,10 @@ button.danger:hover:not(:disabled) {
 @media (max-width: 760px) {
   .live-tv-guide-tools { grid-template-columns: 1fr; }
   .live-tv-guide-tools span { grid-column: 1; grid-row: auto; }
-  .live-tv-grid { --live-tv-channel-width: 14rem; --live-tv-track-width: 62rem; }
+  .live-tv-grid { --live-tv-channel-width: 14rem; }
+  .live-tv-guide-tools #liveTvNowButton { grid-column: 1; grid-row: auto; justify-self: start; }
+  .live-tv-search-program { grid-template-columns: 7.4rem minmax(0, 1fr); }
+  .live-tv-search-program > div:last-child { grid-column: 1 / -1; justify-content: flex-start; }
   .player-mini-guide { --mini-channel-width: 10rem; left: .6rem; right: .6rem; max-height: 48%; }
   .player-mini-guide > header span { display: none; }
   .mini-guide-axis, .mini-guide-row { grid-template-columns: var(--mini-channel-width) repeat(4, minmax(5.5rem, 1fr)); min-width: calc(var(--mini-channel-width) + 22rem); }

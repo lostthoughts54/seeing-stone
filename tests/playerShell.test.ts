@@ -26,7 +26,7 @@ describe("Seeing Stone player shell", () => {
     for (const id of [
       "navLiveTvButton", "mobileLiveTvButton", "liveTvView", "liveTvGuideTab",
       "liveTvRecordingsTab", "liveTvScheduledTab", "playerMiniGuide", "playerGoLiveButton",
-      "liveTvChannelSearch", "liveTvChannelSearchStatus",
+      "liveTvChannelSearch", "liveTvChannelSearchStatus", "liveTvNowButton",
     ]) expect(html).toContain(`id="${id}"`);
     expect(html).toContain('data-player-route="live-tv"');
     expect(app).toContain("window.jellyfin.playback.startLive");
@@ -34,6 +34,8 @@ describe("Seeing Stone player shell", () => {
     expect(app).toContain("window.confirm");
     expect(app).toContain("matchingChannels.slice(0, 300)");
     expect(app).toContain("programsByChannel");
+    expect(app).toContain("window.jellyfin.liveTv.searchPrograms");
+    expect(html).toContain('placeholder="Search channels or programs"');
   });
 
   it("keeps Live TV artwork authenticated and the Mini Guide above auto-hiding controls", async () => {
@@ -67,6 +69,18 @@ describe("Seeing Stone player shell", () => {
     expect(catalogRefresh).toContain("updateLiveTvTimeMarkers();");
     expect(catalogRefresh).not.toContain("await refreshLiveTv(false);");
     expect(styles).toMatch(/\.live-tv-channel-number \{[\s\S]*?min-width: 3\.25rem;[\s\S]*?white-space: nowrap;/);
+  });
+
+  it("uses one fixed horizontal timeline and program-level guide jumps", async () => {
+    const [renderer, styles] = await Promise.all([
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+    ]);
+    expect(renderer).toContain("LIVE_TV_HALF_HOUR_PX");
+    expect(renderer).toContain("guideScrollLeftForTime");
+    expect(renderer).toContain("focusPendingGuideTarget");
+    expect(styles).toMatch(/\.live-tv-grid \{[\s\S]*?overflow: auto[\s\S]*?scrollbar-gutter: stable both-edges;/);
+    expect(styles).toMatch(/grid-template-columns: var\(--live-tv-channel-width\) var\(--live-tv-track-width\)/);
   });
 
   it("uses a dedicated inert native viewport with sibling controls", async () => {

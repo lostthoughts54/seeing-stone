@@ -1,6 +1,7 @@
 import type { LiveTvProgram } from "../shared/contracts";
 
 export const LIVE_TV_HALF_HOUR_MS = 30 * 60_000;
+export const LIVE_TV_HALF_HOUR_PX = 200;
 
 export type TimedProgram = Pick<LiveTvProgram, "startUtc" | "endUtc">;
 
@@ -25,6 +26,14 @@ export function placeProgramInWindow(program: TimedProgram, windowStartMs: numbe
 export function currentTimeMarkerPercent(nowMs: number, windowStartMs: number, windowEndMs: number): number | null {
   if (!Number.isFinite(nowMs) || nowMs < windowStartMs || nowMs > windowEndMs || windowEndMs <= windowStartMs) return null;
   return (nowMs - windowStartMs) / (windowEndMs - windowStartMs) * 100;
+}
+
+export function guideTimeOffsetPixels(timeMs: number, windowStartMs: number): number {
+  return (timeMs - windowStartMs) / LIVE_TV_HALF_HOUR_MS * LIVE_TV_HALF_HOUR_PX;
+}
+
+export function guideScrollLeftForTime(timeMs: number, windowStartMs: number, trackOffsetPx: number, viewportWidthPx: number, placement = 0.32): number {
+  return Math.max(0, trackOffsetPx + guideTimeOffsetPixels(timeMs, windowStartMs) - viewportWidthPx * placement);
 }
 
 export function timeAxisLabels(windowStartMs: number, windowEndMs: number): number[] {

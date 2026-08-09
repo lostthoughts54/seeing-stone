@@ -7,6 +7,7 @@ import type {
   LibrarySummary,
   LiveTvGuide,
   LiveTvProgram,
+  LiveTvProgramSearch,
   LiveTvRecording,
   LiveTvSeriesTimer,
   LiveTvTimer,
@@ -45,7 +46,7 @@ import {
 import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
 import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
 import { loadAllBrowseItems } from "./browsePagination";
-import { LIVE_TV_HALF_HOUR_MS, currentTimeMarkerPercent, isCurrentProgram, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
+import { LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
 import { presentPeople } from "../shared/personPresentation";
 
 const TICKS_PER_SECOND = 10000000;
@@ -120,6 +121,7 @@ const liveTvGuideTools = byId<HTMLElement>("liveTvGuideTools");
 const liveTvChannelSearch = byId<HTMLInputElement>("liveTvChannelSearch");
 const liveTvChannelSearchStatus = byId<HTMLElement>("liveTvChannelSearchStatus");
 const refreshLiveTvButton = byId<HTMLButtonElement>("refreshLiveTvButton");
+const liveTvNowButton = byId<HTMLButtonElement>("liveTvNowButton");
 const liveTvGuideTab = byId<HTMLButtonElement>("liveTvGuideTab");
 const liveTvRecordingsTab = byId<HTMLButtonElement>("liveTvRecordingsTab");
 const liveTvScheduledTab = byId<HTMLButtonElement>("liveTvScheduledTab");
@@ -389,6 +391,8 @@ interface RendererState {
   liveTvTab: LiveTvTab;
   liveTvRequestId: number;
   liveTvChannelQuery: string;
+  liveTvProgramSearch: LiveTvProgramSearch | null;
+  liveTvProgramSearchRequestId: number;
 }
 
 const state: RendererState = {
@@ -451,6 +455,8 @@ const state: RendererState = {
   liveTvTab: "guide",
   liveTvRequestId: 0,
   liveTvChannelQuery: "",
+  liveTvProgramSearch: null,
+  liveTvProgramSearchRequestId: 0,
 };
 
 let connectionRetryInFlight = false;
@@ -484,6 +490,8 @@ let dismissedPlaybackId: string | null = null;
 let liveTvChannelSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const liveTvArtworkUrls = new Map<string, string>();
 let miniGuideSelection = { channelId: "", programIndex: 0 };
+let pendingGuideTarget: { programId: string; channelId: string; timeMs: number } | null = null;
+const liveTvRecordedProgramIds = new Set<string>();
 
 const CATALOG_REFRESH_INTERVAL_MS = 60_000;
 
@@ -1213,6 +1221,7 @@ function handlePlayerMiniGuideKey(event: KeyboardEvent): boolean {
 async function recordProgram(program: LiveTvProgram, series: boolean, options: { prePaddingSeconds?: number; postPaddingSeconds?: number } = {}): Promise<void> {
   try {
     await window.jellyfin.liveTv.createRecording({ programId: program.id, series, options });
+    liveTvRecordedProgramIds.add(program.id);
     showToast(series ? "Series recording scheduled." : "Recording scheduled.");
     await refreshLiveTv(false);
   } catch (error) {
@@ -1282,6 +1291,189 @@ function showProgramDetails(program: LiveTvProgram): void {
   liveTvContent.prepend(panel);
 }
 
+function guideWindowForTime(timeMs: number): { startUtc: string; endUtc: string } {
+  const start = Math.floor(timeMs / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS - LIVE_TV_HALF_HOUR_MS;
+  return { startUtc: new Date(start).toISOString(), endUtc: new Date(start + 6 * 60 * 60_000).toISOString() };
+}
+
+function scrollLiveTvGuideToTime(timeMs: number, behavior: ScrollBehavior = "smooth"): void {
+  const guide = state.liveTvGuide;
+  const grid = liveTvContent.querySelector<HTMLElement>(".live-tv-grid");
+  const track = grid?.querySelector<HTMLElement>(".live-tv-track");
+  if (!guide || !grid || !track) return;
+  const target = guideScrollLeftForTime(timeMs, Date.parse(guide.windowStartUtc), track.offsetLeft, grid.clientWidth);
+  grid.scrollTo({ left: Math.min(target, Math.max(0, grid.scrollWidth - grid.clientWidth)), behavior });
+}
+
+function focusPendingGuideTarget(): void {
+  const target = pendingGuideTarget;
+  if (!target) return;
+  pendingGuideTarget = null;
+  requestAnimationFrame(() => {
+    const grid = liveTvContent.querySelector<HTMLElement>(".live-tv-grid");
+    const row = Array.from(liveTvContent.querySelectorAll<HTMLElement>(".live-tv-row"))
+      .find((entry) => entry.dataset.liveTvChannelId === target.channelId);
+    const program = Array.from(liveTvContent.querySelectorAll<HTMLButtonElement>(".live-tv-program"))
+      .find((entry) => entry.dataset.liveTvProgramId === target.programId);
+    if (grid && row) {
+      const gridBounds = grid.getBoundingClientRect();
+      const rowBounds = row.getBoundingClientRect();
+      const top = grid.scrollTop + rowBounds.top - gridBounds.top - (grid.clientHeight - rowBounds.height) / 2;
+      grid.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    }
+    if (grid) scrollLiveTvGuideToTime(target.timeMs);
+    if (program) {
+      program.classList.add("is-guide-target");
+      program.focus({ preventScroll: true });
+      window.setTimeout(() => program.classList.remove("is-guide-target"), 3_000);
+    }
+  });
+}
+
+async function viewProgramInGuide(result: LiveTvProgramSearch["programs"][number]): Promise<void> {
+  const timeMs = Date.parse(result.program.startUtc);
+  pendingGuideTarget = { programId: result.program.id, channelId: result.channel.id, timeMs };
+  state.liveTvChannelQuery = "";
+  liveTvChannelSearch.value = "";
+  state.liveTvProgramSearch = null;
+  state.liveTvProgramSearchRequestId += 1;
+  setLiveTvTab("guide");
+  const guide = state.liveTvGuide;
+  if (guide && timeMs >= Date.parse(guide.windowStartUtc) && timeMs < Date.parse(guide.windowEndUtc)) {
+    renderLiveTv();
+    focusPendingGuideTarget();
+    return;
+  }
+  await refreshLiveTv(true, guideWindowForTime(timeMs));
+}
+
+function createLiveTvSearchProgramResult(result: LiveTvProgramSearch["programs"][number]): HTMLElement {
+  const { program, channel } = result;
+  const card = document.createElement("article");
+  const identity = document.createElement("div");
+  const number = document.createElement("span");
+  const logoBox = document.createElement("span");
+  const image = document.createElement("img");
+  const fallback = document.createElement("span");
+  const copy = document.createElement("div");
+  const title = document.createElement("h3");
+  const episode = document.createElement("p");
+  const metadata = document.createElement("p");
+  const actions = document.createElement("div");
+  const now = Date.now();
+  const current = isCurrentProgram(program, now);
+  card.className = "live-tv-search-program";
+  identity.className = "live-tv-search-channel";
+  number.className = "live-tv-channel-number";
+  number.textContent = channel.number || "–";
+  logoBox.className = "live-tv-channel-logo";
+  image.className = "is-hidden";
+  fallback.className = "live-tv-channel-fallback";
+  logoBox.append(image, fallback);
+  // Match the full-guide dimensions so an already-resolved opaque artwork URL
+  // can be reused when the same channel appears in search results.
+  setLiveTvChannelLogo(image, fallback, channel, 160, 84);
+  identity.append(number, logoBox);
+  title.textContent = program.name;
+  episode.textContent = program.episodeTitle || "";
+  episode.classList.toggle("is-hidden", !program.episodeTitle);
+  metadata.textContent = `${[channel.number, channel.name].filter(Boolean).join(" · ")} · ${liveTvDateTime(program.startUtc)}–${liveTvTime(program.endUtc)}`;
+  copy.append(title, episode, metadata);
+  if (current) {
+    const nowBadge = document.createElement("span");
+    nowBadge.className = "live-tv-search-badge";
+    nowBadge.textContent = program.isLive ? "LIVE" : "NOW";
+    copy.append(nowBadge);
+  }
+  if (program.timerId || liveTvRecordedProgramIds.has(program.id)) {
+    const scheduled = document.createElement("span");
+    scheduled.className = "live-tv-search-badge is-scheduled";
+    scheduled.textContent = "Scheduled";
+    copy.append(scheduled);
+  }
+  if (current) {
+    const watch = document.createElement("button");
+    watch.type = "button";
+    watch.className = "primary";
+    watch.textContent = "Watch";
+    watch.setAttribute("aria-label", `Watch ${program.name} on ${channel.name}`);
+    watch.addEventListener("click", () => { void watchLive(channel.id); });
+    actions.append(watch);
+  }
+  const record = document.createElement("button");
+  record.type = "button";
+  record.textContent = program.timerId || liveTvRecordedProgramIds.has(program.id) ? "Scheduled" : "Record";
+  record.disabled = Boolean(program.timerId || liveTvRecordedProgramIds.has(program.id));
+  record.setAttribute("aria-label", `Record ${program.name} on ${channel.name}`);
+  record.addEventListener("click", () => { void recordProgram(program, false); });
+  const series = document.createElement("button");
+  series.type = "button";
+  series.textContent = program.seriesTimerId ? "Series Scheduled" : "Record Series";
+  series.disabled = !program.isSeries || Boolean(program.seriesTimerId);
+  series.setAttribute("aria-label", `Record series for ${program.name} on ${channel.name}`);
+  series.addEventListener("click", () => { void recordProgram(program, true); });
+  const guide = document.createElement("button");
+  guide.type = "button";
+  guide.textContent = "View in Guide";
+  guide.setAttribute("aria-label", `View ${program.name} on ${channel.name} in the guide`);
+  guide.addEventListener("click", () => { void viewProgramInGuide(result); });
+  actions.append(record, series, guide);
+  card.append(identity, copy, actions);
+  return card;
+}
+
+function renderLiveTvSearchResults(): void {
+  const search = state.liveTvProgramSearch;
+  const query = state.liveTvChannelQuery.trim();
+  if (!search) {
+    renderMessage(liveTvContent, `Searching Live TV for “${query}”…`);
+    return;
+  }
+  liveTvChannelSearchStatus.textContent = `${search.channels.length} channel matches · ${search.programs.length} program airings${search.truncated ? " (results capped for this server)" : ""}`;
+  if (!search.channels.length && !search.programs.length) {
+    renderMessage(liveTvContent, `No channels or programs match “${query}” in the available guide.`);
+    return;
+  }
+  const now = Date.now();
+  const appendSection = (title: string, entries: HTMLElement[]): void => {
+    if (!entries.length) return;
+    const section = document.createElement("section");
+    const heading = document.createElement("h2");
+    const list = document.createElement("div");
+    section.className = "live-tv-search-section";
+    heading.textContent = title;
+    list.className = "live-tv-search-list";
+    list.append(...entries);
+    section.append(heading, list);
+    liveTvContent.append(section);
+  };
+  appendSection("Channels", search.channels.map((channel) => createLiveTvChannelIdentity(channel)));
+  appendSection("On Now", search.programs.filter((entry) => isCurrentProgram(entry.program, now)).map(createLiveTvSearchProgramResult));
+  appendSection("Upcoming", search.programs.filter((entry) => Date.parse(entry.program.startUtc) > now).map(createLiveTvSearchProgramResult));
+}
+
+async function runLiveTvSearch(query: string): Promise<void> {
+  const normalized = query.trim();
+  const requestId = ++state.liveTvProgramSearchRequestId;
+  if (normalized.length < 2) {
+    state.liveTvProgramSearch = null;
+    renderLiveTv();
+    return;
+  }
+  state.liveTvProgramSearch = null;
+  renderLiveTv();
+  try {
+    const result = await window.jellyfin.liveTv.searchPrograms({ query: normalized });
+    if (requestId !== state.liveTvProgramSearchRequestId || state.liveTvChannelQuery.trim() !== normalized) return;
+    state.liveTvProgramSearch = result;
+    renderLiveTv();
+  } catch (error) {
+    if (requestId !== state.liveTvProgramSearchRequestId) return;
+    liveTvChannelSearchStatus.textContent = errorMessage(error, "Live TV search is unavailable.");
+    renderMessage(liveTvContent, "Live TV search could not be completed. Try again.");
+  }
+}
+
 function renderLiveTvGuide(): void {
   const guide = state.liveTvGuide;
   if (!guide || guide.status.availability !== "available") {
@@ -1294,6 +1486,10 @@ function renderLiveTvGuide(): void {
     text.textContent = guide?.status.message || "Add an M3U or HDHomeRun tuner and XMLTV guide in the Jellyfin dashboard, then refresh this screen.";
     empty.append(title, text);
     liveTvContent.append(empty);
+    return;
+  }
+  if (state.liveTvChannelQuery.trim().length >= 2) {
+    renderLiveTvSearchResults();
     return;
   }
   const start = Date.parse(guide.windowStartUtc);
@@ -1321,6 +1517,7 @@ function renderLiveTvGuide(): void {
   const grid = document.createElement("div");
   grid.className = "live-tv-grid";
   grid.style.setProperty("--live-tv-columns", String(Math.max(1, labels.length)));
+  grid.style.setProperty("--live-tv-track-width", `${Math.max(1, labels.length) * LIVE_TV_HALF_HOUR_PX}px`);
   const axis = document.createElement("div");
   axis.className = "live-tv-axis";
   const axisChannel = document.createElement("span");
@@ -1345,6 +1542,7 @@ function renderLiveTvGuide(): void {
   for (const channel of visibleChannels) {
     const row = document.createElement("section");
     row.className = "live-tv-row";
+    row.dataset.liveTvChannelId = channel.id;
     const track = document.createElement("div");
     track.className = "live-tv-track";
     track.style.setProperty("--live-tv-now", marker === null ? "-10" : String(marker));
@@ -1364,6 +1562,7 @@ function renderLiveTvGuide(): void {
       cell.setAttribute("aria-label", cell.title);
       cell.dataset.liveTvStart = program.startUtc;
       cell.dataset.liveTvEnd = program.endUtc;
+      cell.dataset.liveTvProgramId = program.id;
       if (isCurrentProgram(program, now)) cell.classList.add("is-current");
       if (program.isLive) {
         const badge = document.createElement("em");
@@ -1377,6 +1576,7 @@ function renderLiveTvGuide(): void {
     grid.append(row);
   }
   liveTvContent.append(grid);
+  focusPendingGuideTarget();
 }
 
 function renderLiveTvRecordings(): void {
@@ -1483,13 +1683,13 @@ function updateLiveTvTimeMarkers(): void {
   if (!playerMiniGuide.classList.contains("is-hidden")) renderPlayerMiniGuide();
 }
 
-async function refreshLiveTv(showLoading = true): Promise<void> {
+async function refreshLiveTv(showLoading = true, windowOverride?: { startUtc: string; endUtc: string }): Promise<void> {
   const requestId = ++state.liveTvRequestId;
   if (showLoading) { liveTvStatus.textContent = "Loading Live TV…"; refreshLiveTvButton.disabled = true; }
   const now = Date.now();
   const windowStart = Math.floor(now / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS - LIVE_TV_HALF_HOUR_MS;
-  const start = new Date(windowStart).toISOString();
-  const end = new Date(windowStart + 6 * 60 * 60_000).toISOString();
+  const start = windowOverride?.startUtc || new Date(windowStart).toISOString();
+  const end = windowOverride?.endUtc || new Date(windowStart + 6 * 60 * 60_000).toISOString();
   try {
     const guide = await window.jellyfin.liveTv.getGuide({ startUtc: start, endUtc: end });
     const [recordings, timers, seriesTimers] = guide.status.availability === "available"
@@ -5069,6 +5269,9 @@ function resetSignedInState(): void {
   state.liveTvTimers = [];
   state.liveTvSeriesTimers = [];
   state.liveTvRequestId += 1;
+  state.liveTvProgramSearch = null;
+  state.liveTvProgramSearchRequestId += 1;
+  liveTvRecordedProgramIds.clear();
   state.currentRoute = "home";
   state.returnRoute = "home";
   state.returnScrollTop = 0;
@@ -5321,13 +5524,38 @@ liveTvGuideTab.addEventListener("click", () => setLiveTvTab("guide"));
 liveTvRecordingsTab.addEventListener("click", () => setLiveTvTab("recordings"));
 liveTvScheduledTab.addEventListener("click", () => setLiveTvTab("scheduled"));
 refreshLiveTvButton.addEventListener("click", () => { void refreshLiveTv(); });
+liveTvNowButton.addEventListener("click", () => {
+  const now = Date.now();
+  if (state.liveTvChannelQuery) {
+    state.liveTvChannelQuery = "";
+    liveTvChannelSearch.value = "";
+    state.liveTvProgramSearch = null;
+    state.liveTvProgramSearchRequestId += 1;
+    renderLiveTv();
+  }
+  const guide = state.liveTvGuide;
+  if (guide && now >= Date.parse(guide.windowStartUtc) && now < Date.parse(guide.windowEndUtc)) {
+    scrollLiveTvGuideToTime(now);
+  } else {
+    void refreshLiveTv(true, guideWindowForTime(now)).then(() => scrollLiveTvGuideToTime(now));
+  }
+});
 liveTvChannelSearch.addEventListener("input", () => {
   state.liveTvChannelQuery = liveTvChannelSearch.value;
   if (liveTvChannelSearchTimer) clearTimeout(liveTvChannelSearchTimer);
   liveTvChannelSearchTimer = setTimeout(() => {
     liveTvChannelSearchTimer = null;
-    if (state.liveTvTab === "guide") renderLiveTv();
-  }, 120);
+    if (state.liveTvTab === "guide") void runLiveTvSearch(state.liveTvChannelQuery);
+  }, 300);
+});
+liveTvChannelSearch.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !liveTvChannelSearch.value) return;
+  event.preventDefault();
+  liveTvChannelSearch.value = "";
+  state.liveTvChannelQuery = "";
+  state.liveTvProgramSearch = null;
+  state.liveTvProgramSearchRequestId += 1;
+  renderLiveTv();
 });
 playerPreviousChannelButton.addEventListener("click", () => { void changeLiveChannel(-1); });
 playerNextChannelButton.addEventListener("click", () => { void changeLiveChannel(1); });

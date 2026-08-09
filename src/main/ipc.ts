@@ -23,6 +23,7 @@ import {
   liveTvCreateRecordingSchema,
   liveTvDeleteRecordingSchema,
   liveTvGuideSchema,
+  liveTvProgramSearchSchema,
   liveTvPageSchema,
   liveTvPlaybackSchema,
   liveTvUpdateScheduleSchema,
@@ -279,6 +280,7 @@ export function registerIpcHandlers(
     const value = liveTvGuideSchema.parse(input);
     return api.getLiveTvGuide(value.startUtc, value.endUtc);
   });
+  register(IPC.liveTvSearchPrograms, (input) => api.getLiveTvProgramSearch(liveTvProgramSearchSchema.parse(input).query));
   register(IPC.liveTvGetRecordings, (input) => {
     const value = liveTvPageSchema.parse(input ?? {});
     return api.getLiveTvRecordings(value.startIndex, value.limit);
