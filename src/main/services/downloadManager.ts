@@ -2,6 +2,7 @@ import { mkdir, open, rename, rm, stat, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { DownloadSummary, MediaItem, MediaSourceCapabilities, OfflinePlayableSummary, PlaybackDiagnostics } from "../../shared/contracts";
 import { materializeCachedMediaItem } from "./cachedMedia";
+import { formatMediaVersionLabel } from "../../shared/mediaVersions";
 import { AppError, toPublicError } from "./errors";
 import type { AuthenticatedContext, JellyfinApi } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
@@ -41,6 +42,27 @@ export function progressiveStartupThreshold(expectedSize: number, bitrate: numbe
     ? Math.ceil(bitrate * 30 / 8)
     : 32 * 1024 * 1024;
   return Math.min(expectedSize, Math.max(8 * 1024 * 1024, thirtySecondBytes));
+}
+
+export function selectDownloadSource(
+  capabilities: MediaSourceCapabilities,
+  preferredMediaSourceId?: string,
+): MediaSourceCapabilities["sources"][number] {
+  if (preferredMediaSourceId) {
+    const selected = capabilities.sources.find((entry) => entry.id === preferredMediaSourceId);
+    if (!selected) {
+      throw new AppError("DOWNLOAD_SOURCE_STALE", "That movie version is no longer available. Choose Auto or another version.", 409);
+    }
+    if (!selected.supportsDirectPlay && !selected.supportsDirectStream && !selected.supportsTranscoding) {
+      throw new AppError("DOWNLOAD_SOURCE_UNAVAILABLE", "That movie version is no longer playable.", 422);
+    }
+    return selected;
+  }
+  const automatic = capabilities.sources.find((entry) => entry.supportsDirectPlay) ?? capabilities.sources[0];
+  if (!automatic) {
+    throw new AppError("DOWNLOAD_SOURCE_UNAVAILABLE", "Jellyfin did not provide a downloadable media source.", 422);
+  }
+  return automatic;
 }
 
 function safeExpectedSize(value: number | null): number | null {
@@ -84,6 +106,25 @@ function cachedSourceDiagnostics(
     bitrate: source.bitrate ?? null,
     videoRange: source.videoRange ?? null,
     transcodeReason: null,
+    mediaSourceId: source.id,
+    versionLabel: formatMediaVersionLabel({
+      itemId: "cached",
+      mediaSourceId: source.id,
+      name: source.name ?? null,
+      container: source.container,
+      width: source.width ?? null,
+      height: source.height ?? null,
+      videoCodec: source.videoCodec ?? null,
+      audioCodec: source.audioCodec ?? null,
+      audioChannels: source.audioChannels ?? null,
+      bitrate: source.bitrate ?? null,
+      size: source.size,
+      videoRange: source.videoRange ?? null,
+      runtimeTicks: null,
+      supportsDirectPlay: source.supportsDirectPlay,
+      supportsDirectStream: source.supportsDirectStream,
+      supportsTranscoding: source.supportsTranscoding,
+    }),
   };
 }
 
@@ -201,10 +242,11 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     });
   }
 
-  async acquireProgressive(itemId: string): Promise<ProgressiveDownloadLease | null> {
+  async acquireProgressive(itemId: string, preferredMediaSourceId?: string): Promise<ProgressiveDownloadLease | null> {
     const identity = this.requireIdentity();
     const bundles = await this.persistence.listDownloadBundles(identity.serverId, identity.userId);
-    const bundle = bundles.find((candidate) => candidate.job.itemId === itemId);
+    const bundle = bundles.find((candidate) => candidate.job.itemId === itemId
+      && (!preferredMediaSourceId || candidate.job.mediaSourceId === preferredMediaSourceId));
     const job = bundle?.job;
     if (!bundle || !job || !job.mediaSourceId || !job.expectedSize || job.expectedSize <= 0) return null;
     const candidate = await this.progressiveCandidate(bundle);
@@ -230,6 +272,8 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       bitrate: mediaSource?.diagnostics?.bitrate ?? null,
       videoRange: mediaSource?.diagnostics?.videoRange ?? null,
       transcodeReason: null,
+      mediaSourceId: job.mediaSourceId,
+      versionLabel: mediaSource?.diagnostics?.versionLabel ?? null,
     };
     let lease!: ActiveProgressiveDownloadLease;
     lease = new ActiveProgressiveDownloadLease({
@@ -259,19 +303,20 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     return lease;
   }
 
-  async start(itemId: string): Promise<DownloadSummary> {
-    return this.startDownload(itemId, "manual");
+  async start(itemId: string, preferredMediaSourceId?: string): Promise<DownloadSummary> {
+    return this.startDownload(itemId, "manual", preferredMediaSourceId);
   }
 
   async startSmart(itemId: string): Promise<DownloadSummary> {
     return this.startDownload(itemId, "smart");
   }
 
-  private async startDownload(itemId: string, origin: "manual" | "smart"): Promise<DownloadSummary> {
+  private async startDownload(itemId: string, origin: "manual" | "smart", preferredMediaSourceId?: string): Promise<DownloadSummary> {
     const identity = this.requireIdentity();
     const storageRoot = this.storageRoot;
     const existing = (await this.persistence.listDownloadBundles(identity.serverId, identity.userId))
       .find((bundle) => bundle.job.itemId === itemId
+        && (!preferredMediaSourceId || bundle.job.mediaSourceId === preferredMediaSourceId)
         && bundle.job.state !== "cancelled"
         && !(bundle.job.state === "completed" && bundle.localVersion?.fileState !== "finalized"));
     if (existing) return this.toSummary(existing);
@@ -281,7 +326,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       throw new AppError("DOWNLOAD_NOT_SUPPORTED", "Only movies and individual episodes can be downloaded.", 400);
     }
     const capabilities = await this.api.getMediaSourceCapabilities(item.id);
-    const source = this.chooseSource(capabilities);
+    const source = selectDownloadSource(capabilities, preferredMediaSourceId);
     const expectedSize = safeExpectedSize(source.size);
     const container = safeContainer(source.container);
     const downloadId = crypto.randomUUID();
@@ -454,12 +499,6 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       throw new AppError("DOWNLOAD_NOT_FOUND", "That download could not be found.", 404);
     }
     return bundle;
-  }
-
-  private chooseSource(capabilities: MediaSourceCapabilities): MediaSourceCapabilities["sources"][number] {
-    const source = capabilities.sources.find((entry) => entry.supportsDirectPlay) ?? capabilities.sources[0];
-    if (!source) throw new AppError("DOWNLOAD_SOURCE_UNAVAILABLE", "Jellyfin did not provide a downloadable media source.", 422);
-    return source;
   }
 
   private pump(): void {
@@ -867,9 +906,11 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     return {
       downloadId: job.downloadId,
       itemId: job.itemId,
+      mediaSourceId: job.mediaSourceId,
       name: bundle.itemName,
       itemType: bundle.itemType,
       item,
+      versionLabel: item.mediaVersions?.find((version) => version.itemId === job.itemId && version.mediaSourceId === job.mediaSourceId)?.label ?? null,
       resumePositionTicks: item.userData.playbackPositionTicks,
       localPlaybackAvailable,
       canWatchWhileDownloading,

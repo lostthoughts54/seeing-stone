@@ -24,6 +24,8 @@ export type PlayerAction =
 
 export interface PlaybackCommandContext {
   origin: PlayerActionOrigin;
+  /** Exact renderer-requested source; validated again against Jellyfin negotiation. */
+  preferredMediaSourceId?: string;
   /** Require an eligible growing download and reject server fallback for this open attempt. */
   requireProgressive?: boolean;
   /** Monotonic revision owned by the caller's authentication/group session. */

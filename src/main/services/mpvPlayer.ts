@@ -299,6 +299,7 @@ export class MpvPlayerService implements PlayerController {
       source = await this.playback.start(itemId, resumeMode, {
         skipProgressive: context.origin === "remote-sync",
         requireProgressive: context.requireProgressive === true,
+        preferredMediaSourceId: context.origin === "remote-sync" ? undefined : context.preferredMediaSourceId,
       });
     } catch (error) {
       if (revision === this.playbackRevision) {

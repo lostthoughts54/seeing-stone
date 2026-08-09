@@ -1,4 +1,5 @@
 import type { BrowsePage, BrowseQuery, MediaItem } from "../shared/contracts";
+import { groupMovieVersions } from "../shared/mediaVersions";
 
 const MAX_BROWSE_RESULTS = 100_000;
 
@@ -21,5 +22,5 @@ export async function loadAllBrowseItems(
     startIndex += page.items.length;
   }
 
-  return [...items.values()];
+  return groupMovieVersions([...items.values()]);
 }

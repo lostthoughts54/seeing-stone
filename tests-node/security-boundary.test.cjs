@@ -209,13 +209,15 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   assert.doesNotMatch(renderer, /\bfetch\s*\(|localStorage|sessionStorage|accessToken|api_key|ipcRenderer|window\.open/);
   assert.doesNotMatch(renderer, /from\s+["'](?:node:|electron|.*\/main\/)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^,]+,\s*ipcRenderer/);
-  assert.doesNotMatch(`${renderer}\n${preload}`, /localPath|storageRoot|mediaSourceId|file:\/\//);
+  // Opaque media-source IDs are an intentional renderer capability for exact
+  // movie-version selection; paths, filesystem URLs, and storage roots remain forbidden.
+  assert.doesNotMatch(`${renderer}\n${preload}`, /localPath|storageRoot|file:\/\//);
   assert.doesNotMatch(contracts, /reportStart|reportProgress|reportStop|Sessions\/Playing/);
   const downloadContract = contracts.slice(
     contracts.indexOf("export interface DownloadSummary"),
     contracts.indexOf("export type RpcResult"),
   );
-  assert.doesNotMatch(downloadContract, /localPath|storageRoot|mediaSourceId|authenticatedUrl|headers|command|args/);
+  assert.doesNotMatch(downloadContract, /localPath|storageRoot|authenticatedUrl|headers|command|args/);
   const watchPartyContract = contracts.slice(
     contracts.indexOf("export type WatchPartyPlaybackState"),
     contracts.indexOf("export interface JellyfinBridge"),

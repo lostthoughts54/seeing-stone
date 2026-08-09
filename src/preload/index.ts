@@ -35,6 +35,8 @@ import {
   type LiveTvUpdateScheduleInput,
   type LoginInput,
   type MediaItem,
+  type MediaVersion,
+  type MovieVersionsInput,
   type PersonMediaResult,
   type MediaSourceCapabilities,
   type OpenSourceLicenseInventory,
@@ -131,6 +133,7 @@ const bridge: JellyfinBridge = {
   },
   mediaSources: {
     getCapabilities: (input: ItemIdInput) => invoke<MediaSourceCapabilities>(IPC.mediaSourcesGetCapabilities, input),
+    getVersions: (input: MovieVersionsInput) => invoke<MediaVersion[]>(IPC.mediaSourcesGetVersions, input),
   },
   liveTv: {
     getStatus: () => invoke<LiveTvStatus>(IPC.liveTvGetStatus),

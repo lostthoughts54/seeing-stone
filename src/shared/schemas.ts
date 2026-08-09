@@ -51,6 +51,7 @@ export const artworkSchema = z.object({
 export const playbackStartSchema = z.object({
   itemId: z.string().min(1).max(128),
   resumeMode: z.enum(["resume", "start-over"]),
+  preferredMediaSourceId: z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._~-]*$/).optional(),
   progressiveOnly: z.boolean().optional(),
 });
 
@@ -130,7 +131,14 @@ export const playbackViewportSchema = z.object({
 });
 export const playbackAdapterPreferenceSchema = z.object({ mode: z.enum(["legacy", "embedded", "libmpv"]) });
 
-export const downloadStartSchema = z.object({ itemId: z.string().min(1).max(128) });
+export const downloadStartSchema = z.object({
+  itemId: z.string().min(1).max(128),
+  preferredMediaSourceId: z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._~-]*$/).optional(),
+});
+
+export const movieVersionsSchema = z.object({
+  itemIds: z.array(z.string().min(1).max(128)).min(1).max(32),
+}).strict();
 
 export const downloadIdSchema = z.object({ downloadId: z.string().uuid() });
 
@@ -208,6 +216,27 @@ export const cachedMediaItemSchema = z.object({
   }).strict(),
   hasTrailer: z.boolean(),
   playable: z.boolean(),
+  providerIds: z.record(z.string().max(32), z.string().max(128)).optional(),
+  presentationUniqueKey: cachedOptionalText(256).optional(),
+  mediaVersions: z.array(z.object({
+    itemId: cachedIdentity,
+    mediaSourceId: cachedIdentity,
+    name: cachedOptionalText(80),
+    label: z.string().min(1).max(512),
+    container: cachedOptionalText(64),
+    width: cachedNonnegativeInteger.nullable(),
+    height: cachedNonnegativeInteger.nullable(),
+    videoCodec: cachedOptionalText(64),
+    audioCodec: cachedOptionalText(64),
+    audioChannels: cachedOptionalText(64),
+    bitrate: cachedNonnegativeInteger.nullable(),
+    size: cachedNonnegativeInteger.nullable(),
+    videoRange: cachedOptionalText(64),
+    runtimeTicks: cachedNonnegativeInteger.nullable(),
+    supportsDirectPlay: z.boolean(),
+    supportsDirectStream: z.boolean(),
+    supportsTranscoding: z.boolean(),
+  }).strict()).max(64).optional(),
 }).strict();
 
 export const cachedPlaybackDiagnosticsSchema = z.object({
@@ -222,6 +251,8 @@ export const cachedPlaybackDiagnosticsSchema = z.object({
   bitrate: cachedNonnegativeInteger.nullable(),
   videoRange: cachedOptionalText(64),
   transcodeReason: cachedOptionalText(1024),
+  mediaSourceId: cachedOptionalText(256).optional(),
+  versionLabel: cachedOptionalText(512).optional(),
   videoOutput: z.enum(["d3d11", "opengl-software", "libmpv-opengl-angle"]).nullable().optional(),
   videoOutputHealthy: z.boolean().nullable().optional(),
   hardwareDecoding: z.boolean().nullable().optional(),

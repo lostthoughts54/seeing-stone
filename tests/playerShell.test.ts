@@ -471,8 +471,25 @@ describe("Seeing Stone player shell", () => {
     expect(html).toContain('id="smartUnfollowDialog"');
     expect(renderer).toContain("window.jellyfin.smartDownloads.follow");
     expect(renderer).toContain("window.jellyfin.smartDownloads.checkNow");
-    expect(renderer).toContain('download.smartManaged ? `${download.itemType}');
+    expect(renderer).toContain('download.smartManaged ? "Smart download" : ""');
     expect(renderer).toContain('skip.textContent = download.canDelete ? "Remove & skip" : "Skip episode"');
+  });
+
+  it("offers sanitized movie version selection across playback, downloads, and diagnostics", async () => {
+    const [html, renderer, preload] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+      readFile("src/preload/index.ts", "utf8"),
+    ]);
+    for (const id of ["detailVersionControl", "detailVersionSelect", "detailVersionNote"]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(html).toContain("Auto / Best Available");
+    expect(renderer).toContain("window.jellyfin.mediaSources.getVersions");
+    expect(renderer).toContain("preferredMediaSourceId");
+    expect(renderer).toContain('{ label: "Version", value: diagnostics.versionLabel }');
+    expect(preload).toContain("mediaSourcesGetVersions");
+    expect(`${html}\n${renderer}\n${preload}`).not.toMatch(/api_key|AccessToken|X-Emby-Token/);
   });
 
   it("keeps essential text and state colors at readable contrast", async () => {

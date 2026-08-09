@@ -52,6 +52,7 @@ export class LocalPlaybackResolver {
     itemId: string,
     resumeMode: "resume" | "start-over",
     excludedLocalVersionIds: ReadonlySet<string> = new Set(),
+    preferredMediaSourceId?: string,
   ): Promise<ResolvedPlaybackSource | null> {
     const identity = this.api.getAuthenticatedContext();
     const connectionState = this.api.getConnectionDiagnostics?.().state ?? "unknown";
@@ -68,6 +69,7 @@ export class LocalPlaybackResolver {
       .filter((version) => version.fileState === "finalized"
         && version.probeState === "valid"
         && version.mediaSourceId
+        && (!preferredMediaSourceId || version.mediaSourceId === preferredMediaSourceId)
         && !excludedLocalVersionIds.has(version.localVersionId))
       .sort((left, right) => Number(Boolean(left.downloadId)) - Number(Boolean(right.downloadId))
         || Number(right.keepDownloaded) - Number(left.keepDownloaded)
@@ -175,6 +177,8 @@ export class LocalPlaybackResolver {
         bitrate: cachedSourceDiagnostics?.bitrate ?? null,
         videoRange: cachedSourceDiagnostics?.videoRange ?? null,
         transcodeReason: null,
+        mediaSourceId: candidate.mediaSourceId!,
+        versionLabel: cachedSourceDiagnostics?.versionLabel ?? null,
       };
       if (this.persistence.upsertMediaSource) {
         await this.persistence.upsertMediaSource({

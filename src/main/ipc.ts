@@ -28,6 +28,7 @@ import {
   liveTvPlaybackSchema,
   liveTvUpdateScheduleSchema,
   loginSchema,
+  movieVersionsSchema,
   playbackFullscreenSchema,
   playbackIdSchema,
   playbackPauseSchema,
@@ -272,6 +273,7 @@ export function registerIpcHandlers(
     return trickplay.getSpriteUrl(value.playbackId, value.manifestId, value.spriteIndex);
   });
   register(IPC.mediaSourcesGetCapabilities, (input) => api.getMediaSourceCapabilities(itemIdSchema.strict().parse(input).itemId));
+  register(IPC.mediaSourcesGetVersions, (input) => api.getMovieVersions(movieVersionsSchema.parse(input).itemIds));
   register(IPC.liveTvGetStatus, (input) => {
     emptySchema.strict().parse(input ?? {});
     return api.getLiveTvStatus();
@@ -336,7 +338,10 @@ export function registerIpcHandlers(
     if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
     return downloadLocation.open();
   });
-  register(IPC.downloadsStart, (input) => downloads.start(downloadStartSchema.strict().parse(input).itemId));
+  register(IPC.downloadsStart, (input) => {
+    const value = downloadStartSchema.strict().parse(input);
+    return downloads.start(value.itemId, value.preferredMediaSourceId);
+  });
   register(IPC.downloadsPause, (input) => downloads.pause(downloadIdSchema.strict().parse(input).downloadId));
   register(IPC.downloadsResume, (input) => downloads.resume(downloadIdSchema.strict().parse(input).downloadId));
   register(IPC.downloadsRetry, (input) => downloads.retry(downloadIdSchema.strict().parse(input).downloadId));
@@ -377,14 +382,17 @@ export function registerIpcHandlers(
   });
   register(IPC.playbackStart, (input) => {
     const value = playbackStartSchema.strict().parse(input);
-    if (playbackCommands) return playbackCommands.start(value.itemId, value.resumeMode, false, "local-user", value.progressiveOnly === true);
+    if (playbackCommands) return playbackCommands.start(value.itemId, value.resumeMode, false, "local-user", value.progressiveOnly === true, value.preferredMediaSourceId);
     if (value.progressiveOnly && syncPlay?.isJoined()) {
       throw new AppError("PROGRESSIVE_SYNCPLAY_UNAVAILABLE", "Watch while downloading is unavailable in a watch party.", 409);
     }
-    if (syncPlay?.isJoined()) return syncPlay.selectItem(value.itemId, value.resumeMode);
+    if (syncPlay?.isJoined()) {
+      if (value.preferredMediaSourceId) throw new AppError("MOVIE_VERSION_WATCH_PARTY_UNAVAILABLE", "Specific movie versions are unavailable in a watch party. Choose Auto / Best Available.", 409);
+      return syncPlay.selectItem(value.itemId, value.resumeMode);
+    }
     return playback.loadItem(value.itemId, value.resumeMode, value.progressiveOnly
       ? { origin: "local-user", requireProgressive: true }
-      : { origin: "local-user" });
+      : { origin: "local-user", preferredMediaSourceId: value.preferredMediaSourceId });
   });
   register(IPC.playbackStartLive, (input) => {
     const value = liveTvPlaybackSchema.parse(input);

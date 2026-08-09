@@ -37,7 +37,7 @@ export interface ProgressiveDownloadLease {
 }
 
 export interface ProgressiveDownloadProvider {
-  acquireProgressive(itemId: string): Promise<ProgressiveDownloadLease | null>;
+  acquireProgressive(itemId: string, preferredMediaSourceId?: string): Promise<ProgressiveDownloadLease | null>;
 }
 
 interface ProgressiveLeaseOptions {

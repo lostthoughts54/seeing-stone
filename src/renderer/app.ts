@@ -12,6 +12,7 @@ import type {
   LiveTvSeriesTimer,
   LiveTvTimer,
   MediaItem,
+  MediaVersion,
   MediaPerson,
   PersonMediaResult,
   OpenSourceLicenseInventory,
@@ -48,6 +49,7 @@ import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
 import { loadAllBrowseItems } from "./browsePagination";
 import { LIVE_TV_GUIDE_WINDOW_MS, LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, isLocalDateTransition, normalGuideWindow, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
 import { presentPeople } from "../shared/personPresentation";
+import { groupMovieVersions } from "../shared/mediaVersions";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -166,6 +168,9 @@ const detailTitle = byId<HTMLElement>("detailTitle");
 const detailMeta = byId<HTMLElement>("detailMeta");
 const detailOverview = byId<HTMLElement>("detailOverview");
 const detailGenres = byId<HTMLElement>("detailGenres");
+const detailVersionControl = byId<HTMLElement>("detailVersionControl");
+const detailVersionSelect = byId<HTMLSelectElement>("detailVersionSelect");
+const detailVersionNote = byId<HTMLElement>("detailVersionNote");
 const detailCast = byId<HTMLElement>("detailCast");
 const detailPeople = byId<HTMLElement>("detailPeople");
 const detailPlayButton = byId<HTMLButtonElement>("detailPlayButton");
@@ -354,6 +359,7 @@ interface RendererState {
   selectedDownloadIds: Set<string>;
   detailItem: MediaItem | null;
   detailPlayItem: MediaItem | null;
+  detailVersions: MediaVersion[];
   detailsRequestId: number;
   seasons: MediaItem[];
   episodes: MediaItem[];
@@ -418,6 +424,7 @@ const state: RendererState = {
   selectedDownloadIds: new Set(),
   detailItem: null,
   detailPlayItem: null,
+  detailVersions: [],
   detailsRequestId: 0,
   seasons: [],
   episodes: [],
@@ -739,7 +746,39 @@ function itemCardSubtitle(item: MediaItem): string {
   if (item?.type === "Episode") {
     return [episodeCode(item), item.name].filter(Boolean).join(" - ");
   }
-  return [itemYear(item), runtime(item)].filter(Boolean).join(" - ");
+  const versionCount = item.mediaVersions?.length ?? 0;
+  return [itemYear(item), runtime(item), versionCount > 1 ? `${versionCount} versions` : ""].filter(Boolean).join(" - ");
+}
+
+function selectedDetailVersion(): MediaVersion | null {
+  if (detailVersionSelect.value === "auto") return null;
+  const index = Number(detailVersionSelect.value);
+  return Number.isSafeInteger(index) ? state.detailVersions[index] ?? null : null;
+}
+
+function renderDetailVersionControl(): void {
+  const versions = state.detailVersions;
+  const current = detailVersionSelect.value;
+  detailVersionSelect.replaceChildren();
+  const auto = document.createElement("option");
+  auto.value = "auto";
+  auto.textContent = "Auto / Best Available";
+  detailVersionSelect.append(auto);
+  versions.forEach((version, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = version.label;
+    option.title = [version.container, version.size ? formatBytes(version.size) : ""].filter(Boolean).join(" • ");
+    detailVersionSelect.append(option);
+  });
+  detailVersionSelect.value = [...detailVersionSelect.options].some((option) => option.value === current) ? current : "auto";
+  const joined = Boolean(state.watchParties?.joinedGroup);
+  if (joined) detailVersionSelect.value = "auto";
+  detailVersionControl.classList.toggle("is-hidden", versions.length <= 1);
+  detailVersionSelect.disabled = versions.length <= 1 || joined;
+  detailVersionNote.textContent = joined && versions.length > 1
+    ? "Specific versions are unavailable in a Watch Party; Auto keeps every participant on Jellyfin's shared item."
+    : "";
 }
 
 function metadataParts(item: MediaItem): string[] {
@@ -2052,7 +2091,7 @@ function renderConnectionFailure(): void {
     const byItemId = new Map(state.offlinePlayable.map((entry) => [entry.item.id, entry]));
     homeRows.append(createMediaRow({
       title: "Local playback available",
-      items: state.offlinePlayable.map((entry) => entry.item),
+      items: groupMovieVersions(state.offlinePlayable.map((entry) => entry.item)),
       shape: "landscape",
     }, (item) => {
       const local = byItemId.get(item.id);
@@ -2293,6 +2332,7 @@ function renderDetails(item: MediaItem): void {
     button.addEventListener("click", () => { void openBrowse(`Genre: ${genre}`, { type: "Mixed", genre, sort: "title-ascending", startIndex: 0, limit: 60 }); });
     detailGenres.append(button);
   }
+  renderDetailVersionControl();
   detailPeople.replaceChildren();
   detailCast.classList.toggle("is-hidden", !(item.people?.length));
   for (const person of presentPeople(item.people ?? [])) {
@@ -2312,7 +2352,7 @@ function renderDetails(item: MediaItem): void {
   const downloadable = item.type === "Movie" || item.type === "Episode";
   detailDownloadButton.disabled = !downloadable;
   detailDownloadButton.dataset.downloadItem = downloadable ? item.id : "";
-  detailDownloadButton.onclick = downloadable ? () => startDownload(item) : null;
+  detailDownloadButton.onclick = downloadable ? () => startDownload(item, selectedDetailVersion()) : null;
   detailTrailerButton.disabled = !item.hasTrailer;
   detailTrailerButton.onclick = item.hasTrailer
     ? () => { void openTrailer(item.id); }
@@ -2488,7 +2528,7 @@ async function setWatchedState(item: MediaItem, watched: boolean, button: HTMLBu
 function updateDetailPlayButton(): void {
   const item = state.detailPlayItem;
   detailPlayButton.disabled = !item;
-  detailPlayButton.onclick = item ? () => playItem(item) : null;
+  detailPlayButton.onclick = item ? () => playItem(item, selectedDetailVersion()) : null;
   if (!item) {
     detailPlayLabel.textContent = state.detailItem?.type === "Series" ? "Loading" : "Play";
     return;
@@ -2510,6 +2550,8 @@ async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): P
   const requestId = state.detailsRequestId;
   state.seasons = [];
   state.episodes = [];
+  state.detailVersions = [];
+  detailVersionSelect.value = "auto";
   episodeSection.classList.add("is-hidden");
   renderDetails(item);
   setRoute("details");
@@ -2518,7 +2560,13 @@ async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): P
       ? item
       : await window.jellyfin.items.getDetails({ itemId: item.id });
     if (requestId !== state.detailsRequestId) return;
-    renderDetails(fullItem);
+    const versionItemIds = [...new Set((item.mediaVersions?.length ? item.mediaVersions : fullItem.mediaVersions ?? []).map((version) => version.itemId))];
+    const versions = fullItem.type === "Movie" && versionItemIds.length
+      ? await window.jellyfin.mediaSources.getVersions({ itemIds: versionItemIds }).catch(() => fullItem.mediaVersions ?? item.mediaVersions ?? [])
+      : [];
+    if (requestId !== state.detailsRequestId) return;
+    state.detailVersions = versions;
+    renderDetails({ ...fullItem, mediaVersions: versions });
     if (fullItem.type === "Series") await loadSeriesSeasons(fullItem, requestId, options.preferredSeasonId);
   } catch (error) {
     showToast(errorMessage(error, "Details could not be loaded."));
@@ -2766,7 +2814,7 @@ async function refreshLibrary(library: LibrarySummary, showLoading = false): Pro
   if (!type) return;
   const cachedItems = state.libraryCache.get(library.id);
   if (library.id === DOWNLOADED_LIBRARY_ID) {
-    const items = state.offlinePlayable.map((entry) => entry.item);
+    const items = groupMovieVersions(state.offlinePlayable.map((entry) => entry.item));
     state.libraryCache.set(library.id, items);
     if ((!cachedItems || !mediaItemsEqual(cachedItems, items))
       && state.currentRoute === "library"
@@ -3306,7 +3354,7 @@ async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<
 
 function syncDownloadedLibrary(): void {
   const previousItems = state.libraryCache.get(DOWNLOADED_LIBRARY_ID);
-  const items = state.offlinePlayable.map((entry) => entry.item);
+  const items = groupMovieVersions(state.offlinePlayable.map((entry) => entry.item));
   const changed = previousItems
     ? !mediaItemsEqual(previousItems, items)
     : items.length > 0;
@@ -3490,14 +3538,20 @@ async function openDownloadLocation(): Promise<void> {
   }
 }
 
-async function startDownload(item: MediaItem): Promise<void> {
-  const existing = downloadForItem(item.id);
+async function startDownload(item: MediaItem, version: MediaVersion | null = null): Promise<void> {
+  const targetItemId = version?.itemId ?? item.id;
+  const existing = state.downloads.find((download) => download.itemId === targetItemId
+    && (!version || download.mediaSourceId === version.mediaSourceId)
+    && download.state !== "missing");
   if (existing) {
     openDownloads();
     return;
   }
   try {
-    const download = await window.jellyfin.downloads.start({ itemId: item.id });
+    const download = await window.jellyfin.downloads.start({
+      itemId: targetItemId,
+      ...(version ? { preferredMediaSourceId: version.mediaSourceId } : {}),
+    });
     state.downloads = [download, ...state.downloads.filter((entry) => entry.downloadId !== download.downloadId)];
     renderDownloads();
     syncVisibleDownloadButtons();
@@ -3551,7 +3605,7 @@ function renderDownloads(): void {
     card.className = "download-card";
     heading.className = "download-card-heading";
     title.textContent = download.name;
-    type.textContent = download.smartManaged ? `${download.itemType} · Smart download` : download.itemType;
+    type.textContent = [download.itemType, download.versionLabel, download.smartManaged ? "Smart download" : ""].filter(Boolean).join(" · ");
     type.classList.toggle("smart-download-badge", download.smartManaged);
     status.className = "download-status";
     status.textContent = download.state;
@@ -3670,6 +3724,8 @@ interface PlaybackPresentation {
   failureMessage: string;
   liveChannelId?: string;
   progressiveOnly?: boolean;
+  preferredMediaSourceId?: string;
+  versionLabel?: string;
 }
 
 let playerViewportRevision = 0;
@@ -4006,6 +4062,7 @@ function renderPlayerMetadata(): void {
   const pills = [
     item && itemYear(item) ? String(itemYear(item)) : null,
     item ? runtime(item) : null,
+    diagnostics?.versionLabel,
     diagnostics?.resolution,
     diagnostics?.container?.toUpperCase() || null,
     diagnostics?.videoCodec?.toUpperCase() || null,
@@ -4330,6 +4387,7 @@ function renderSoloSessionPanel(): void {
   ]);
 
   appendSessionSection("Media", [
+    ...(diagnostics?.versionLabel ? [{ label: "Version", value: diagnostics.versionLabel }] : []),
     ...(diagnostics?.container ? [{ label: "Container", value: diagnostics.container.toUpperCase() }] : []),
     ...(diagnostics?.resolution ? [{ label: "Resolution", value: diagnostics.resolution }] : []),
     ...(diagnostics?.videoCodec ? [{ label: "Video", value: diagnostics.videoCodec.toUpperCase() }] : []),
@@ -4861,6 +4919,7 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
       : await window.jellyfin.playback.start({
         itemId: presentation.itemId,
         resumeMode: presentation.resumeMode,
+        ...(presentation.preferredMediaSourceId ? { preferredMediaSourceId: presentation.preferredMediaSourceId } : {}),
         ...(presentation.progressiveOnly ? { progressiveOnly: true } : {}),
       });
     await refreshPlayerAdapterPreference();
@@ -4878,6 +4937,9 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   state.playbackId = resolved.playbackId;
   state.playbackSource = resolved.source;
   state.playbackSourceKind = resolved.sourceKind;
+  if (resolved.mediaVersion?.label || presentation.versionLabel) {
+    playerMeta.textContent = [presentation.meta, resolved.mediaVersion?.label ?? presentation.versionLabel].filter(Boolean).join(" • ");
+  }
     state.playbackState = await window.jellyfin.playback.getState().catch(() => null);
   if (resolved.notice) showToast(resolved.notice);
   renderPlayerState();
@@ -4997,17 +5059,21 @@ async function playOfflineItem(entry: OfflinePlayableSummary): Promise<void> {
   });
 }
 
-async function playItem(item: MediaItem): Promise<void> {
+async function playItem(item: MediaItem, version: MediaVersion | null = null): Promise<void> {
   if (!canPlay(item)) return;
+  const targetItemId = version?.itemId ?? item.id;
   await startPresentedPlayback({
     item,
-    itemId: item.id,
-    resumeMode: item.userData.playbackPositionTicks > 0 ? "resume" : "start-over",
+    itemId: targetItemId,
+    // An alternate item ID owns its own Jellyfin progress. Let the main-side
+    // details lookup resolve that selected item's resume position.
+    resumeMode: version ? "resume" : item.userData.playbackPositionTicks > 0 ? "resume" : "start-over",
     title: item.type === "Episode" && item.seriesName ? item.seriesName : item.name || "Now Playing",
     meta: item.type === "Episode"
       ? [episodeCode(item), item.name].filter(Boolean).join(" - ")
       : metadataParts(item).join(" - "),
     failureMessage: "Playback could not be started.",
+    ...(version ? { preferredMediaSourceId: version.mediaSourceId, versionLabel: version.label } : {}),
   });
 }
 
@@ -5504,6 +5570,13 @@ cancelDownloadedSelectionButton.addEventListener("click", () => {
 });
 deleteSelectedDownloadedButton.addEventListener("click", () => { void deleteSelectedDownloads(); });
 detailsBackButton.addEventListener("click", returnFromDetails);
+detailVersionSelect.addEventListener("change", () => {
+  updateDetailPlayButton();
+  if (state.detailItem) {
+    detailDownloadButton.onclick = () => startDownload(state.detailItem as MediaItem, selectedDetailVersion());
+    syncVisibleDownloadButtons();
+  }
+});
 seasonSelect.addEventListener("change", () => {
   if (state.detailItem?.type === "Series") loadEpisodes(state.detailItem.id, seasonSelect.value);
 });
@@ -6100,6 +6173,7 @@ window.jellyfin.smartDownloads.subscribe((smartDownloads) => {
 window.jellyfin.watchParties.subscribe((watchParties) => {
   state.watchParties = watchParties;
   if (state.currentRoute === "watch-parties") renderWatchParties();
+  if (state.currentRoute === "details") renderDetailVersionControl();
   if (!playerView.classList.contains("is-hidden")) renderPlayerState();
 });
 

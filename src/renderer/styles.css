@@ -1771,6 +1771,28 @@ button.danger:hover:not(:disabled) {
   min-width: 116px;
 }
 
+.detail-version-control {
+  display: grid;
+  gap: 0.35rem;
+  max-width: min(42rem, 100%);
+  margin: 1rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.detail-version-control select {
+  width: 100%;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.7rem;
+  background: rgba(10, 12, 20, 0.82);
+  color: var(--text);
+}
+
+.detail-version-control small { color: var(--muted); font-weight: 500; letter-spacing: 0; }
+
 .episode-section {
   margin: 0 auto;
   max-width: 1500px;

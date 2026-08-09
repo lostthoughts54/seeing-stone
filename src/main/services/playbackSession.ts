@@ -6,6 +6,7 @@ import type {
   PlaybackState,
 } from "../../shared/contracts";
 import { AppError } from "./errors";
+import { formatMediaVersionLabel } from "../../shared/mediaVersions";
 import type { SqlitePersistenceService } from "./persistence";
 import type { ProgressiveDownloadLease, ProgressiveDownloadProvider } from "./progressiveDownload";
 import type {
@@ -52,6 +53,7 @@ interface PlaybackRecord {
   liveStreamId: string | null;
   negotiatedLiveStreamUrl: string | null;
   progressiveLease: ProgressiveDownloadLease | null;
+  preferredMediaSourceId: string | null;
 }
 
 export interface ResolvedPlaybackSource extends PlaybackStartResult {
@@ -82,6 +84,7 @@ export interface LocalSourceResolver {
     itemId: string,
     resumeMode: "resume" | "start-over",
     excludedLocalVersionIds?: ReadonlySet<string>,
+    preferredMediaSourceId?: string,
   ): Promise<ResolvedPlaybackSource | null>;
 }
 
@@ -162,7 +165,7 @@ export class PlaybackSessionService {
   async start(
     itemId: string,
     resumeMode: "resume" | "start-over",
-    options: { skipLocal?: boolean; skipProgressive?: boolean; requireProgressive?: boolean; preserveLocalExclusions?: boolean } = {},
+    options: { skipLocal?: boolean; skipProgressive?: boolean; requireProgressive?: boolean; preserveLocalExclusions?: boolean; preferredMediaSourceId?: string } = {},
   ): Promise<ResolvedPlaybackSource> {
     const skipProgressiveOnce = this.skipProgressiveOnceItems.delete(itemId);
     const revision = ++this.revision;
@@ -173,7 +176,9 @@ export class PlaybackSessionService {
     this.state = state({ itemId, phase: "resolving" });
     const local = options.skipLocal
       ? null
-      : await this.localResolver?.resolve(itemId, resumeMode, this.excludedLocalVersionIds).catch(() => null) ?? null;
+      : await (options.preferredMediaSourceId
+        ? this.localResolver?.resolve(itemId, resumeMode, this.excludedLocalVersionIds, options.preferredMediaSourceId)
+        : this.localResolver?.resolve(itemId, resumeMode, this.excludedLocalVersionIds))?.catch(() => null) ?? null;
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     if (local) {
       let externalSubtitleTracks: ExternalSubtitleTrack[] = [];
@@ -208,6 +213,7 @@ export class PlaybackSessionService {
         liveStreamId: null,
         negotiatedLiveStreamUrl: null,
         progressiveLease: null,
+        preferredMediaSourceId: options.preferredMediaSourceId ?? null,
       };
       this.state = state({
         playbackId: resolvedLocal.playbackId,
@@ -220,7 +226,9 @@ export class PlaybackSessionService {
       return resolvedLocal;
     }
     if (!options.skipProgressive && !skipProgressiveOnce) {
-      const lease = await this.progressiveProvider?.acquireProgressive(itemId).catch(() => null) ?? null;
+      const lease = await (options.preferredMediaSourceId
+        ? this.progressiveProvider?.acquireProgressive(itemId, options.preferredMediaSourceId)
+        : this.progressiveProvider?.acquireProgressive(itemId))?.catch(() => null) ?? null;
       if (lease) {
         if (revision !== this.revision) {
           lease.release();
@@ -265,6 +273,7 @@ export class PlaybackSessionService {
           liveStreamId: null,
           negotiatedLiveStreamUrl: null,
           progressiveLease: lease,
+          preferredMediaSourceId: options.preferredMediaSourceId ?? null,
         };
         this.state = state({
           playbackId,
@@ -338,22 +347,32 @@ export class PlaybackSessionService {
       throw new AppError("MEDIA_IDENTITY_MISMATCH", "Jellyfin returned a different media item.", 502);
     }
     const capabilities = sourceInfo.capabilities;
-    const directPlaySource = capabilities.sources.find((entry) => entry.supportsDirectPlay);
+    const preferredSource = options.preferredMediaSourceId
+      ? capabilities.sources.find((entry) => entry.id === options.preferredMediaSourceId)
+      : undefined;
+    if (options.preferredMediaSourceId && !preferredSource) {
+      this.state = state({ itemId, phase: "error", error: "That movie version is no longer available." });
+      throw new AppError("MEDIA_SOURCE_STALE", "That movie version is no longer available. Choose Auto or another version.", 409);
+    }
+    const directPlaySource = preferredSource?.supportsDirectPlay
+      ? preferredSource
+      : options.preferredMediaSourceId ? undefined : capabilities.sources.find((entry) => entry.supportsDirectPlay);
     const directStreamSource = this.api.fetchDirectStream
-      ? capabilities.sources.find((entry) => entry.supportsDirectStream)
+      ? preferredSource?.supportsDirectStream ? preferredSource
+        : options.preferredMediaSourceId ? undefined : capabilities.sources.find((entry) => entry.supportsDirectStream)
       : undefined;
     const directSource = directPlaySource ?? directStreamSource;
-    const source = directSource
+    const source = preferredSource ?? directSource
       ?? capabilities.sources.find((entry) => entry.supportsTranscoding)
       ?? capabilities.sources[0];
     if (!source) {
       this.state = state({ itemId, phase: "error", error: "No playable media source is available." });
       throw new AppError("NO_MEDIA_SOURCE", "No playable media source is available.", 422);
     }
-    const delivery = source === directSource ? "direct" : "transcode";
+    const delivery = source.supportsDirectPlay || (Boolean(this.api.fetchDirectStream) && source.supportsDirectStream) ? "direct" : "transcode";
     const sourceKind = source === directPlaySource
       ? "direct-play"
-      : source === directStreamSource ? "direct-stream" : "transcode";
+      : source === directStreamSource || (!source.supportsDirectPlay && Boolean(this.api.fetchDirectStream) && source.supportsDirectStream) ? "direct-stream" : "transcode";
     if (delivery === "transcode" && !source.supportsTranscoding) {
       this.state = state({ itemId, phase: "error", error: "This media requires server transcoding, but transcoding is unavailable." });
       throw new AppError("TRANSCODING_UNAVAILABLE", "This media requires server transcoding, but transcoding is unavailable.", 422);
@@ -380,6 +399,25 @@ export class PlaybackSessionService {
       bitrate: source.bitrate ?? null,
       videoRange: source.videoRange ?? null,
       transcodeReason: sourceKind === "transcode" ? source.transcodeReason ?? null : null,
+      mediaSourceId: source.id,
+      versionLabel: formatMediaVersionLabel({
+        itemId,
+        mediaSourceId: source.id,
+        name: source.name ?? null,
+        container: source.container,
+        width: source.width ?? null,
+        height: source.height ?? null,
+        videoCodec: source.videoCodec ?? null,
+        audioCodec: source.audioCodec ?? null,
+        audioChannels: source.audioChannels ?? null,
+        bitrate: source.bitrate ?? null,
+        size: source.size,
+        videoRange: source.videoRange ?? null,
+        runtimeTicks: details.runTimeTicks,
+        supportsDirectPlay: source.supportsDirectPlay,
+        supportsDirectStream: source.supportsDirectStream,
+        supportsTranscoding: source.supportsTranscoding,
+      }),
     };
     if (this.persistence && !isLive) {
       await this.persistence.upsertMediaItem({
@@ -432,6 +470,7 @@ export class PlaybackSessionService {
       liveStreamId: sourceInfo.liveStreamId,
       negotiatedLiveStreamUrl,
       progressiveLease: null,
+      preferredMediaSourceId: options.preferredMediaSourceId ?? null,
     };
     this.state = state({ playbackId, itemId, phase: "loading", source: "server", durationTicks, contentKind: isLive ? "live-tv" : "on-demand" });
     return {
@@ -453,6 +492,25 @@ export class PlaybackSessionService {
       initialAction: initialAction(resumeMode, previous.played, previous.positionTicks),
       contentKind: isLive ? "live-tv" : "on-demand",
       liveStreamId: sourceInfo.liveStreamId,
+      mediaVersion: {
+        itemId,
+        mediaSourceId: source.id,
+        name: source.name ?? null,
+        label: diagnostics.versionLabel ?? "Media version",
+        container: source.container,
+        width: source.width ?? null,
+        height: source.height ?? null,
+        videoCodec: source.videoCodec ?? null,
+        audioCodec: source.audioCodec ?? null,
+        audioChannels: source.audioChannels ?? null,
+        bitrate: source.bitrate ?? null,
+        size: source.size,
+        videoRange: source.videoRange ?? null,
+        runtimeTicks: details.runTimeTicks,
+        supportsDirectPlay: source.supportsDirectPlay,
+        supportsDirectStream: source.supportsDirectStream,
+        supportsTranscoding: source.supportsTranscoding,
+      },
     };
   }
 
@@ -474,6 +532,7 @@ export class PlaybackSessionService {
       skipLocal: playback.localVersionId === null && !progressiveFailure,
       skipProgressive: progressiveFailure,
       preserveLocalExclusions: true,
+      preferredMediaSourceId: playback.preferredMediaSourceId ?? undefined,
     });
   }
 

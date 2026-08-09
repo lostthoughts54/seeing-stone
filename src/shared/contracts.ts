@@ -58,6 +58,32 @@ export interface MediaItem {
   userData: SafeUserData;
   hasTrailer: boolean;
   playable: boolean;
+  /** Sanitized stable movie identifiers. Never contains paths, URLs, or credentials. */
+  providerIds?: Record<string, string>;
+  /** Optional server/plugin grouping identity when a Jellyfin-compatible endpoint exposes it. */
+  presentationUniqueKey?: string | null;
+  /** Playable versions already proven to belong to this logical movie. */
+  mediaVersions?: MediaVersion[];
+}
+
+export interface MediaVersion {
+  itemId: string;
+  mediaSourceId: string;
+  name: string | null;
+  label: string;
+  container: string | null;
+  width: number | null;
+  height: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  audioChannels: string | null;
+  bitrate: number | null;
+  size: number | null;
+  videoRange: string | null;
+  runtimeTicks: number | null;
+  supportsDirectPlay: boolean;
+  supportsDirectStream: boolean;
+  supportsTranscoding: boolean;
 }
 
 export interface LibrarySummary {
@@ -102,6 +128,7 @@ export interface MediaSourceCapabilities {
   itemId: string;
   sources: Array<{
     id: string;
+    name?: string | null;
     container: string | null;
     size: number | null;
     supportsDirectPlay: boolean;
@@ -137,6 +164,7 @@ export interface PlaybackStartResult {
   source: "server" | "local";
   sourceKind: PlaybackSourceKind;
   notice?: string | null;
+  mediaVersion?: MediaVersion | null;
 }
 
 export type PlaybackSourceKind = "matched-local" | "downloaded" | "downloading" | "direct-play" | "direct-stream" | "transcode" | "offline-local";
@@ -153,6 +181,8 @@ export interface PlaybackDiagnostics {
   bitrate: number | null;
   videoRange: string | null;
   transcodeReason: string | null;
+  mediaSourceId?: string | null;
+  versionLabel?: string | null;
   /** Sanitized embedded renderer profile; never contains device or driver names. */
   videoOutput?: "d3d11" | "opengl-software" | "libmpv-opengl-angle" | null;
   videoOutputHealthy?: boolean | null;
@@ -374,6 +404,8 @@ export type DownloadState = "queued" | "downloading" | "paused" | "downloaded" |
 export interface DownloadSummary {
   downloadId: string;
   itemId: string;
+  mediaSourceId?: string | null;
+  versionLabel?: string | null;
   name: string;
   itemType: "Movie" | "Episode" | "Video";
   /** Full sanitized cache entry; never contains a local path or Jellyfin URL. */
@@ -414,6 +446,7 @@ export type RpcResult<T> =
 export interface ServerUrlInput { url: string }
 export interface LoginInput { connectionId: string; username: string; password: string; remember: boolean }
 export interface ItemIdInput { itemId: string }
+export interface MovieVersionsInput { itemIds: string[] }
 export interface TrailerOpenInput { itemId: string; openExternally?: boolean }
 
 export interface TrailerOpenResult {
@@ -452,6 +485,7 @@ export interface TrickplayManifest {
 export interface PlaybackStartInput {
   itemId: string;
   resumeMode: "resume" | "start-over";
+  preferredMediaSourceId?: string;
   /** Require an eligible growing download; never fall through to Jellyfin for this attempt. */
   progressiveOnly?: boolean;
 }
@@ -528,7 +562,7 @@ export interface CleanMachineDiagnostics {
 export interface CleanMachineDiagnosticActionResult {
   completed: boolean;
 }
-export interface DownloadStartInput { itemId: string }
+export interface DownloadStartInput { itemId: string; preferredMediaSourceId?: string }
 export interface DownloadIdInput { downloadId: string }
 export interface DownloadKeepInput extends DownloadIdInput { keepDownloaded: boolean }
 export type SmartDownloadStatus = "ready" | "checking" | "offline" | "attention";
@@ -707,6 +741,7 @@ export interface JellyfinBridge {
   };
   mediaSources: {
     getCapabilities(input: ItemIdInput): Promise<MediaSourceCapabilities>;
+    getVersions(input: MovieVersionsInput): Promise<MediaVersion[]>;
   };
   liveTv: {
     getStatus(): Promise<LiveTvStatus>;
@@ -817,6 +852,7 @@ export const IPC = {
   playbackFeaturesGetTrickplayManifest: "playback-features:get-trickplay-manifest",
   playbackFeaturesGetTrickplaySpriteUrl: "playback-features:get-trickplay-sprite-url",
   mediaSourcesGetCapabilities: "media-sources:get-capabilities",
+  mediaSourcesGetVersions: "media-sources:get-versions",
   liveTvGetStatus: "live-tv:get-status",
   liveTvGetGuide: "live-tv:get-guide",
   liveTvSearchPrograms: "live-tv:search-programs",

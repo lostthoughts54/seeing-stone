@@ -147,7 +147,10 @@ describe("JellyfinApi main-side boundary", () => {
           ? [{ ...unsafeItem, Id: "episode-2", Name: "Episode 2", Type: "Episode", SeriesId: "series-1", SeasonId: "season-2" }]
           : [],
       });
-      if (url.pathname === "/Items/Latest") return Response.json([unsafeItem]);
+      if (url.pathname === "/Items/Latest") return Response.json([
+        { ...unsafeItem, ProviderIds: { Imdb: "tt0133093" } },
+        { ...unsafeItem, Id: "movie-2", ProviderIds: { Imdb: "tt0133093" }, MediaSources: [{ ...unsafeItem.MediaSources[0], Id: "source-2" }] },
+      ]);
       if (url.pathname === "/Users/user-1/Items/movie-1") return Response.json(unsafeItem);
       if (url.pathname === "/Shows/series-1/Seasons") return Response.json({ Items: [{ ...unsafeItem, Id: "season-1", Name: "Season 1", Type: "Season" }] });
       if (url.pathname === "/Shows/series-1/Episodes") return Response.json({ Items: [{ ...unsafeItem, Id: "episode-1", Name: "Episode 1", Type: "Episode", SeriesId: "series-1", SeasonId: "season-1" }] });
@@ -158,7 +161,10 @@ describe("JellyfinApi main-side boundary", () => {
         });
       }
       if (url.pathname.endsWith("/Items") && url.searchParams.get("ParentId")) return Response.json({ Items: [unsafeItem], TotalRecordCount: 61 });
-      if (url.pathname.endsWith("/Items") && url.searchParams.get("SearchTerm")) return Response.json({ Items: [unsafeItem] });
+      if (url.pathname.endsWith("/Items") && url.searchParams.get("SearchTerm")) return Response.json({ Items: [
+        { ...unsafeItem, ProviderIds: { Imdb: "tt0133093" } },
+        { ...unsafeItem, Id: "movie-2", ProviderIds: { Imdb: "tt0133093" }, MediaSources: [{ ...unsafeItem.MediaSources[0], Id: "source-2" }] },
+      ] });
       if (url.pathname.endsWith("/Items") && url.searchParams.get("IncludeItemTypes")) return Response.json({ Items: [unsafeItem] });
       if (url.pathname.endsWith("/PlaybackInfo")) return Response.json({
         MediaSources: unsafeItem.MediaSources,
@@ -312,6 +318,8 @@ describe("JellyfinApi main-side boundary", () => {
       playable: true,
       hasTrailer: true,
     });
+    expect(home.latestRows[0].items).toHaveLength(1);
+    expect(home.latestRows[0].items[0].mediaVersions).toHaveLength(2);
     expect(libraries[0]).toEqual({ id: "library-1", name: "Movies", collectionType: "movies" });
     expect(libraryItems[0].id).toBe("movie-1");
     expect(libraryPage).toMatchObject({ totalRecordCount: 61, items: [{ id: "movie-1" }] });
@@ -321,12 +329,15 @@ describe("JellyfinApi main-side boundary", () => {
     expect(pagedLibraryRequest?.url.searchParams.get("SortOrder")).toBe("Descending");
     expect(pagedLibraryRequest?.url.searchParams.get("EnableTotalRecordCount")).toBe("true");
     expect(searchItems[0].id).toBe("movie-1");
+    expect(searchItems).toHaveLength(1);
+    expect(searchItems[0].mediaVersions).toHaveLength(2);
     expect(details.id).toBe("movie-1");
     expect(seasons[0]).toMatchObject({ id: "season-1", type: "Season" });
     expect(episodes[0]).toMatchObject({ id: "episode-1", type: "Episode", seriesId: "series-1", seasonId: "season-1" });
     expect(nextUp).toMatchObject({ id: "episode-2", type: "Episode", seriesId: "series-1", seasonId: "season-2" });
     expect(capabilities.sources[0]).toEqual({
       id: "source-1",
+      name: null,
       container: "mkv",
       size: 123,
       supportsDirectPlay: true,

@@ -140,6 +140,27 @@ function harness(options: {
 }
 
 describe("LocalPlaybackResolver", () => {
+  it("uses only the local copy matching an explicit media source", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-version-"));
+    const firstPath = join(root, "first", "media.mkv");
+    const secondPath = join(root, "second", "media.mkv");
+    await mkdir(join(root, "first"));
+    await mkdir(join(root, "second"));
+    await writeFile(firstPath, Buffer.alloc(100, 1));
+    await writeFile(secondPath, Buffer.alloc(100, 2));
+    const versions = [
+      localVersion(root, firstPath, { localVersionId: "first", mediaSourceId: "source-1" }),
+      localVersion(root, secondPath, { localVersionId: "second", mediaSourceId: "source-2", updatedAt: 2 }),
+    ];
+    const value = harness({ root, versions });
+
+    const selected = await value.resolver.resolve("episode-1", "resume", new Set(), "source-2");
+    const missing = await value.resolver.resolve("episode-1", "resume", new Set(), "source-gone");
+
+    expect(selected).toMatchObject({ localVersionId: "second", mediaSourceId: "source-2", mediaUrl: secondPath });
+    expect(missing).toBeNull();
+  });
+
   it("selects an exact finalized local version and preserves authoritative server resume metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "lf-local-resolver-"));
     const target = join(root, "download-1", "media.mkv");

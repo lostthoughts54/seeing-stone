@@ -62,6 +62,25 @@ describe("PlaybackCommandService Companion presentation", () => {
       requireProgressive: true,
     });
   });
+
+  it("forwards an explicit movie version only for that local start", async () => {
+    const { service, player } = harness();
+    await service.start(item.id, "resume", false, "local-user", false, "source-4k");
+    expect(player.loadItem).toHaveBeenCalledWith(item.id, "resume", {
+      origin: "local-user",
+      preferredMediaSourceId: "source-4k",
+    });
+  });
+
+  it("rejects explicit version starts while joined to a watch party", async () => {
+    const { service, player } = harness();
+    const selectItem = vi.fn();
+    service.setSyncPlay({ isJoined: () => true, selectItem } as never);
+    await expect(service.start(item.id, "start-over", false, "local-user", false, "source-4k"))
+      .rejects.toMatchObject({ code: "MOVIE_VERSION_WATCH_PARTY_UNAVAILABLE" });
+    expect(selectItem).not.toHaveBeenCalled();
+    expect(player.loadItem).not.toHaveBeenCalled();
+  });
 });
 
 describe("PlaybackCommandService seek identity", () => {

@@ -7,6 +7,7 @@ import type {
   BrowseQuery,
   BrowsePage,
   MediaItem,
+  MediaVersion,
   PersonMediaResult,
   PlaybackMediaSegment,
   PlaybackMediaSegmentType,
@@ -27,6 +28,7 @@ import type {
 } from "../../shared/contracts";
 import { groupPersonMediaResults } from "../../shared/personPresentation";
 import { searchLiveTvGuide } from "../../shared/liveTvSearch";
+import { groupMovieVersions, versionsFromCapabilities } from "../../shared/mediaVersions";
 import type { PlaybackActionKind } from "./persistenceTypes";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
@@ -53,6 +55,7 @@ const ITEM_FIELDS = [
   "OfficialRating",
   "CommunityRating",
   "People",
+  "ProviderIds",
 ].join(",");
 
 type JsonRecord = Record<string, unknown>;
@@ -129,6 +132,27 @@ const safeDiagnosticToken = (value: unknown, maximum = 64): string | null =>
 const safeDiagnosticPhrase = (value: unknown, maximum = 256): string | null =>
   safeDiagnostic(value, maximum, /^[A-Za-z0-9][A-Za-z0-9 .,_+():~-]*$/);
 
+function safeVersionName(value: unknown): string | null {
+  const result = asString(value).replace(/\0/g, "").trim().slice(0, 80);
+  if (!result || SENSITIVE_DIAGNOSTIC.test(result) || /[\\/]/.test(result)
+    || /\.(?:mkv|mp4|m4v|mov|avi|ts|m2ts|webm)$/i.test(result)
+    || !/[\p{L}\p{N}]/u.test(result)) return null;
+  return result;
+}
+
+function safeProviderIds(value: unknown): Record<string, string> {
+  const providers = asRecord(value);
+  const result: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(providers)) {
+    const key = rawKey.trim().slice(0, 32);
+    const id = asString(rawValue).trim().slice(0, 128);
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(key)
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) continue;
+    result[key] = id;
+  }
+  return result;
+}
+
 function transcodeReasonsFromUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 16_384) return null;
   try {
@@ -201,6 +225,7 @@ function mediaSourceCapabilities(itemId: string, value: unknown): MediaSourceCap
       const transcodeReasons = declaredTranscodeReasons ?? transcodeReasonsFromUrl(source.TranscodingUrl);
       return {
         id: safeOpaqueIdentifier(source.Id) ?? "",
+        name: safeVersionName(source.Name),
         container: safeDiagnosticToken(source.Container),
         size: nullableNumber(source.Size),
         supportsDirectPlay: source.SupportsDirectPlay === true,
@@ -296,8 +321,10 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
   const remoteTrailers = Array.isArray(item.RemoteTrailers) ? item.RemoteTrailers : [];
   const type = asString(item.Type, "Video") as MediaItem["type"];
   const people = Array.isArray(item.People) ? item.People : [];
+  const id = asString(item.Id);
+  const capabilities = mediaSourceCapabilities(id, item);
   return {
-    id: asString(item.Id),
+    id,
     name: asString(item.Name, "Untitled"),
     type: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video", "TvChannel", "Program"].includes(type) ? type : "Video",
     overview: asString(item.Overview),
@@ -338,6 +365,12 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
       try { return ["http:", "https:"].includes(new URL(url).protocol); } catch { return false; }
     }),
     playable: type === "Movie" || type === "Episode" || type === "Video" || type === "TvChannel",
+    providerIds: safeProviderIds(item.ProviderIds),
+    presentationUniqueKey: safeOpaqueIdentifier(item.PresentationUniqueKey),
+    mediaVersions: type === "Movie" ? versionsFromCapabilities(capabilities).map((version) => ({
+      ...version,
+      runtimeTicks: nullableNumber(item.RunTimeTicks),
+    })) : undefined,
   };
 }
 
@@ -741,17 +774,17 @@ export class JellyfinApi {
           ParentId: library.id,
           GroupItems: "true",
           Fields: ITEM_FIELDS,
-          Limit: "20",
+          Limit: library.collectionType === "movies" ? "60" : "20",
         })),
     ]);
     const rowLibraries = libraries.filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows");
     const latestRows = rowLibraries.map((library, index) => ({
       library,
-      items: (Array.isArray(latestResults[index]) ? latestResults[index] : []).map(sanitizeMediaItem),
+      items: groupMovieVersions((Array.isArray(latestResults[index]) ? latestResults[index] : []).map(sanitizeMediaItem)).slice(0, 20),
     }));
     return {
       libraries,
-      resumeItems: this.items(asRecord(resumeResult)).map(sanitizeMediaItem),
+      resumeItems: groupMovieVersions(this.items(asRecord(resumeResult)).map(sanitizeMediaItem)),
       nextUpItems: this.items(asRecord(nextUpResult)).map(sanitizeMediaItem),
       latestRows,
     };
@@ -782,7 +815,7 @@ export class JellyfinApi {
       Fields: ITEM_FIELDS,
       Limit: String(limit),
     }));
-    return this.items(result).map(sanitizeMediaItem);
+    return groupMovieVersions(this.items(result).map(sanitizeMediaItem));
   }
 
   async getLibraryItemsPage(
@@ -851,7 +884,7 @@ export class JellyfinApi {
       const items = await this.getItemsByIds(seriesIds.slice(offset, offset + 50));
       for (const item of items) if (item.type === "Series") resolved.set(item.id, item);
     }
-    return groupPersonMediaResults(movies, series, episodes, resolved);
+    return groupPersonMediaResults(groupMovieVersions(movies), series, episodes, resolved);
   }
 
   private async getAllPersonItems(personId: string, type: "Movie" | "Series" | "Episode"): Promise<MediaItem[]> {
@@ -890,9 +923,9 @@ export class JellyfinApi {
       Recursive: "true",
       IncludeItemTypes: "Movie,Series,Episode",
       Fields: ITEM_FIELDS,
-      Limit: "60",
+      Limit: "180",
     }));
-    return this.items(result).map(sanitizeMediaItem);
+    return groupMovieVersions(this.items(result).map(sanitizeMediaItem)).slice(0, 60);
   }
 
   async getDetails(itemId: string): Promise<MediaItem> {
@@ -1146,6 +1179,22 @@ export class JellyfinApi {
 
   async getMediaSourceCapabilities(itemId: string, signal?: AbortSignal): Promise<MediaSourceCapabilities> {
     return mediaSourceCapabilities(itemId, await this.requestPlaybackInfo(itemId, signal));
+  }
+
+  async getMovieVersions(requestedItemIds: string[]): Promise<MediaVersion[]> {
+    const itemIds = [...new Set(requestedItemIds)].slice(0, 32);
+    if (!itemIds.length) throw new AppError("MOVIE_VERSION_INVALID", "No movie version was requested.", 400);
+    const items = await Promise.all(itemIds.map((itemId) => this.getDetails(itemId)));
+    if (items.some((item) => item.type !== "Movie")) {
+      throw new AppError("MOVIE_VERSION_INVALID", "Version selection is available only for movies.", 400);
+    }
+    if (items.length > 1 && groupMovieVersions(items).length !== 1) {
+      throw new AppError("MOVIE_VERSION_IDENTITY_MISMATCH", "Those movie versions do not share an authoritative identity.", 409);
+    }
+    const capabilities = await Promise.all(items.map((item) => this.getMediaSourceCapabilities(item.id)));
+    return capabilities.flatMap((entry, index) => versionsFromCapabilities(entry)
+      .filter((version) => version.supportsDirectPlay || version.supportsDirectStream || version.supportsTranscoding)
+      .map((version) => ({ ...version, runtimeTicks: items[index].runTimeTicks })));
   }
 
   async getPlaybackSourceInfo(itemId: string, signal?: AbortSignal): Promise<PlaybackSourceInfo> {

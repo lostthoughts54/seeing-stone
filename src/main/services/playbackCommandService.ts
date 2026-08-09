@@ -53,19 +53,25 @@ export class PlaybackCommandService {
     preserveQueue = false,
     origin: PlayerActionOrigin = "companion",
     requireProgressive = false,
+    preferredMediaSourceId?: string,
   ): Promise<PlaybackStartResult> {
     if (requireProgressive && this.syncPlay?.isJoined()) {
       throw new AppError("PROGRESSIVE_SYNCPLAY_UNAVAILABLE", "Watch while downloading is unavailable in a watch party.", 409);
     }
     if (this.syncPlay?.isJoined()) {
+      if (preferredMediaSourceId) {
+        throw new AppError("MOVIE_VERSION_WATCH_PARTY_UNAVAILABLE", "Specific movie versions are unavailable in a watch party. Choose Auto / Best Available.", 409);
+      }
       const result = await this.syncPlay.selectItem(itemId, resumeMode);
       await this.enterCompanionFullscreen(result, origin);
       return result;
     }
     const item = await this.api.getDetails(itemId);
-    const result = await this.player.loadItem(itemId, resumeMode, requireProgressive
-      ? { origin, requireProgressive: true }
-      : { origin });
+    const result = await this.player.loadItem(itemId, resumeMode, {
+      origin,
+      ...(requireProgressive ? { requireProgressive: true } : {}),
+      ...(preferredMediaSourceId ? { preferredMediaSourceId } : {}),
+    });
     if (!preserveQueue) await this.queue.reset(item);
     await this.enterCompanionFullscreen(result, origin);
     return result;
