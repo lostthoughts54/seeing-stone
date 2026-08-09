@@ -351,6 +351,13 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("const activeAction = activeElement?.dataset.sessionAction");
   });
 
+  it("keeps Watch Party timing controls in the local Earlier/Later sign convention", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain('earlier.addEventListener("click", () => { void setWatchPartySyncOffset(Math.min(2000, offset + 100), earlier); });');
+    expect(renderer).toContain('later.addEventListener("click", () => { void setWatchPartySyncOffset(Math.max(-2000, offset - 100), later); });');
+    expect(renderer).toContain('reset.addEventListener("click", () => { void setWatchPartySyncOffset(0, reset); });');
+  });
+
   it("preserves a visible safe terminal state after forced player termination", async () => {
     const renderer = await readFile("src/renderer/app.ts", "utf8");
     expect(renderer).toContain("const lostActivePlayback");

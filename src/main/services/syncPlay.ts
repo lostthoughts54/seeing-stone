@@ -418,6 +418,7 @@ export class SyncPlayService {
     await this.preferences?.setWatchPartySyncOffset?.(offsetMilliseconds);
     this.localSyncOffsetMilliseconds = offsetMilliseconds;
     this.setPreparation({ localSyncOffsetMilliseconds: offsetMilliseconds });
+    await this.applyLocalSyncOffsetImmediately().catch((error) => this.handleBackgroundFailure(error));
     await this.correctDrift().catch((error) => this.handleBackgroundFailure(error));
     return this.getState();
   }
@@ -497,11 +498,7 @@ export class SyncPlayService {
       throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
     }
     const playbackId = state.playbackId;
-    const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
-    const targetTicks = Math.min(
-      state.durationTicks || Number.MAX_SAFE_INTEGER,
-      Math.max(0, anchor.positionTicks + elapsedTicks + this.localSyncOffsetMilliseconds * 10_000),
-    );
+    const targetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
     if (this.player.getPlaybackRate() !== 1) state = await this.player.setPlaybackRate(playbackId, 1, context);
     if (!state.paused) state = await this.player.setPaused(playbackId, true, context);
     state = await this.player.seek(playbackId, targetTicks, context);
@@ -726,8 +723,18 @@ export class SyncPlayService {
       const serverNow = Date.now() + this.serverTimeOffsetMs;
       const elapsedTicks = Math.max(0, Math.min(5 * TICKS_PER_SECOND, (serverNow - Date.parse(command.When)) * 10_000));
       const targetPosition = basePosition + elapsedTicks;
-      if (Math.abs(state.positionTicks - targetPosition) >= DRIFT_SEEK_TICKS) {
-        await this.player.seek(state.playbackId, targetPosition, context);
+      const startingAnchor: SyncAnchor = {
+        membershipRevision,
+        playlistItemId: command.PlaylistItemId,
+        positionTicks: targetPosition,
+        playing: true,
+        monotonicTimestampMs: performance.now(),
+      };
+      const localTargetPosition = this.localAuthoritativeTargetTicks(startingAnchor, state.durationTicks);
+      const needsOffsetCorrection = this.localSyncOffsetMilliseconds !== 0
+        && Math.abs(state.positionTicks - localTargetPosition) > 0;
+      if (needsOffsetCorrection || Math.abs(state.positionTicks - targetPosition) >= DRIFT_SEEK_TICKS) {
+        await this.player.seek(state.playbackId, localTargetPosition, context);
       }
       await this.player.setPaused(state.playbackId, false, context);
       this.setSyncAnchor(targetPosition, true);
@@ -939,29 +946,62 @@ export class SyncPlayService {
     };
   }
 
+  /**
+   * Calculates this computer's target from the group anchor without changing
+   * the anchor itself. Positive offsets intentionally put this player ahead.
+   */
+  private localAuthoritativeTargetTicks(anchor: SyncAnchor, durationTicks: number): number {
+    const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
+    return Math.min(
+      durationTicks || Number.MAX_SAFE_INTEGER,
+      Math.max(0, Math.round(anchor.positionTicks + elapsedTicks + this.localSyncOffsetMilliseconds * 10_000)),
+    );
+  }
+
+  /** Applies a timing preference to this player only; it never sends a SyncPlay command. */
+  private async applyLocalSyncOffsetImmediately(): Promise<void> {
+    const anchor = this.syncAnchor;
+    const joined = this.state.joinedGroup;
+    const state = this.player.getState();
+    if (
+      !this.hasAuthoritativeTimeline()
+      || !anchor
+      || !joined
+      || !state.playbackId
+      || state.itemId !== joined.currentItemId
+      || state.buffering
+      || (anchor.playing && state.paused)
+    ) return;
+
+    const membershipRevision = this.membershipRevision;
+    const context = {
+      origin: "remote-sync" as const,
+      commandRevision: ++this.commandRevision,
+      commandId: `local-offset:${anchor.playlistItemId}:${this.commandRevision}`,
+    };
+    const targetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
+    if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
+    if (membershipRevision !== this.membershipRevision || !this.hasAuthoritativeTimeline()) return;
+    await this.player.seek(state.playbackId, targetTicks, context);
+  }
+
   private async correctDrift(): Promise<void> {
     if (this.driftCorrectionInFlight) return;
     const anchor = this.syncAnchor;
     const joined = this.state.joinedGroup;
     const state = this.player.getState();
-    if (!anchor || !joined || !state.playbackId || state.buffering || state.paused || !anchor.playing) return;
+    if (!this.hasAuthoritativeTimeline() || !anchor || !joined || !state.playbackId || state.buffering || state.paused || !anchor.playing) return;
     if (anchor.membershipRevision !== this.membershipRevision || anchor.playlistItemId !== this.currentPlaylistItemId) return;
-    const elapsedTicks = Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000);
-    const expectedTicks = Math.min(state.durationTicks || Number.MAX_SAFE_INTEGER, anchor.positionTicks + elapsedTicks);
-    const rawDriftTicks = expectedTicks - state.positionTicks;
-    const driftTicks = rawDriftTicks + this.localSyncOffsetMilliseconds * 10_000;
+    const localTargetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
+    const driftTicks = localTargetTicks - state.positionTicks;
     this.lastDriftTicks = Math.round(driftTicks);
     this.driftMeasuredAtUnixMs = Date.now();
     this.driftCorrectionInFlight = true;
     try {
       const context = { origin: "remote-sync" as const, commandRevision: ++this.commandRevision, commandId: `drift:${anchor.playlistItemId}` };
-      if (Math.abs(rawDriftTicks) >= DRIFT_SEEK_TICKS) {
+      if (Math.abs(driftTicks) >= DRIFT_SEEK_TICKS) {
         if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
-        const adjustedTarget = Math.min(
-          state.durationTicks || Number.MAX_SAFE_INTEGER,
-          Math.max(0, expectedTicks + this.localSyncOffsetMilliseconds * 10_000),
-        );
-        await this.player.seek(state.playbackId, adjustedTarget, context);
+        await this.player.seek(state.playbackId, localTargetTicks, context);
       } else if (Math.abs(driftTicks) >= DRIFT_TOLERANCE_TICKS) {
         const magnitude = Math.abs(driftTicks);
         const adjustment = magnitude >= DRIFT_HIGH_RATE_TICKS
@@ -1034,6 +1074,7 @@ export class SyncPlayService {
       && this.state.joinedGroup
       && this.syncAnchor.membershipRevision === this.membershipRevision
       && this.syncAnchor.playlistItemId === this.currentPlaylistItemId
+      && this.syncAnchor.playlistItemId === this.state.joinedGroup.playlistItemId
     );
   }
 

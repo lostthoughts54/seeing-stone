@@ -573,7 +573,7 @@ describe("SyncPlayService", () => {
     }
   });
 
-  it("persists a local timing adjustment and eases toward it without jumping", async () => {
+  it("applies local timing adjustments immediately without seeking the SyncPlay group", async () => {
     const setWatchPartySyncOffset = vi.fn(async () => undefined);
     const h = harness({
       getBufferingPolicy: vi.fn(async () => "wait-for-all" as const),
@@ -593,13 +593,77 @@ describe("SyncPlayService", () => {
         monotonicTimestampMs: now,
       };
 
-      await h.service.setLocalSyncOffset(400);
+      await h.service.setLocalSyncOffset(100);
 
-      expect(setWatchPartySyncOffset).toHaveBeenCalledWith(400);
-      expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(400);
-      expect(h.player.setPlaybackRate).toHaveBeenLastCalledWith(expect.any(String), 1.04, expect.objectContaining({ origin: "remote-sync" }));
+      expect(setWatchPartySyncOffset).toHaveBeenLastCalledWith(100);
+      expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(100);
+      expect(h.player.seek).toHaveBeenLastCalledWith(expect.any(String), 41_000_000, expect.objectContaining({
+        origin: "remote-sync",
+        commandId: expect.stringContaining("local-offset:"),
+      }));
+      expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
+      h.player.seek.mockClear();
+      await h.internals.correctDrift();
       expect(h.player.seek).not.toHaveBeenCalled();
+      expect(h.player.getPlaybackRate()).toBe(1);
+
+      await h.service.setLocalSyncOffset(-100);
+      expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(-100);
+      expect(h.player.seek).toHaveBeenLastCalledWith(expect.any(String), 39_000_000, expect.objectContaining({
+        origin: "remote-sync",
+        commandId: expect.stringContaining("local-offset:"),
+      }));
+
+      await h.service.setLocalSyncOffset(0);
+      expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(0);
+      expect(h.player.seek).toHaveBeenLastCalledWith(expect.any(String), 40_000_000, expect.objectContaining({ origin: "remote-sync" }));
+      await h.internals.correctDrift();
+      expect(h.player.getPlaybackRate()).toBe(1);
+      expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
     } finally {
+      performanceNow.mockRestore();
+    }
+  });
+
+  it("saves a timing preference without seeking when no authoritative timeline is available", async () => {
+    const setWatchPartySyncOffset = vi.fn(async () => undefined);
+    const h = harness({
+      getBufferingPolicy: vi.fn(async () => "wait-for-all" as const),
+      setBufferingPolicy: vi.fn(async () => undefined),
+      setWatchPartySyncOffset,
+    });
+    h.internals.syncAnchor = null;
+
+    await h.service.setLocalSyncOffset(100);
+
+    expect(setWatchPartySyncOffset).toHaveBeenCalledWith(100);
+    expect(h.service.getState().preparation.localSyncOffsetMilliseconds).toBe(100);
+    expect(h.player.seek).not.toHaveBeenCalled();
+    expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
+  });
+
+  it("uses a saved local timing preference when Watch Party playback starts", async () => {
+    const h = harness();
+    h.internals.localSyncOffsetMilliseconds = 100;
+    h.internals.state.preparation.localSyncOffsetMilliseconds = 100;
+    h.internals.state.joinedGroup.lastUpdatedAt = new Date(1_000_000).toISOString();
+    h.setPlayerState(playbackState({ paused: true, phase: "paused", positionTicks: 40_000_000 }));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const performanceNow = vi.spyOn(performance, "now").mockReturnValue(25_000);
+    try {
+      await h.internals.handleCommand("eeeeeeeeeeee4eee8eeeeeeeeeeeeeee", {
+        GroupId: groupId,
+        PlaylistItemId: playlistItemId,
+        When: new Date(1_000_000).toISOString(),
+        PositionTicks: 40_000_000,
+        Command: "Unpause",
+        EmittedAt: new Date(1_000_000).toISOString(),
+      });
+
+      expect(h.player.seek).toHaveBeenCalledWith(expect.any(String), 41_000_000, expect.objectContaining({ origin: "remote-sync" }));
+      expect(h.requests.some((request) => request.path === "/SyncPlay/Seek")).toBe(false);
+    } finally {
+      dateNow.mockRestore();
       performanceNow.mockRestore();
     }
   });
