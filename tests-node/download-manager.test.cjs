@@ -350,3 +350,41 @@ test("changing the download root preserves paused and completed copies in earlie
     await closeFixture(value);
   }
 });
+
+test("bulk watched cleanup revalidates watched and Keep Downloaded eligibility", async () => {
+  const content = Buffer.alloc(80 * 1024, 9);
+  const api = createApi(content);
+  api.getDetails = async (itemId) => ({ ...mediaItem(itemId), userData: { played: itemId !== "movie-keep", playbackPositionTicks: 0, playedPercentage: itemId !== "movie-keep" ? 100 : 0 } });
+  const probe = { async probe(_root, target) { return { actualSize: (await fs.stat(target)).size, container: "mkv" }; } };
+  const value = await fixture(api, probe);
+  try {
+    await value.manager.start("movie-watched");
+    const watched = await waitForState(value.manager, "movie-watched", "downloaded");
+    await value.manager.start("movie-keep");
+    const kept = await waitForState(value.manager, "movie-keep", "downloaded");
+    await value.manager.setKeep(kept.downloadId, true);
+    assert.deepEqual(await value.manager.getWatchedCleanupPreview(), { count: 1, bytes: content.length });
+    const result = await value.manager.deleteWatched();
+    assert.equal(result.affected, 1);
+    assert.equal(result.failed, 0);
+    const after = await value.manager.list();
+    assert.equal(after.find((entry) => entry.downloadId === watched.downloadId).state, "missing");
+    assert.equal(after.find((entry) => entry.downloadId === kept.downloadId).state, "downloaded");
+  } finally { await closeFixture(value); }
+});
+
+test("bulk pause and resume only affect pausable downloads", async () => {
+  const content = Buffer.alloc(512 * 1024, 5);
+  const probe = { async probe(_root, target) { return { actualSize: (await fs.stat(target)).size, container: "mkv" }; } };
+  const value = await fixture(createApi(content, { slow: true }), probe);
+  try {
+    await value.manager.start("episode-bulk-a");
+    await value.manager.start("episode-bulk-b");
+    await waitForState(value.manager, "episode-bulk-a", "downloading");
+    const paused = await value.manager.pauseAll();
+    assert.ok(paused.affected >= 1);
+    assert.ok((await value.manager.list()).some((entry) => entry.state === "paused"));
+    const resumed = await value.manager.resumePaused();
+    assert.ok(resumed.affected >= 1);
+  } finally { await closeFixture(value); }
+});

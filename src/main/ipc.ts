@@ -330,6 +330,10 @@ export function registerIpcHandlers(
     if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
     return downloadLocation.getSummary();
   });
+  register(IPC.downloadsGetStorage, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return downloads.getStorageSummary();
+  });
   register(IPC.downloadsChooseLocation, (input) => {
     emptySchema.strict().parse(input ?? {});
     if (!downloadLocation) throw new AppError("DOWNLOAD_LOCATION_UNAVAILABLE", "Download location settings are unavailable.", 503);
@@ -358,6 +362,10 @@ export function registerIpcHandlers(
     const value = downloadKeepSchema.strict().parse(input);
     return downloads.setKeep(value.downloadId, value.keepDownloaded);
   });
+  register(IPC.downloadsPauseAll, (input) => { emptySchema.strict().parse(input ?? {}); return downloads.pauseAll(); });
+  register(IPC.downloadsResumePaused, (input) => { emptySchema.strict().parse(input ?? {}); return downloads.resumePaused(); });
+  register(IPC.downloadsWatchedPreview, (input) => { emptySchema.strict().parse(input ?? {}); return downloads.getWatchedCleanupPreview(); });
+  register(IPC.downloadsDeleteWatched, (input) => { emptySchema.strict().parse(input ?? {}); return downloads.deleteWatched(); });
   register(IPC.updatesCheck, (input) => {
     emptySchema.strict().parse(input ?? {});
     if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Update checking is unavailable.", 503);

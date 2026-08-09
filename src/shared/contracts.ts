@@ -439,6 +439,18 @@ export interface DownloadLocationSummary {
   label: string;
 }
 
+export interface DownloadStorageSummary {
+  bytesUsed: number;
+  bytesAvailable: number | null;
+  bytesTotal: number | null;
+}
+
+export interface DownloadBulkResult {
+  affected: number;
+  failed: number;
+  bytesFreed: number;
+}
+
 export interface UpdateCheckStatus {
   currentVersion: string;
   latestVersion: string | null;
@@ -771,6 +783,7 @@ export interface JellyfinBridge {
     list(): Promise<DownloadSummary[]>;
     listOfflinePlayable(): Promise<OfflinePlayableSummary[]>;
     getLocation(): Promise<DownloadLocationSummary>;
+    getStorage(): Promise<DownloadStorageSummary>;
     chooseLocation(): Promise<DownloadLocationSummary | null>;
     useDefaultLocation(): Promise<DownloadLocationSummary>;
     openLocation(): Promise<{ opened: boolean }>;
@@ -781,6 +794,10 @@ export interface JellyfinBridge {
     cancel(input: DownloadIdInput): Promise<DownloadSummary>;
     delete(input: DownloadIdInput): Promise<DownloadSummary>;
     setKeep(input: DownloadKeepInput): Promise<DownloadSummary>;
+    pauseAll(): Promise<DownloadBulkResult>;
+    resumePaused(): Promise<DownloadBulkResult>;
+    getWatchedCleanupPreview(): Promise<{ count: number; bytes: number }>;
+    deleteWatched(): Promise<DownloadBulkResult>;
     subscribe(listener: (downloads: DownloadSummary[]) => void): () => void;
   };
   updates: {
@@ -883,6 +900,7 @@ export const IPC = {
   downloadsList: "downloads:list",
   downloadsListOfflinePlayable: "downloads:list-offline-playable",
   downloadsGetLocation: "downloads:get-location",
+  downloadsGetStorage: "downloads:get-storage",
   downloadsChooseLocation: "downloads:choose-location",
   downloadsUseDefaultLocation: "downloads:use-default-location",
   downloadsOpenLocation: "downloads:open-location",
@@ -893,6 +911,10 @@ export const IPC = {
   downloadsCancel: "downloads:cancel",
   downloadsDelete: "downloads:delete",
   downloadsSetKeep: "downloads:set-keep",
+  downloadsPauseAll: "downloads:pause-all",
+  downloadsResumePaused: "downloads:resume-paused",
+  downloadsWatchedPreview: "downloads:watched-preview",
+  downloadsDeleteWatched: "downloads:delete-watched",
   downloadsChanged: "downloads:changed",
   updatesCheck: "updates:check",
   updatesOpen: "updates:open",

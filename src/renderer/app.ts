@@ -2,6 +2,7 @@ import type {
   CleanMachineDiagnostics,
   DiscoveredServer,
   DownloadLocationSummary,
+  DownloadStorageSummary,
   DownloadSummary,
   ImageKind,
   LibrarySummary,
@@ -331,6 +332,14 @@ const chooseDownloadLocationButton = byId<HTMLButtonElement>("chooseDownloadLoca
 const openDownloadLocationButton = byId<HTMLButtonElement>("openDownloadLocationButton");
 const defaultDownloadLocationButton = byId<HTMLButtonElement>("defaultDownloadLocationButton");
 const downloadsList = byId<HTMLElement>("downloadsList");
+const downloadsActiveCount = byId<HTMLElement>("downloadsActiveCount");
+const downloadsQueuedCount = byId<HTMLElement>("downloadsQueuedCount");
+const downloadsCompletedCount = byId<HTMLElement>("downloadsCompletedCount");
+const downloadsStorageCount = byId<HTMLElement>("downloadsStorageCount");
+const downloadsSort = byId<HTMLSelectElement>("downloadsSort");
+const deleteWatchedDownloadsButton = byId<HTMLButtonElement>("deleteWatchedDownloadsButton");
+const pauseAllDownloadsButton = byId<HTMLButtonElement>("pauseAllDownloadsButton");
+const resumePausedDownloadsButton = byId<HTMLButtonElement>("resumePausedDownloadsButton");
 const smartDownloadsList = byId<HTMLElement>("smartDownloadsList");
 const checkSmartDownloadsButton = byId<HTMLButtonElement>("checkSmartDownloadsButton");
 const smartDownloadDialog = byId<HTMLDialogElement>("smartDownloadDialog");
@@ -391,6 +400,9 @@ interface RendererState {
   downloads: DownloadSummary[];
   offlinePlayable: OfflinePlayableSummary[];
   downloadLocation: DownloadLocationSummary | null;
+  downloadStorage: DownloadStorageSummary | null;
+  downloadsFilter: "all" | "active" | "completed" | "failed";
+  downloadsSort: "newest" | "oldest" | "name";
   smartDownloads: SmartDownloadsState;
   lastFocusElement: HTMLElement | null;
   searchTimer: ReturnType<typeof setTimeout> | null;
@@ -456,6 +468,9 @@ const state: RendererState = {
   downloads: [],
   offlinePlayable: [],
   downloadLocation: null,
+  downloadStorage: null,
+  downloadsFilter: "all",
+  downloadsSort: "newest",
   smartDownloads: { series: [], notice: null },
   lastFocusElement: null,
   searchTimer: null,
@@ -3372,15 +3387,17 @@ function closeCompanion(): void {
 }
 
 async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
-  const [downloads, offlinePlayable, smartDownloads] = await Promise.all([
+  const [downloads, offlinePlayable, smartDownloads, storage] = await Promise.all([
     window.jellyfin.downloads.list(),
     window.jellyfin.downloads.listOfflinePlayable(),
     window.jellyfin.smartDownloads.getState(),
+    window.jellyfin.downloads.getStorage(),
   ]);
   if (!isCurrent()) return;
   state.downloads = downloads;
   state.offlinePlayable = offlinePlayable;
   state.smartDownloads = smartDownloads;
+  state.downloadStorage = storage;
   syncDownloadedLibrary();
   renderDownloads();
   renderSmartDownloads();
@@ -3620,8 +3637,39 @@ async function skipSmartDownload(download: DownloadSummary): Promise<void> {
   }
 }
 
+const transferSamples = new Map<string, { bytes: number; at: number; rate: number }>();
+function downloadTransferPresentation(download: DownloadSummary): string | null {
+  if (download.state !== "downloading") return download.state === "paused" ? "Paused" : null;
+  const now = performance.now(); const previous = transferSamples.get(download.downloadId);
+  let rate = previous?.rate ?? 0;
+  if (previous && now > previous.at && download.bytesDownloaded >= previous.bytes) {
+    const instantaneous = (download.bytesDownloaded - previous.bytes) / ((now - previous.at) / 1000);
+    rate = previous.rate > 0 ? previous.rate * .7 + instantaneous * .3 : instantaneous;
+  }
+  transferSamples.set(download.downloadId, { bytes: download.bytesDownloaded, at: now, rate });
+  if (!Number.isFinite(rate) || rate < 1024) return "Preparing transfer…";
+  const speed = `${formatBytes(rate)}/s`;
+  if (!download.expectedSize || download.expectedSize <= download.bytesDownloaded) return speed;
+  const eta = Math.ceil((download.expectedSize - download.bytesDownloaded) / rate);
+  if (!Number.isFinite(eta) || eta <= 0) return speed;
+  return `${speed} · ${eta >= 3600 ? `${Math.ceil(eta / 3600)}h remaining` : eta >= 60 ? `${Math.ceil(eta / 60)}m remaining` : `${eta}s remaining`}`;
+}
+
 function renderDownloads(): void {
   downloadsList.replaceChildren();
+  const active = state.downloads.filter((entry) => entry.state === "downloading" || entry.state === "paused");
+  const queued = state.downloads.filter((entry) => entry.state === "queued");
+  const completed = state.downloads.filter((entry) => entry.state === "downloaded");
+  downloadsActiveCount.textContent = String(active.length);
+  downloadsQueuedCount.textContent = String(queued.length);
+  downloadsCompletedCount.textContent = String(completed.length);
+  downloadsStorageCount.textContent = state.downloadStorage?.bytesTotal !== null && state.downloadStorage?.bytesTotal !== undefined
+    ? `${formatBytes(state.downloadStorage.bytesUsed)} / ${formatBytes(state.downloadStorage.bytesTotal)}`
+    : state.downloadStorage ? `${formatBytes(state.downloadStorage.bytesUsed)} used` : "Storage unavailable";
+  pauseAllDownloadsButton.disabled = !state.downloads.some((entry) => entry.canPause);
+  resumePausedDownloadsButton.disabled = !state.downloads.some((entry) => entry.canResume);
+  deleteWatchedDownloadsButton.disabled = !completed.some((entry) => entry.item.userData.played && !entry.keepDownloaded);
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-filter]")) button.classList.toggle("is-active", button.dataset.downloadFilter === state.downloadsFilter);
   if (!state.downloads.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
@@ -3629,7 +3677,15 @@ function renderDownloads(): void {
     downloadsList.append(empty);
     return;
   }
-  for (const download of state.downloads) {
+  const visible = state.downloads.filter((download) => state.downloadsFilter === "all"
+    || state.downloadsFilter === "active" && ["downloading", "paused", "queued"].includes(download.state)
+    || state.downloadsFilter === "completed" && download.state === "downloaded"
+    || state.downloadsFilter === "failed" && download.state === "failed")
+    .sort((a, b) => state.downloadsSort === "name" ? a.name.localeCompare(b.name) : state.downloadsSort === "oldest" ? a.downloadId.localeCompare(b.downloadId) : b.downloadId.localeCompare(a.downloadId));
+  if (!visible.length) {
+    const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "No downloads match this filter."; downloadsList.append(empty); return;
+  }
+  for (const download of visible) {
     const card = document.createElement("article");
     const heading = document.createElement("div");
     const copy = document.createElement("div");
@@ -3640,13 +3696,17 @@ function renderDownloads(): void {
     const controls = document.createElement("div");
     card.className = "download-card";
     heading.className = "download-card-heading";
+    const thumbnail = document.createElement("img");
+    thumbnail.className = "download-thumbnail";
+    thumbnail.alt = "";
+    void imageUrl(download.item, "Primary", { width: 112, height: 168 }).then((url) => { if (url) thumbnail.src = url; else thumbnail.remove(); }).catch(() => thumbnail.remove());
     title.textContent = download.name;
     type.textContent = [download.itemType, download.versionLabel, download.smartManaged ? "Smart download" : ""].filter(Boolean).join(" · ");
     type.classList.toggle("smart-download-badge", download.smartManaged);
     status.className = "download-status";
     status.textContent = download.state;
     copy.append(title, type);
-    heading.append(copy, status);
+    heading.append(thumbnail, copy, status);
     card.append(heading);
 
     if (download.expectedSize !== null) {
@@ -3662,6 +3722,13 @@ function renderDownloads(): void {
       ? formatBytes(download.bytesDownloaded)
       : `${formatBytes(download.bytesDownloaded)} of ${formatBytes(download.expectedSize)}`;
     card.append(size);
+    const transfer = downloadTransferPresentation(download);
+    if (transfer) {
+      const details = document.createElement("span");
+      details.className = "download-transfer";
+      details.textContent = transfer;
+      card.append(details);
+    }
     if (download.error) {
       const error = document.createElement("p");
       error.className = "download-error";
@@ -5731,6 +5798,19 @@ document.addEventListener("visibilitychange", () => {
 });
 
 downloadsButton.addEventListener("click", () => openDownloads());
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-filter]")) button.addEventListener("click", () => {
+  state.downloadsFilter = button.dataset.downloadFilter as RendererState["downloadsFilter"];
+  renderDownloads();
+});
+downloadsSort.addEventListener("change", () => { state.downloadsSort = downloadsSort.value as RendererState["downloadsSort"]; renderDownloads(); });
+pauseAllDownloadsButton.addEventListener("click", () => { void window.jellyfin.downloads.pauseAll().then(async (result) => { await refreshDownloads(); showToast(result.failed ? `Paused ${result.affected} downloads; ${result.failed} could not be paused.` : `Paused ${result.affected} downloads.`); }).catch((error) => showToast(errorMessage(error, "Downloads could not be paused."))); });
+resumePausedDownloadsButton.addEventListener("click", () => { void window.jellyfin.downloads.resumePaused().then(async (result) => { await refreshDownloads(); showToast(result.failed ? `Resumed ${result.affected} downloads; ${result.failed} could not be resumed.` : `Resumed ${result.affected} downloads.`); }).catch((error) => showToast(errorMessage(error, "Downloads could not be resumed."))); });
+deleteWatchedDownloadsButton.addEventListener("click", () => { void window.jellyfin.downloads.getWatchedCleanupPreview().then(async (preview) => {
+  if (!preview.count) { showToast("No watched downloads are eligible for cleanup."); return; }
+  if (!window.confirm(`Delete ${preview.count} watched downloads?\n\nThis will free approximately ${formatBytes(preview.bytes)}. Items marked Keep Downloaded will not be removed.`)) return;
+  const result = await window.jellyfin.downloads.deleteWatched(); await refreshDownloads();
+  showToast(result.failed ? `Deleted ${result.affected} downloads; ${result.failed} could not be removed.` : `Deleted ${result.affected} watched downloads.`);
+}).catch((error) => showToast(errorMessage(error, "Watched downloads could not be deleted."))); });
 checkForUpdatesButton.addEventListener("click", () => { void checkForUpdates(); });
 dismissUpdateButton.addEventListener("click", () => updateBanner.classList.add("is-hidden"));
 checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });

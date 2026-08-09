@@ -11,6 +11,8 @@ import {
   type DownloadIdInput,
   type DownloadKeepInput,
   type DownloadLocationSummary,
+  type DownloadStorageSummary,
+  type DownloadBulkResult,
   type DownloadStartInput,
   type DownloadSummary,
   type EpisodesInput,
@@ -152,6 +154,7 @@ const bridge: JellyfinBridge = {
     list: () => invoke<DownloadSummary[]>(IPC.downloadsList),
     listOfflinePlayable: () => invoke<OfflinePlayableSummary[]>(IPC.downloadsListOfflinePlayable),
     getLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsGetLocation),
+    getStorage: () => invoke<DownloadStorageSummary>(IPC.downloadsGetStorage),
     chooseLocation: () => invoke<DownloadLocationSummary | null>(IPC.downloadsChooseLocation),
     useDefaultLocation: () => invoke<DownloadLocationSummary>(IPC.downloadsUseDefaultLocation),
     openLocation: () => invoke<{ opened: boolean }>(IPC.downloadsOpenLocation),
@@ -162,6 +165,10 @@ const bridge: JellyfinBridge = {
     cancel: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsCancel, input),
     delete: (input: DownloadIdInput) => invoke<DownloadSummary>(IPC.downloadsDelete, input),
     setKeep: (input: DownloadKeepInput) => invoke<DownloadSummary>(IPC.downloadsSetKeep, input),
+    pauseAll: () => invoke<DownloadBulkResult>(IPC.downloadsPauseAll),
+    resumePaused: () => invoke<DownloadBulkResult>(IPC.downloadsResumePaused),
+    getWatchedCleanupPreview: () => invoke<{ count: number; bytes: number }>(IPC.downloadsWatchedPreview),
+    deleteWatched: () => invoke<DownloadBulkResult>(IPC.downloadsDeleteWatched),
     subscribe: (listener: (downloads: DownloadSummary[]) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, downloads: DownloadSummary[]) => listener(downloads);
       ipcRenderer.on(IPC.downloadsChanged, receive);

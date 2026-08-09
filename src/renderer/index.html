@@ -598,6 +598,18 @@
           <button id="closeDownloadsButton" type="button" aria-label="Close downloads" title="Close downloads">×</button>
         </header>
         <p class="downloads-note">Manual downloads are kept until you delete them. Smart Downloads rotate unneeded episodes unless you choose Keep downloaded.</p>
+        <section class="downloads-overview" aria-label="Download summary">
+          <div><strong id="downloadsActiveCount">0</strong><span>Active downloads</span></div>
+          <div><strong id="downloadsQueuedCount">0</strong><span>Queued</span></div>
+          <div><strong id="downloadsCompletedCount">0</strong><span>Downloaded</span></div>
+          <div><strong id="downloadsStorageCount">Storage unavailable</strong><span>Download storage</span></div>
+        </section>
+        <div class="downloads-toolbar">
+          <div class="downloads-filters" role="group" aria-label="Filter downloads"><button data-download-filter="all" class="is-active" type="button">All</button><button data-download-filter="active" type="button">Active</button><button data-download-filter="completed" type="button">Completed</button><button data-download-filter="failed" type="button">Failed</button></div>
+          <select id="downloadsSort" aria-label="Sort downloads"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select>
+          <button id="deleteWatchedDownloadsButton" class="danger" type="button">Delete watched downloads</button>
+          <button id="pauseAllDownloadsButton" type="button">Pause all</button><button id="resumePausedDownloadsButton" type="button">Resume paused</button>
+        </div>
         <section class="download-location" aria-labelledby="downloadLocationTitle">
           <div class="download-location-copy">
             <strong id="downloadLocationTitle">Download location</strong>

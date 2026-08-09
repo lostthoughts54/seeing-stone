@@ -1,6 +1,6 @@
 import { mkdir, open, rename, rm, stat, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import type { DownloadSummary, MediaItem, MediaSourceCapabilities, OfflinePlayableSummary, PlaybackDiagnostics } from "../../shared/contracts";
+import type { DownloadBulkResult, DownloadStorageSummary, DownloadSummary, MediaItem, MediaSourceCapabilities, OfflinePlayableSummary, PlaybackDiagnostics } from "../../shared/contracts";
 import { materializeCachedMediaItem } from "./cachedMedia";
 import { formatMediaVersionLabel } from "../../shared/mediaVersions";
 import { AppError, toPublicError } from "./errors";
@@ -226,6 +226,53 @@ export class DownloadManager implements ProgressiveDownloadProvider {
   async list(): Promise<DownloadSummary[]> {
     const identity = this.requireIdentity();
     return this.listFor(identity);
+  }
+
+  async getStorageSummary(): Promise<DownloadStorageSummary> {
+    const identity = this.requireIdentity();
+    const bundles = await this.persistence.listDownloadBundles(identity.serverId, identity.userId);
+    const bytesUsed = bundles.reduce((total, bundle) => total + (bundle.job.state === "completed" && bundle.localVersion?.fileState === "finalized" ? Math.max(0, bundle.localVersion.actualSize ?? bundle.job.bytesDownloaded) : 0), 0);
+    try {
+      const value = await statfs(this.storageRoot, { bigint: true });
+      const safe = (number: bigint): number | null => number > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(number);
+      return { bytesUsed, bytesAvailable: safe(value.bavail * value.bsize), bytesTotal: safe(value.blocks * value.bsize) };
+    } catch {
+      return { bytesUsed, bytesAvailable: null, bytesTotal: null };
+    }
+  }
+
+  async pauseAll(): Promise<DownloadBulkResult> {
+    const eligible = (await this.list()).filter((download) => download.canPause);
+    let affected = 0; let failed = 0;
+    for (const download of eligible) {
+      try { await this.pause(download.downloadId); affected += 1; } catch { failed += 1; }
+    }
+    return { affected, failed, bytesFreed: 0 };
+  }
+
+  async resumePaused(): Promise<DownloadBulkResult> {
+    const eligible = (await this.list()).filter((download) => download.canResume);
+    let affected = 0; let failed = 0;
+    for (const download of eligible) {
+      try { await this.resume(download.downloadId); affected += 1; } catch { failed += 1; }
+    }
+    return { affected, failed, bytesFreed: 0 };
+  }
+
+  async getWatchedCleanupPreview(): Promise<{ count: number; bytes: number }> {
+    const downloads = await this.list();
+    const eligible = downloads.filter((download) => download.state === "downloaded" && download.canDelete && !download.keepDownloaded && download.item.userData.played);
+    return { count: eligible.length, bytes: eligible.reduce((total, download) => total + Math.max(0, download.expectedSize ?? download.bytesDownloaded), 0) };
+  }
+
+  async deleteWatched(): Promise<DownloadBulkResult> {
+    // Recalculate in the main process: renderer IDs never authorize a deletion.
+    const eligible = (await this.list()).filter((download) => download.state === "downloaded" && download.canDelete && !download.keepDownloaded && download.item.userData.played);
+    let affected = 0; let failed = 0; let bytesFreed = 0;
+    for (const download of eligible) {
+      try { await this.delete(download.downloadId); affected += 1; bytesFreed += Math.max(0, download.expectedSize ?? download.bytesDownloaded); } catch { failed += 1; }
+    }
+    return { affected, failed, bytesFreed };
   }
 
   async listOfflinePlayable(): Promise<OfflinePlayableSummary[]> {
