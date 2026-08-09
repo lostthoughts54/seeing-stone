@@ -99,6 +99,9 @@
             <button id="navLiveTvButton" type="button" title="Live TV (Beta)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
             </button>
+            <button id="navDownloadsButton" type="button" title="Downloads">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg><span>Downloads</span>
+            </button>
             <span class="app-rail-divider"></span>
             <span id="mainLibraryNavigation" class="library-nav-items"></span>
             <button id="navWatchPartiesButton" type="button" title="Watch Parties">
@@ -350,6 +353,19 @@
               <ol id="episodeList" class="episode-list"></ol>
             </section>
           </section>
+          <section id="downloadsView" class="view downloads-view is-hidden" aria-labelledby="downloadsTitle">
+            <header class="page-heading downloads-page-heading">
+              <div><p class="eyebrow">Offline media</p><h1 id="downloadsTitle">Downloads</h1><p>Manage offline media and active downloads</p></div>
+              <div class="downloads-page-actions"><button id="deleteWatchedDownloadsButton" class="danger" type="button">Delete watched downloads</button><button id="pauseAllDownloadsButton" type="button">Pause all</button><button id="resumePausedDownloadsButton" type="button">Resume paused</button></div>
+            </header>
+            <section class="downloads-overview" aria-label="Download summary">
+              <div><strong id="downloadsActiveCount">0</strong><span>Active downloads</span></div><div><strong id="downloadsQueuedCount">0</strong><span>Queued</span></div><div><strong id="downloadsCompletedCount">0</strong><span>Downloaded</span></div><div class="downloads-storage"><strong id="downloadsStorageCount">Storage unavailable</strong><span>Download storage</span></div>
+            </section>
+            <div class="downloads-toolbar"><div class="downloads-filters" role="group" aria-label="Filter downloads"><button data-download-filter="all" class="is-active" type="button">All</button><button data-download-filter="active" type="button">Active</button><button data-download-filter="completed" type="button">Completed</button><button data-download-filter="failed" type="button">Failed</button></div><label>Sort by <select id="downloadsSort" aria-label="Sort downloads"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select></label></div>
+            <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
+            <div class="downloads-secondary-grid"><section class="download-location" aria-labelledby="downloadLocationTitle"><div class="download-location-copy"><strong id="downloadLocationTitle">Download location</strong><span id="downloadLocationLabel">Windows Videos folder</span><small>New downloads use this folder. Existing downloads stay where they are.</small></div><div class="download-location-actions"><button id="chooseDownloadLocationButton" class="primary" type="button">Change Location</button><button id="openDownloadLocationButton" type="button">Open Folder</button><button id="defaultDownloadLocationButton" type="button">Use Videos Folder</button></div></section>
+              <section class="smart-downloads-manager" aria-labelledby="smartDownloadsTitle"><header><div><strong id="smartDownloadsTitle">Smart Downloads</strong><small>Keep upcoming episodes ready automatically.</small></div><button id="checkSmartDownloadsButton" type="button">Check now</button></header><div id="smartDownloadsList" class="smart-downloads-list" aria-live="polite"></div></section></div>
+          </section>
         </main>
 
         <nav class="mobile-nav" aria-label="Mobile navigation">
@@ -588,8 +604,7 @@
         <div><button id="viewUpdateButton" class="primary" type="button">View update</button><button id="dismissUpdateButton" type="button">Later</button></div>
       </aside>
 
-      <div id="downloadsScrim" class="downloads-scrim is-hidden"></div>
-      <section id="downloadsPanel" class="downloads-panel is-hidden" role="dialog" aria-modal="true" aria-labelledby="downloadsTitle">
+      <section class="legacy-downloads-drawer is-hidden" aria-hidden="true">
         <header class="downloads-header">
           <div>
             <p class="eyebrow">Offline media</p>

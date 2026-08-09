@@ -60,7 +60,7 @@ const DOWNLOADED_LIBRARY: LibrarySummary = {
   name: "Downloaded",
   collectionType: "downloaded",
 };
-type Route = "home" | "library" | "search" | "details" | "watch-parties" | "live-tv";
+type Route = "home" | "library" | "search" | "details" | "watch-parties" | "live-tv" | "downloads";
 type LiveTvTab = "guide" | "recordings" | "scheduled";
 type MediaRow = {
   title: string;
@@ -93,6 +93,7 @@ const loginMessage = byId<HTMLElement>("loginMessage");
 const brandHomeButton = byId<HTMLButtonElement>("brandHomeButton");
 const navHomeButton = byId<HTMLButtonElement>("navHomeButton");
 const navLiveTvButton = byId<HTMLButtonElement>("navLiveTvButton");
+const navDownloadsButton = byId<HTMLButtonElement>("navDownloadsButton");
 const mainLibraryNavigation = byId<HTMLElement>("mainLibraryNavigation");
 const navWatchPartiesButton = byId<HTMLButtonElement>("navWatchPartiesButton");
 const navCompanionButton = byId<HTMLButtonElement>("navCompanionButton");
@@ -125,6 +126,7 @@ const searchView = byId<HTMLElement>("searchView");
 const detailsView = byId<HTMLElement>("detailsView");
 const watchPartiesView = byId<HTMLElement>("watchPartiesView");
 const liveTvView = byId<HTMLElement>("liveTvView");
+const downloadsView = byId<HTMLElement>("downloadsView");
 const liveTvStatus = byId<HTMLElement>("liveTvStatus");
 const liveTvContent = byId<HTMLElement>("liveTvContent");
 const liveTvGuideTools = byId<HTMLElement>("liveTvGuideTools");
@@ -302,9 +304,6 @@ const cleanMachineDiagnosticsChecks = byId<HTMLElement>("cleanMachineDiagnostics
 const rerunCleanMachineDiagnosticsButton = byId<HTMLButtonElement>("rerunCleanMachineDiagnosticsButton");
 const copyCleanMachineDiagnosticsButton = byId<HTMLButtonElement>("copyCleanMachineDiagnosticsButton");
 const saveCleanMachineDiagnosticsButton = byId<HTMLButtonElement>("saveCleanMachineDiagnosticsButton");
-const downloadsScrim = byId<HTMLElement>("downloadsScrim");
-const downloadsPanel = byId<HTMLElement>("downloadsPanel");
-const closeDownloadsButton = byId<HTMLButtonElement>("closeDownloadsButton");
 const companionScrim = byId<HTMLElement>("companionScrim");
 const companionPanel = byId<HTMLElement>("companionPanel");
 const closeCompanionButton = byId<HTMLButtonElement>("closeCompanionButton");
@@ -842,7 +841,7 @@ function setButtonActive(button: HTMLButtonElement, active: boolean): void {
 }
 
 function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?: number } = {}): void {
-  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView, "live-tv": liveTvView };
+  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView, "live-tv": liveTvView, downloads: downloadsView };
   for (const [name, element] of Object.entries(views)) element.classList.toggle("is-hidden", name !== route);
   state.currentRoute = route;
   const nextWatchPartiesVisible = route === "watch-parties";
@@ -858,6 +857,7 @@ function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?:
   }
   setButtonActive(navWatchPartiesButton, desktopRoute === "watch-parties");
   setButtonActive(navLiveTvButton, desktopRoute === "live-tv");
+  setButtonActive(navDownloadsButton, desktopRoute === "downloads");
   setButtonActive(mobileHomeButton, desktopRoute === "home");
   setButtonActive(mobileSearchButton, desktopRoute === "search");
   setButtonActive(mobileLibraryButton, desktopRoute === "library");
@@ -3234,16 +3234,9 @@ function syncVisibleDownloadButtons(): void {
 function openDownloads(): void {
   profileMenu.classList.add("is-hidden");
   profileButton.setAttribute("aria-expanded", "false");
-  downloadsScrim.classList.remove("is-hidden");
-  downloadsPanel.classList.remove("is-hidden");
+  setRoute("downloads");
   void refreshDownloadLocation().catch((error) => showToast(errorMessage(error, "The download location could not be loaded.")));
   void refreshDownloads().catch((error) => showToast(errorMessage(error, "Downloads could not be refreshed.")));
-  closeDownloadsButton.focus();
-}
-
-function closeDownloads(): void {
-  downloadsScrim.classList.add("is-hidden");
-  downloadsPanel.classList.add("is-hidden");
 }
 
 function updateLabel(status: UpdateCheckStatus): string {
@@ -5581,7 +5574,6 @@ function resetSignedInState(): void {
   joinedWatchParty.classList.add("is-hidden");
   watchPartyStatus.textContent = "";
   watchPartyNameInput.value = "";
-  closeDownloads();
   closeTrailer();
   closeLicenses();
   closeCleanMachineDiagnostics();
@@ -5798,6 +5790,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 downloadsButton.addEventListener("click", () => openDownloads());
+navDownloadsButton.addEventListener("click", () => openDownloads());
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-filter]")) button.addEventListener("click", () => {
   state.downloadsFilter = button.dataset.downloadFilter as RendererState["downloadsFilter"];
   renderDownloads();
@@ -5814,8 +5807,6 @@ deleteWatchedDownloadsButton.addEventListener("click", () => { void window.jelly
 checkForUpdatesButton.addEventListener("click", () => { void checkForUpdates(); });
 dismissUpdateButton.addEventListener("click", () => updateBanner.classList.add("is-hidden"));
 checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });
-closeDownloadsButton.addEventListener("click", closeDownloads);
-downloadsScrim.addEventListener("click", closeDownloads);
 closeCompanionButton.addEventListener("click", closeCompanion);
 companionScrim.addEventListener("click", closeCompanion);
 closeTrailerButton.addEventListener("click", closeTrailer);
@@ -6242,8 +6233,6 @@ document.addEventListener("keydown", (event) => {
   if (!profileMenu.classList.contains("is-hidden")) {
     profileMenu.classList.add("is-hidden");
     profileButton.setAttribute("aria-expanded", "false");
-  } else if (!downloadsPanel.classList.contains("is-hidden")) {
-    closeDownloads();
   } else if (!companionPanel.classList.contains("is-hidden")) {
     closeCompanion();
   } else if (state.currentRoute === "details") {
