@@ -4924,6 +4924,33 @@ button.danger:hover:not(:disabled) {
 .downloads-view .download-progress { height: .7rem; width: 100%; }
 .downloads-view .download-controls { justify-content: flex-end; }
 .download-transfer { color: #c9b7df; font-size: .7rem; font-variant-numeric: tabular-nums; }
+
+.downloaded-individual-card,
+.downloaded-series-stack { background: #17151e; border: 1px solid rgba(218,193,255,.15); border-radius: .65rem; color: #f4eff8; min-width: 0; overflow: hidden; position: relative; }
+.downloaded-individual-card { display: grid; gap: .65rem; grid-template-columns: 4.7rem minmax(0,1fr); padding: .75rem; }
+.downloaded-record-art { background: #0d0c12; border-radius: .38rem; height: 6.5rem; object-fit: cover; width: 4.7rem; }
+.downloaded-record-copy { display: grid; gap: .28rem; min-width: 0; }
+.downloaded-record-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.downloaded-record-copy span { color: #bdb4c9; font-size: .72rem; }
+.downloaded-record-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .4rem; grid-column: 1 / -1; }
+.downloaded-record-actions button { font-size: .72rem; padding: .36rem .58rem; }
+.downloaded-record-select { position: absolute; right: .65rem; top: .65rem; }
+.downloaded-series-stack::before,
+.downloaded-series-stack::after { background: rgba(55,40,76,.75); border: 1px solid rgba(218,193,255,.1); border-radius: .65rem; content: ""; height: calc(100% - .7rem); left: .55rem; position: absolute; right: -.3rem; top: .35rem; z-index: -1; }
+.downloaded-series-stack::after { left: .3rem; right: -.15rem; top: .18rem; }
+.downloaded-series-toggle { align-items: center; background: #17151e; border: 0; border-radius: .65rem; color: inherit; display: grid; gap: .75rem; grid-template-columns: 5rem minmax(0,1fr) auto; padding: .75rem; text-align: left; width: 100%; }
+.downloaded-series-toggle:hover, .downloaded-series-toggle:focus-visible { background: #211b2d; transform: none; }
+.downloaded-series-art { background: #0d0c12; border-radius: .38rem; height: 7.1rem; object-fit: cover; width: 5rem; }
+.downloaded-series-toggle > div { display: grid; gap: .35rem; min-width: 0; }
+.downloaded-series-toggle strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.downloaded-series-toggle span { color: #c0b5cb; font-size: .75rem; }
+.downloaded-series-chevron { color: #d8bdff !important; font-size: 1.15rem !important; }
+.downloaded-series-select { margin: 0 .75rem .7rem; }
+.downloaded-series-entries { border-top: 1px solid rgba(218,193,255,.13); display: grid; gap: .45rem; padding: .65rem .75rem .75rem; }
+.downloaded-episode-row { align-items: center; background: rgba(9,8,13,.35); border: 1px solid rgba(218,193,255,.1); border-radius: .42rem; display: grid; gap: .65rem; grid-template-columns: 5rem minmax(0,1fr) auto; padding: .48rem; position: relative; }
+.downloaded-episode-row .downloaded-record-art { height: 3.2rem; width: 5rem; }
+.downloaded-episode-row .downloaded-record-actions { grid-column: auto; justify-content: end; }
+@media (max-width: 760px) { .downloaded-episode-row { grid-template-columns: 4rem minmax(0,1fr); } .downloaded-episode-row .downloaded-record-art { width: 4rem; } .downloaded-episode-row .downloaded-record-actions { grid-column: 1 / -1; justify-content: start; } }
 @media (max-width: 900px) { .downloads-secondary-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .downloads-page-heading { align-items: stretch; flex-direction: column; } .downloads-page-actions { justify-content: flex-start; } .downloads-overview { grid-template-columns: repeat(2, minmax(0,1fr)); } .downloads-toolbar select { margin-right: 0; } }
 

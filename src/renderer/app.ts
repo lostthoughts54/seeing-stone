@@ -52,6 +52,7 @@ import { loadAllBrowseItems } from "./browsePagination";
 import { LIVE_TV_GUIDE_WINDOW_MS, LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, isLocalDateTransition, normalGuideWindow, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
 import { presentPeople } from "../shared/personPresentation";
 import { groupMovieVersions } from "../shared/mediaVersions";
+import { groupDownloadedRecords, type DownloadedGroup } from "./downloadedPresentation";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -372,6 +373,7 @@ interface RendererState {
   libraryRequestIds: Map<string, number>;
   downloadedSelectionMode: boolean;
   selectedDownloadIds: Set<string>;
+  expandedDownloadedSeriesIds: Set<string>;
   detailItem: MediaItem | null;
   detailPlayItem: MediaItem | null;
   detailVersions: MediaVersion[];
@@ -440,6 +442,7 @@ const state: RendererState = {
   libraryRequestIds: new Map(),
   downloadedSelectionMode: false,
   selectedDownloadIds: new Set(),
+  expandedDownloadedSeriesIds: new Set(),
   detailItem: null,
   detailPlayItem: null,
   detailVersions: [],
@@ -3032,9 +3035,61 @@ async function deleteSelectedDownloads(): Promise<void> {
   else showToast(`${removed} ${removed === 1 ? "download" : "downloads"} deleted.`);
 }
 
+function downloadedEpisodeLabel(download: DownloadSummary): string {
+  const season = download.item.parentIndexNumber;
+  const episode = download.item.indexNumber;
+  return season !== null && episode !== null ? `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` : "Episode";
+}
+
+function createDownloadedRecordRow(download: DownloadSummary, compact = false): HTMLElement {
+  const row = document.createElement("article");
+  row.className = compact ? "downloaded-episode-row" : "downloaded-individual-card";
+  const image = document.createElement("img"); image.alt = ""; image.className = "downloaded-record-art";
+  void imageUrl(download.item, compact ? "Thumb" : "Primary", { width: compact ? 160 : 280, height: compact ? 90 : 420 }).then((url) => { if (url) image.src = url; else image.remove(); }).catch(() => image.remove());
+  const copy = document.createElement("div"); copy.className = "downloaded-record-copy";
+  const title = document.createElement("strong"); title.textContent = compact ? `${downloadedEpisodeLabel(download)}  ${download.name}` : download.name;
+  const meta = document.createElement("span"); meta.textContent = [download.item.seriesName, download.versionLabel, formatBytes(download.expectedSize ?? download.bytesDownloaded)].filter(Boolean).join(" · ");
+  copy.append(title, meta);
+  if (download.smartManaged) { const badge = document.createElement("em"); badge.className = "smart-download-badge"; badge.textContent = "SMART"; copy.append(badge); }
+  const actions = document.createElement("div"); actions.className = "downloaded-record-actions";
+  const play = document.createElement("button"); play.type = "button"; play.className = "primary"; play.textContent = "Play"; play.addEventListener("click", () => { void playDownloadedItem(download); });
+  const keep = document.createElement("button"); keep.type = "button"; keep.textContent = download.keepDownloaded ? "Unkeep" : "Keep"; keep.addEventListener("click", async () => { await window.jellyfin.downloads.setKeep({ downloadId: download.downloadId, keepDownloaded: !download.keepDownloaded }); await refreshDownloads(); });
+  const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Delete"; remove.addEventListener("click", () => { void performDownloadAction(download, "delete"); });
+  actions.append(play, keep, remove);
+  row.append(image, copy, actions);
+  if (state.downloadedSelectionMode) {
+    const select = document.createElement("input"); select.type = "checkbox"; select.className = "downloaded-record-select"; select.checked = state.selectedDownloadIds.has(download.downloadId); select.dataset.downloadSelect = download.downloadId;
+    select.addEventListener("change", () => toggleDownloadedSelection(download.downloadId)); row.append(select);
+  }
+  return row;
+}
+
+function renderDownloadedGroups(): void {
+  const groups = groupDownloadedRecords(state.downloads, state.libraryFilter, state.librarySort);
+  if (!groups.length) { const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "No titles match this filter."; libraryGrid.append(empty); return; }
+  for (const group of groups) {
+    if (group.kind === "individual") { libraryGrid.append(createDownloadedRecordRow(group.download)); continue; }
+    const stack = document.createElement("section"); stack.className = "downloaded-series-stack";
+    const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "downloaded-series-toggle"; toggle.setAttribute("aria-expanded", String(state.expandedDownloadedSeriesIds.has(group.seriesId)));
+    const image = document.createElement("img"); image.alt = ""; image.className = "downloaded-series-art";
+    void imageUrl(group.downloads[0].item, "Primary", { width: 280, height: 420 }).then((url) => { if (url) image.src = url; else image.remove(); }).catch(() => image.remove());
+    const copy = document.createElement("div"); const title = document.createElement("strong"); title.textContent = group.name; const meta = document.createElement("span"); const season = group.seasons.length === 1 ? `Season ${group.seasons[0]} · ` : ""; meta.textContent = `${season}${group.downloads.length} downloaded episodes · ${formatBytes(group.bytes)}`; copy.append(title, meta);
+    if (group.smart !== "none") { const badge = document.createElement("em"); badge.className = "smart-download-badge"; badge.textContent = group.smart === "all" ? "SMART" : "SMART + MANUAL"; copy.append(badge); }
+    const chevron = document.createElement("span"); chevron.className = "downloaded-series-chevron"; chevron.textContent = state.expandedDownloadedSeriesIds.has(group.seriesId) ? "⌃" : "⌄";
+    toggle.append(image, copy, chevron); toggle.addEventListener("click", () => { if (state.expandedDownloadedSeriesIds.has(group.seriesId)) state.expandedDownloadedSeriesIds.delete(group.seriesId); else state.expandedDownloadedSeriesIds.add(group.seriesId); renderLibraryGrid([]); });
+    stack.append(toggle);
+    if (state.downloadedSelectionMode) {
+      const selectAll = document.createElement("button"); selectAll.type = "button"; selectAll.className = "downloaded-series-select"; selectAll.textContent = "Select episodes"; selectAll.addEventListener("click", () => { for (const download of group.downloads) state.selectedDownloadIds.add(download.downloadId); renderLibraryGrid([]); }); stack.append(selectAll);
+    }
+    if (state.expandedDownloadedSeriesIds.has(group.seriesId)) { const entries = document.createElement("div"); entries.className = "downloaded-series-entries"; for (const download of group.downloads) entries.append(createDownloadedRecordRow(download, true)); stack.append(entries); }
+    libraryGrid.append(stack);
+  }
+}
+
 function renderLibraryGrid(items: MediaItem[]): void {
   libraryGrid.innerHTML = "";
   renderDownloadedLibraryExtras();
+  if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) { renderDownloadedGroups(); return; }
   const filtered = items.filter((item) => {
     if (state.libraryFilter === "watched") return item.userData.played;
     if (state.libraryFilter === "unwatched") return !item.userData.played;
@@ -5460,6 +5515,7 @@ function resetSignedInState(): void {
   state.libraryRequestIds.clear();
   state.downloadedSelectionMode = false;
   state.selectedDownloadIds.clear();
+  state.expandedDownloadedSeriesIds.clear();
   state.detailItem = null;
   state.detailPlayItem = null;
   detailSeriesButton.classList.add("is-hidden");
