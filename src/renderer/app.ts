@@ -134,6 +134,8 @@ const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
 const checkForUpdatesButton = byId<HTMLButtonElement>("checkForUpdatesButton");
 const updateCheckStatus = byId<HTMLElement>("updateCheckStatus");
+const profileVersionLabel = byId<HTMLElement>("profileVersionLabel");
+const applicationVersionLabel = byId<HTMLElement>("applicationVersionLabel");
 const updateBanner = byId<HTMLElement>("updateBanner");
 const updateBannerText = byId<HTMLElement>("updateBannerText");
 const viewUpdateButton = byId<HTMLButtonElement>("viewUpdateButton");
@@ -3931,6 +3933,11 @@ function updateLabel(status: UpdateCheckStatus): string {
   return status.releaseName || status.latestVersion || "A new Seeing Stone version";
 }
 
+function renderApplicationVersion(status: UpdateCheckStatus): void {
+  profileVersionLabel.textContent = `Seeing Stone ${status.currentVersion}`;
+  applicationVersionLabel.textContent = `Version ${status.currentVersion}`;
+}
+
 function showAvailableUpdate(status: UpdateCheckStatus): void {
   if (!status.isUpdateAvailable) return;
   updateBannerText.textContent = `${updateLabel(status)} is available`;
@@ -3943,6 +3950,7 @@ async function checkForUpdates(): Promise<void> {
   updateCheckStatus.textContent = "Checking for updates…";
   try {
     const status = await window.jellyfin.updates.check();
+    renderApplicationVersion(status);
     if (status.status === "available") {
       updateCheckStatus.textContent = `${updateLabel(status)} is available.`;
       showAvailableUpdate(status);
@@ -6992,6 +7000,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.jellyfin.updates.subscribe((status) => {
+  renderApplicationVersion(status);
   // Automatic failures are deliberately silent; only an available update gets UI.
   if (status.source === "automatic" && status.status === "available") showAvailableUpdate(status);
 });

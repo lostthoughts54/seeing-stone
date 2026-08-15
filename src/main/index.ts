@@ -531,7 +531,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   // Update discovery starts after the renderer has loaded and never affects startup.
   setTimeout(() => {
     void updateController.check("automatic").then((status) => {
-      if (status.status === "available" && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.updatesChanged, status);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.updatesChanged, status);
     });
   }, 1500);
 }).catch((error) => {

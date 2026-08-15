@@ -9,8 +9,9 @@ describe("update release selection", () => {
     expect(compareSeeingStoneVersions(parseSeeingStoneVersion("v0.7.1-beta.4")!, parseSeeingStoneVersion("v0.7.1-beta.3")!)).toBeGreaterThan(0);
     expect(compareSeeingStoneVersions(parseSeeingStoneVersion("v0.7.1")!, parseSeeingStoneVersion("v0.7.1-beta.4")!)).toBeGreaterThan(0);
   });
-  it("normalizes the historical Beta 2 tag and ignores malformed tags and drafts", () => {
+  it("normalizes Seeing Stone beta tags and ignores malformed tags and drafts", () => {
     expect(parseSeeingStoneVersion("Seeing.Stone.beta.2.v.0.7.0")).toEqual(parseSeeingStoneVersion("0.7.0-beta.2"));
+    expect(parseSeeingStoneVersion("Seeing.Stone.beta.3.v.0.7.1")).toEqual(parseSeeingStoneVersion("0.7.1-beta.3"));
     expect(parseSeeingStoneVersion("beta-two")).toBeNull();
     expect(selectNewestRelease("0.7.0", [release("Seeing.Stone.beta.2.v.0.7.0"), release("v0.7.1-beta.3"), release("v9.0.0", { draft: true })])?.tagName).toBe("v0.7.1-beta.3");
   });
@@ -19,6 +20,7 @@ describe("update release selection", () => {
   });
   it("only generates canonical URLs for recognized tags", () => {
     expect(canonicalReleasePageUrl("v0.7.1-beta.3")).toBe("https://github.com/lostthoughts54/seeing-stone/releases/tag/v0.7.1-beta.3");
+    expect(canonicalReleasePageUrl("Seeing.Stone.beta.3.v.0.7.1")).toBe("https://github.com/lostthoughts54/seeing-stone/releases/tag/Seeing.Stone.beta.3.v.0.7.1");
     expect(canonicalReleasePageUrl("https://evil.invalid")).toBeNull();
   });
   it("returns safe manual and quiet automatic failures", async () => {

@@ -21,10 +21,10 @@ export interface UpdateStatus {
 }
 
 interface ParsedVersion { major: number; minor: number; patch: number; prerelease: Array<string | number>; }
-const HISTORICAL_BETA_2 = "Seeing.Stone.beta.2.v.0.7.0";
 
 export function parseSeeingStoneVersion(tag: string): ParsedVersion | null {
-  const normalized = tag === HISTORICAL_BETA_2 ? "0.7.0-beta.2" : tag.replace(/^v/i, "");
+  const historicalBeta = /^Seeing\.Stone\.beta\.(\d+)\.v\.(\d+\.\d+\.\d+)$/i.exec(tag);
+  const normalized = historicalBeta ? `${historicalBeta[2]}-beta.${historicalBeta[1]}` : tag.replace(/^v/i, "");
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(normalized);
   if (!match) return null;
   const prerelease = match[4] ? match[4].split(".").map((part) => /^\d+$/.test(part) ? Number(part) : part) : [];
@@ -54,7 +54,7 @@ export function canonicalReleasePageUrl(tagName: string): string | null {
 export function selectNewestRelease(currentVersion: string, releases: ReleaseCandidate[]): ReleaseCandidate | null {
   const current = parseSeeingStoneVersion(currentVersion);
   if (!current) return null;
-  // Beta 2 predates semver tags but is still a prerelease development build.
+  // The 0.7.0 package version predates semver tags but is still a prerelease development build.
   const prereleaseChannel = current.prerelease.length > 0 || currentVersion === "0.7.0";
   const eligible = releases.filter((release) => !release.draft && (!release.prerelease || prereleaseChannel))
     .map((release) => ({ release, version: parseSeeingStoneVersion(release.tagName) }))
