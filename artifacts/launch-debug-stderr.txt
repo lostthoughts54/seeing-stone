@@ -1,0 +1,319 @@
+[47424:0813/011451.173:VERBOSE1:base\allocator\scheduler_loop_quarantine_config.cc:168] No entry found for browser/global.
+[47424:0813/011451.241:VERBOSE1:base\allocator\scheduler_loop_quarantine_config.cc:168] No entry found for browser/*.
+[47424:0813/011451.298:VERBOSE1:base\allocator\scheduler_loop_quarantine_config.cc:168] No entry found for /main.
+[47424:0813/011451.324:VERBOSE1:base\allocator\scheduler_loop_quarantine_config.cc:168] No entry found for /io.
+[47424:0813/011453.052:VERBOSE1:components\device_event_log\device_event_log_impl.cc:203] [01:14:53.053] Display: EVENT: screen_win.cc:1043 Displays updated, count: 2
+[47424:0813/011453.358:VERBOSE1:components\device_event_log\device_event_log_impl.cc:203] [01:14:53.358] Display: EVENT: screen_win.cc:1045 Display[2919157218] bounds=[-1920,180 1920x1080], workarea=[-1920,180 1920x1032], scale=1, rotation=0, panel_rotation=0 external detected
+[47424:0813/011453.359:VERBOSE1:components\device_event_log\device_event_log_impl.cc:203] [01:14:53.359] Display: EVENT: screen_win.cc:1045 Display[363188828] bounds=[0,0 2560x1440], workarea=[0,0 2560x1392], scale=1, rotation=0, panel_rotation=0 external detected
+[47424:0813/011453.362:VERBOSE1:components\proxy_config\pref_proxy_config_tracker_impl.cc:462] 0x30fc00467400: set chrome proxy config service to 0x30fc00525c00
+Application startup failed. { code: 'PERSISTENCE_INTEGRITY_FAILED', status: 503, name: 'AppError' }
+[47424:0813/011453.759:VERBOSE1:content\browser\first_party_sets\first_party_sets_handler_impl_instance.cc:270] Empty path. Failed initializing First-Party Sets database.
+[47424:0813/011453.762:VERBOSE1:base\allocator\scheduler_loop_quarantine_config.cc:168] No entry found for browser/io.
+[47424:0813/011454.121:VERBOSE1:base\metrics\statistics_recorder.cc:631] Collections of all histograms
+Histogram: Accessibility.ManuallyEnabled recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: Chrome.ProcessSingleton.TimeToCreate recorded 1 samples, mean = 2.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+10 ... 
+
+Histogram: Cookie.FirstPartySets.Browser.DelayedQueriesCount recorded 1 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 100.0%) {0.0%}
+2  ... 
+
+Histogram: Cookie.FirstPartySets.Browser.MostDelayedQueryDelta recorded 1 samples, mean = 147.0 (flags = 0x1)
+0    ... 
+135  -O                                                                        (1 = 100.0%) {0.0%}
+160  ... 
+
+Histogram: GPU.GPUProcessLaunchTime recorded 1 samples, mean = 389.0 (flags = 0x1)
+0    ... 
+378  -O                                                                        (1 = 100.0%) {0.0%}
+449  ... 
+
+Histogram: GPU.GPUProcessTerminationStatus2 recorded 1 samples, mean = 4.0 (flags = 0x1)
+0  ... 
+4  -O                                                                        (1 = 100.0%) {0.0%}
+5  ... 
+
+Histogram: GPU.ProcessLifetime2 recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: GPU.ProcessLifetimeEvents.HardwareAccelerated recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: MPArch.ChildProcessLaunchFirst recorded 1 samples, mean = 54.0 (flags = 0x1)
+0   ... 
+48  -O                                                                        (1 = 100.0%) {0.0%}
+57  ... 
+
+Histogram: MPArch.ChildProcessLaunchSubsequent recorded 1 samples, mean = 65.0 (flags = 0x1)
+0   ... 
+57  -O                                                                        (1 = 100.0%) {0.0%}
+68  ... 
+
+Histogram: MPArch.ChildProcessLauncher.Notify recorded 2 samples, mean = 268.5 (flags = 0x1)
+0    ... 
+160  -O                                                                        (1 = 50.0%) {0.0%}
+190  ... 
+318  -O                                                                        (1 = 50.0%) {50.0%}
+378  ... 
+
+Histogram: MPArch.ChildProcessLauncher.PreLaunchDelay recorded 2 samples, mean = 0.5 (flags = 0x1)
+0  -O                                                                        (1 = 50.0%)
+1  -O                                                                        (1 = 50.0%) {50.0%}
+2  ... 
+
+Histogram: Memory.PartitionAlloc.PartitionRoot.ExtrasSize recorded 1 samples, mean = 4.0 (flags = 0x1)
+0  ... 
+4  -O                                                                        (1 = 100.0%) {0.0%}
+5  ... 
+
+Histogram: Mojo.EndToEndLatencyUs.BrowserIO recorded 0 samples (flags = 0x1)
+0 ... 
+
+Histogram: Mojo.EndToEndLatencyUs.BrowserMain recorded 0 samples (flags = 0x1)
+0 ... 
+
+Histogram: NQE.ContentObserver.NetworkQualityMeaningfullyChanged recorded 2 samples, mean = 1.0
+0  O                                                                         (0 = 0.0%)
+1  --O                                                                       (2 = 100.0%) {0.0%}
+2  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: Net.DNS.DnsConfig.Windows.Compatibility recorded 1 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 100.0%) {0.0%}
+2  ... 
+
+Histogram: Net.DNS.DnsConfig.Windows.ReadSystemSettings0 recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: Net.DNS.DnsHosts.Count recorded 1 samples, mean = 40.0 (flags = 0x1)
+0   ... 
+39  -O                                                                        (1 = 100.0%) {0.0%}
+49  ... 
+
+Histogram: Net.DNS.DnsHosts.EstimateMemoryUsage recorded 1 samples, mean = 3646.0 (flags = 0x1)
+0     ... 
+3206  -O                                                                        (1 = 100.0%) {0.0%}
+3649  ... 
+
+Histogram: Net.DNS.DnsHosts.FileSize recorded 1 samples, mean = 3690.0 (flags = 0x1)
+0     ... 
+3215  -O                                                                        (1 = 100.0%) {0.0%}
+4647  ... 
+
+Histogram: Net.NetworkChangeNotifier.NewConnectionCost recorded 1 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 100.0%) {0.0%}
+2  ... 
+
+Histogram: OSCrypt.Win.Decrypt.Result recorded 1 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 100.0%) {0.0%}
+2  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: OSCrypt.Win.Decrypt.Time recorded 1 samples, mean = 14.0 (flags = 0x1)
+0   ... 
+14  -O                                                                        (1 = 100.0%) {0.0%}
+17  ... 
+
+Histogram: Process.Sandbox.StartSandboxedWin.CreatePolicyDuration recorded 1 samples, mean = 1200.0 (flags = 0x1)
+0     ... 
+1068  -O                                                                        (1 = 100.0%) {0.0%}
+1313  ... 
+
+Histogram: Process.Sandbox.StartSandboxedWin.GeneratePolicyDuration recorded 1 samples, mean = 1418.0 (flags = 0x1)
+0     ... 
+1313  -O                                                                        (1 = 100.0%) {0.0%}
+1614  ... 
+
+Histogram: Process.Sandbox.StartSandboxedWin.PostSpawnTargetDuration recorded 1 samples, mean = 4.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+5  ... 
+
+Histogram: Process.Sandbox.StartSandboxedWin.SpawnTargetDuration recorded 1 samples, mean = 43079.0 (flags = 0x1)
+0      ... 
+35647  -O                                                                        (1 = 100.0%) {0.0%}
+43815  ... 
+
+Histogram: Process.Sandbox.StartSandboxedWin.TotalDuration recorded 1 samples, mean = 45701.0 (flags = 0x1)
+0      ... 
+43815  -O                                                                        (1 = 100.0%) {0.0%}
+53854  ... 
+
+Histogram: Scheduling.MessagePumpTimeKeeper.BrowserIO recorded 0 samples (flags = 0x1)
+0 ... 
+
+Histogram: Scheduling.MessagePumpTimeKeeper.BrowserUI recorded 0 samples (flags = 0x1)
+0 ... 
+
+Histogram: SiteIsolation.IsSitePerProcessOrStricter recorded 1 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 100.0%) {0.0%}
+2  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: Startup.BrowserMainRunnerImplInitializeLongTime recorded 1 samples, mean = 2403.0 (flags = 0x1)
+0     ... 
+2394  -O                                                                        (1 = 100.0%) {0.0%}
+2763  ... 
+
+Histogram: ThreadPool.UnnecessaryWakeup.Browser.Foreground recorded 2 samples, mean = 1.0 (flags = 0x1)
+0  O                                                                         (0 = 0.0%)
+1  --O                                                                       (2 = 100.0%) {0.0%}
+2  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: Tracing.Init.InitTracing recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: Tracing.Init.Perfetto.Initialize recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: UMA.ChildProcess.Ping.SharedMemorySetUp recorded 3 samples, mean = 0.7 (flags = 0x1)
+0  --O                                                                       (2 = 66.7%)
+1  O                                                                         (0 = 0.0%) {66.7%}
+2  -O                                                                        (1 = 33.3%) {66.7%}
+3  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: UMA.LocalHistogram recorded 2 samples, mean = 1.0
+0  O                                                                         (0 = 0.0%)
+1  --O                                                                       (2 = 100.0%) {0.0%}
+2  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: UMA.MetricsService.PendingOngoingLogOnDisable recorded 1 samples, mean = 0.0 (flags = 0x1)
+0  -O                                                                        (1 = 100.0%)
+1  ... 
+
+Histogram: UMA.PersistentAllocator.FieldTrialAllocator.UsedPct recorded 2 samples, mean = 0.0 (flags = 0x1)
+0  --O                                                                       (2 = 100.0%)
+1  ... 
+
+Histogram: V8.SandboxMode recorded 1 samples, mean = 3.0 (flags = 0x1)
+0  ... 
+3  -O                                                                        (1 = 100.0%) {0.0%}
+4  ... 
+
+Histogram: V8.SandboxReservationSizeGB recorded 1 samples (flags = 0x1)
+1152  -O                                                                        (1 = 100.0%)
+
+Histogram: Variations.FeatureAccess recorded 101 samples (flags = 0x1)
+-2117579521 -O                                                                        (1 = 1.0%)
+-2107538580 -O                                                                        (1 = 1.0%)
+-2102298458 -O                                                                        (1 = 1.0%)
+-2060232198 -O                                                                        (1 = 1.0%)
+-1995209261 -O                                                                        (1 = 1.0%)
+-1906867679 -O                                                                        (1 = 1.0%)
+-1858910104 -O                                                                        (1 = 1.0%)
+-1728976901 -O                                                                        (1 = 1.0%)
+-1711317086 -O                                                                        (1 = 1.0%)
+-1688499241 -O                                                                        (1 = 1.0%)
+-1660447659 -O                                                                        (1 = 1.0%)
+-1655770158 -O                                                                        (1 = 1.0%)
+-1553292923 -O                                                                        (1 = 1.0%)
+-1502757532 -O                                                                        (1 = 1.0%)
+-1492938903 -O                                                                        (1 = 1.0%)
+-1413243002 -O                                                                        (1 = 1.0%)
+-1378540834 -O                                                                        (1 = 1.0%)
+-1226374686 -O                                                                        (1 = 1.0%)
+-1215002415 -O                                                                        (1 = 1.0%)
+-1195638501 -O                                                                        (1 = 1.0%)
+-1187667623 -O                                                                        (1 = 1.0%)
+-1049192801 -O                                                                        (1 = 1.0%)
+-1016276104 -O                                                                        (1 = 1.0%)
+-1005649085 -O                                                                        (1 = 1.0%)
+-911204236  -O                                                                        (1 = 1.0%)
+-909212394  -O                                                                        (1 = 1.0%)
+-807606769  -O                                                                        (1 = 1.0%)
+-727594202  -O                                                                        (1 = 1.0%)
+-717224835  -O                                                                        (1 = 1.0%)
+-632734404  -O                                                                        (1 = 1.0%)
+-614860742  -O                                                                        (1 = 1.0%)
+-578246082  -O                                                                        (1 = 1.0%)
+-541926158  -O                                                                        (1 = 1.0%)
+-516599012  -O                                                                        (1 = 1.0%)
+-506046811  -O                                                                        (1 = 1.0%)
+-494086340  -O                                                                        (1 = 1.0%)
+-410734873  -O                                                                        (1 = 1.0%)
+-406115708  -O                                                                        (1 = 1.0%)
+-359833222  -O                                                                        (1 = 1.0%)
+-295930877  -O                                                                        (1 = 1.0%)
+-240196760  -O                                                                        (1 = 1.0%)
+-203688515  -O                                                                        (1 = 1.0%)
+-202553235  -O                                                                        (1 = 1.0%)
+-180346475  -O                                                                        (1 = 1.0%)
+-161487917  -O                                                                        (1 = 1.0%)
+-137791953  -O                                                                        (1 = 1.0%)
+-122994576  -O                                                                        (1 = 1.0%)
+-108627637  -O                                                                        (1 = 1.0%)
+-23209715   -O                                                                        (1 = 1.0%)
+18629499    -O                                                                        (1 = 1.0%)
+41534857    -O                                                                        (1 = 1.0%)
+63400227    -O                                                                        (1 = 1.0%)
+98757146    -O                                                                        (1 = 1.0%)
+113167134   -O                                                                        (1 = 1.0%)
+240240699   -O                                                                        (1 = 1.0%)
+260925644   -O                                                                        (1 = 1.0%)
+270624428   -O                                                                        (1 = 1.0%)
+296915847   -O                                                                        (1 = 1.0%)
+310256564   -O                                                                        (1 = 1.0%)
+331875907   -O                                                                        (1 = 1.0%)
+394507292   -O                                                                        (1 = 1.0%)
+435853294   -O                                                                        (1 = 1.0%)
+450950906   -O                                                                        (1 = 1.0%)
+485903736   -O                                                                        (1 = 1.0%)
+492662271   -O                                                                        (1 = 1.0%)
+533100406   -O                                                                        (1 = 1.0%)
+748164110   -O                                                                        (1 = 1.0%)
+759649158   -O                                                                        (1 = 1.0%)
+919092195   -O                                                                        (1 = 1.0%)
+962216855   -O                                                                        (1 = 1.0%)
+989585550   -O                                                                        (1 = 1.0%)
+1035653911  -O                                                                        (1 = 1.0%)
+1054475148  -O                                                                        (1 = 1.0%)
+1078028982  -O                                                                        (1 = 1.0%)
+1081479179  -O                                                                        (1 = 1.0%)
+1287815939  -O                                                                        (1 = 1.0%)
+1314327410  -O                                                                        (1 = 1.0%)
+1408933162  -O                                                                        (1 = 1.0%)
+1495121320  -O                                                                        (1 = 1.0%)
+1506130378  -O                                                                        (1 = 1.0%)
+1537607498  -O                                                                        (1 = 1.0%)
+1578755036  -O                                                                        (1 = 1.0%)
+1580801830  -O                                                                        (1 = 1.0%)
+1640401204  -O                                                                        (1 = 1.0%)
+1664214230  -O                                                                        (1 = 1.0%)
+1664286639  -O                                                                        (1 = 1.0%)
+1691859835  -O                                                                        (1 = 1.0%)
+1706102350  -O                                                                        (1 = 1.0%)
+1740992949  -O                                                                        (1 = 1.0%)
+1787376275  -O                                                                        (1 = 1.0%)
+1799862370  -O                                                                        (1 = 1.0%)
+1816811671  -O                                                                        (1 = 1.0%)
+1838400867  -O                                                                        (1 = 1.0%)
+1848167202  -O                                                                        (1 = 1.0%)
+1848990866  -O                                                                        (1 = 1.0%)
+1896790961  -O                                                                        (1 = 1.0%)
+1924857150  -O                                                                        (1 = 1.0%)
+1977291722  -O                                                                        (1 = 1.0%)
+2014181330  -O                                                                        (1 = 1.0%)
+2040130620  -O                                                                        (1 = 1.0%)
+2120939159  -O                                                                        (1 = 1.0%)
+
+Histogram: Windows.DisplayIdFromDeviceId recorded 2 samples, mean = 3.0 (flags = 0x1)
+0  ... 
+3  --O                                                                       (2 = 100.0%) {0.0%}
+4  O                                                                         (0 = 0.0%) {100.0%}
+
+Histogram: Windows.DisplayIdFromDeviceKey recorded 2 samples, mean = 3.0 (flags = 0x1)
+0  ... 
+3  --O                                                                       (2 = 100.0%) {0.0%}
+4  O                                                                         (0 = 0.0%) {100.0%}
+
+

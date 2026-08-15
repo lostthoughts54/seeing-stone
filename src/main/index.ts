@@ -57,6 +57,7 @@ import { requestedPlayerAdapterMode, resolvePlayerAdapterLaunch } from "./servic
 import { detectLibMpvRuntime, detectMediaProbeRuntime, libMpvManifestPath, libMpvRuntimeDirectory } from "./services/libMpvRuntime";
 import { LibMpvHost } from "./services/libMpvHost";
 import { ElectronLibMpvBridge } from "./services/libMpvElectronBridge";
+import { resolveLibMpvDiagnosticSettings } from "./services/libMpvDiagnostics";
 import { PlayerControllerRouter, type PlayerControllerRoute } from "./services/playerControllerRouter";
 import { persistPlayerEngineDiagnostics } from "./services/playerEngineDiagnostics";
 import { TrailerWindowService } from "./services/trailerWindow";
@@ -135,6 +136,22 @@ app.on("second-instance", () => {
 });
 
 if (ownsSingleInstance) app.whenReady().then(async () => {
+  const libMpvDiagnostics = resolveLibMpvDiagnosticSettings(process.env, app.getPath("logs"));
+  if (libMpvDiagnostics.enabled) {
+    logger.info("Opt-in libmpv playback diagnostics enabled.", {
+      requestedDecoderMode: libMpvDiagnostics.requestedDecoderMode,
+      activeDecoderMode: libMpvDiagnostics.decoderMode,
+      configuredHwdec: libMpvDiagnostics.hwdec,
+      presentationMode: libMpvDiagnostics.presentationMode,
+    });
+  }
+  if (libMpvDiagnostics.unsupportedReason) {
+    logger.warn("Requested libmpv diagnostic mode is unavailable.", {
+      requestedDecoderMode: libMpvDiagnostics.requestedDecoderMode,
+      presentationMode: libMpvDiagnostics.presentationMode,
+      reason: libMpvDiagnostics.unsupportedReason,
+    });
+  }
   const persistenceWorkerPath = app.isPackaged
     ? await resolveVerifiedPersistenceWorkerPath(process.resourcesPath, __dirname)
     : undefined;
@@ -274,6 +291,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
         libmpvCapability.artifacts.libraryPath,
         libmpvCapability.artifacts.nativeAddonPath,
         libmpvCapability.clientApiVersion!,
+        libMpvDiagnostics,
       );
       const host = new LibMpvHost(libmpvCapability, bridge);
       initialRoute = {

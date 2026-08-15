@@ -60,4 +60,31 @@ describe("LibMpvCommandClient", () => {
     client.close();
     vi.useRealTimers();
   });
+
+  it("spreads native property polling across ticks instead of querying every property in a burst", async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(async () => 1);
+    const session: LibMpvSession = {
+      generation: { playback: 1, surface: 1 },
+      command: async () => undefined,
+      query,
+      updateViewport: () => undefined,
+      stop: async () => undefined,
+    };
+    const client = new LibMpvCommandClient(session, () => () => undefined);
+    await Promise.all([
+      client.observe(1, "time-pos"),
+      client.observe(2, "duration"),
+      client.observe(3, "pause"),
+      client.observe(4, "track-list"),
+    ]);
+    query.mockClear();
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(query).toHaveBeenCalledTimes(10);
+    expect(query.mock.calls.filter(([property]) => property === "time-pos")).toHaveLength(5);
+    client.close();
+    vi.useRealTimers();
+  });
 });

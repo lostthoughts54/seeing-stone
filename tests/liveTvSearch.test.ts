@@ -3,12 +3,12 @@ import { searchLiveTvGuide } from "../src/shared/liveTvSearch";
 import type { LiveTvChannel, LiveTvProgram } from "../src/shared/contracts";
 
 const channels: LiveTvChannel[] = [
-  { id: "one", number: "5930", name: "Island One", imageTag: "one", isFavorite: false, currentProgramId: "now" },
-  { id: "two", number: "101", name: "Sunset TV", imageTag: null, isFavorite: false, currentProgramId: null },
+  { id: "one", number: "5930", name: "Island One", categories: [], imageTag: "one", isFavorite: false, currentProgramId: "now" },
+  { id: "two", number: "101", name: "Sunset TV", categories: [], imageTag: null, isFavorite: false, currentProgramId: null },
 ];
 const program = (id: string, channelId: string, name: string, startUtc: string, episodeTitle: string | null = null): LiveTvProgram => ({
   id, channelId, name, startUtc, endUtc: new Date(Date.parse(startUtc) + 30 * 60_000).toISOString(), episodeTitle,
-  overview: "Island arrivals and recaps", seasonNumber: null, episodeNumber: null, isLive: false, isSeries: true,
+  overview: "Island arrivals and recaps", genres: [], seasonNumber: null, episodeNumber: null, isLive: false, isSeries: true,
   isMovie: false, isNews: false, isKids: false, isSports: false, timerId: null, seriesTimerId: null,
 });
 const programs = [
@@ -32,5 +32,19 @@ describe("Live TV guide search", () => {
 
   it("does not depend on the currently visible guide window", () => {
     expect(searchLiveTvGuide("love island", channels, programs).programs).toContainEqual(expect.objectContaining({ program: expect.objectContaining({ id: "repeat" }) }));
+  });
+
+  it("uses structured subject metadata and modest channel signals", () => {
+    const subjectChannels: LiveTvChannel[] = [
+      { ...channels[0], id: "espn", name: "ESPN", categories: ["Sports"] },
+      { ...channels[1], id: "smithsonian", name: "Smithsonian Channel", categories: ["Science & Documentary"] },
+    ];
+    const subjectPrograms: LiveTvProgram[] = [
+      { ...program("game", "espn", "Saturday Showcase", "2026-08-10T20:00:00.000Z"), genres: ["College Football"], isSports: true },
+      { ...program("space", "smithsonian", "Worlds Beyond", "2026-08-10T21:00:00.000Z"), genres: ["Science", "Documentary"] },
+    ];
+    expect(searchLiveTvGuide("sports", subjectChannels, subjectPrograms).channels.map((channel) => channel.id)).toContain("espn");
+    expect(searchLiveTvGuide("football", subjectChannels, subjectPrograms).programs.map((entry) => entry.program.id)).toContain("game");
+    expect(searchLiveTvGuide("science", subjectChannels, subjectPrograms).channels.map((channel) => channel.id)).toContain("smithsonian");
   });
 });

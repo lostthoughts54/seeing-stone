@@ -1,7 +1,15 @@
 @echo off
 setlocal
 
-set "PLAYER=%~dp0.runtime\live-tv-recording-time-hotfix\win-unpacked\Seeing Stone Libmpv Test.exe"
+set "PLAYER=%~dp0.runtime\cache-library-refresh-hotfix\win-unpacked\Seeing Stone Libmpv Test.exe"
+
+if not exist "%PLAYER%" (
+  set "PLAYER=%~dp0.runtime\video-surface-recovery-hotfix\win-unpacked\Seeing Stone Libmpv Test.exe"
+)
+
+if not exist "%PLAYER%" (
+  set "PLAYER=%~dp0.runtime\live-tv-recording-time-hotfix\win-unpacked\Seeing Stone Libmpv Test.exe"
+)
 
 if not exist "%PLAYER%" (
   set "PLAYER=%~dp0.runtime\libmpv-dvr-recovery-hotfix\win-unpacked\Seeing Stone Libmpv Test.exe"

@@ -12,12 +12,12 @@
     "offscreenCanvas": true
   },
   "frames": {
-    "transferred": 168,
-    "presented": 162,
-    "released": 168,
-    "lastSequence": 168,
+    "transferred": 165,
+    "presented": 165,
+    "released": 165,
+    "lastSequence": 165,
     "maxOutstanding": 3,
-    "maxPresentationMilliseconds": 37.200000047683716
+    "maxPresentationMilliseconds": 31.299999952316284
   },
   "geometry": {
     "initial": {
@@ -66,8 +66,10 @@
     }
   },
   "native": {
-    "renderedFrames": 168,
-    "droppedFrames": 115,
+    "renderedFrames": 165,
+    "droppedFrames": 84,
+    "readbackFrames": 0,
+    "readbackFailures": 0,
     "outstandingFrames": 0,
     "poolSize": 3,
     "unusable": false
@@ -76,7 +78,7 @@
   "bitmapIpc": false,
   "fixtureSha256": "82680303c637abee267fb034bab55aa695d160d5de56f89c231554ecf4a80cd6",
   "librarySha256": "54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
-  "nativeAddonSha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
+  "nativeAddonSha256": "1ee151106e510876e0dbe30f3df106fa6819ea15a748d626c72d723da1ab5931",
   "realVideoRenderedThroughMpvRenderApi": true,
   "hwdec": "no-conservative-gate",
   "controllerSurface": {

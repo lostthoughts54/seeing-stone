@@ -25,6 +25,7 @@ export class LibMpvCommandClient implements MpvCommandClient {
   private readonly observed = new Map<number, { property: string; serialized: string | null }>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
+  private pollCursor = 0;
   private closed = false;
   private readonly removeEventListener: () => void;
 
@@ -99,8 +100,9 @@ export class LibMpvCommandClient implements MpvCommandClient {
 
   async observe(id: number, property: string): Promise<void> {
     if (this.closed) throw new AppError("PLAYER_UNAVAILABLE", "The player is unavailable.", 409);
-    this.observed.set(id, { property, serialized: null });
-    await this.pollOnce();
+    const observation = { property, serialized: null as string | null };
+    this.observed.set(id, observation);
+    await this.pollObservation(observation);
     if (!this.pollTimer) this.pollTimer = setInterval(() => { void this.pollOnce(); }, 100);
   }
 
@@ -118,17 +120,31 @@ export class LibMpvCommandClient implements MpvCommandClient {
     if (this.closed || this.polling) return;
     this.polling = true;
     try {
-      for (const observed of this.observed.values()) {
-        let value: unknown;
-        try { value = await this.session.query(observed.property); } catch { continue; }
-        const serialized = JSON.stringify(value);
-        if (serialized === observed.serialized) continue;
-        observed.serialized = serialized;
-        this.emit({ event: "property-change", name: observed.property, data: value });
+      const observations = [...this.observed.values()];
+      if (observations.length === 0) return;
+      // time-pos drives the visible playhead, so keep it at the original 10 Hz.
+      // Every other property is checked round-robin instead of querying the
+      // entire native property set in a single frame-blocking burst.
+      const position = observations.find((entry) => entry.property === "time-pos") ?? null;
+      if (position) await this.pollObservation(position);
+      const others = observations.filter((entry) => entry !== position);
+      if (others.length > 0) {
+        const next = others[this.pollCursor % others.length];
+        this.pollCursor = (this.pollCursor + 1) % others.length;
+        await this.pollObservation(next);
       }
     } finally {
       this.polling = false;
     }
+  }
+
+  private async pollObservation(observed: { property: string; serialized: string | null }): Promise<void> {
+    let value: unknown;
+    try { value = await this.session.query(observed.property); } catch { return; }
+    const serialized = JSON.stringify(value);
+    if (serialized === observed.serialized) return;
+    observed.serialized = serialized;
+    this.emit({ event: "property-change", name: observed.property, data: value });
   }
 
   private emit(message: MpvMessage): void {

@@ -32,10 +32,31 @@ describe("Seeing Stone player shell", () => {
     expect(app).toContain("window.jellyfin.playback.startLive");
     expect(app).toContain("window.jellyfin.liveTv.createRecording");
     expect(app).toContain("window.confirm");
-    expect(app).toContain("matchingChannels.slice(0, 300)");
+    expect(app).not.toContain("matchingChannels.slice(0, 300)");
+    expect(app).toContain("requestAnimationFrame(renderBatch)");
     expect(app).toContain("programsByChannel");
     expect(app).toContain("window.jellyfin.liveTv.searchPrograms");
     expect(html).toContain('placeholder="Search channels or programs"');
+  });
+
+  it("keeps the Full Guide controls compact and gives the grid the remaining viewport height", async () => {
+    const [html, styles] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/styles.css", "utf8"),
+    ]);
+    const toolbar = html.slice(html.indexOf('<header class="live-tv-toolbar">'), html.indexOf('id="liveTvContent"'));
+    for (const id of [
+      "liveTvGuideTab", "liveTvRecordingsTab", "liveTvScheduledTab", "liveTvChannelSearch",
+      "liveTvNowButton", "liveTvChannelSearchStatus", "liveTvStatus", "refreshLiveTvButton",
+    ]) expect(toolbar).toContain(`id="${id}"`);
+    const compactGuideStyles = styles.slice(
+      styles.indexOf("/* Live TV: a compact toolbar"),
+      styles.indexOf("/* Mini Guide lives"),
+    );
+    expect(compactGuideStyles).toMatch(/\.live-tv-view \{[\s\S]*?display: flex;[\s\S]*?height: 100%;[\s\S]*?min-height: 0;[\s\S]*?overflow: hidden;/);
+    expect(compactGuideStyles).toMatch(/\.live-tv-toolbar \{[\s\S]*?grid-template-columns:/);
+    expect(compactGuideStyles).toMatch(/\.live-tv-content \{[\s\S]*?flex: 1 1 auto;[\s\S]*?min-height: 0;/);
+    expect(compactGuideStyles).toMatch(/\.live-tv-grid \{[\s\S]*?flex: 1 1 0;[\s\S]*?max-height: none;[\s\S]*?min-height: 0;/);
   });
 
   it("keeps Live TV artwork authenticated and the Mini Guide above auto-hiding controls", async () => {
@@ -312,6 +333,18 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain('classList.toggle("is-hidden", selectionAvailable)');
   });
 
+  it("offers an explicit server catalog refresh while keeping show libraries paginated", async () => {
+    const [html, renderer] = await Promise.all([
+      readFile("src/renderer/index.html", "utf8"),
+      readFile("src/renderer/app.ts", "utf8"),
+    ]);
+    expect(html).toContain('id="refreshLibrariesButton"');
+    expect(html).toContain("Refresh Media Libraries");
+    expect(renderer).toContain("state.libraryCache.clear()");
+    expect(renderer).toContain('options.requestExactTotal === true || type === "Series"');
+    expect(renderer).toContain("refreshMediaLibraries()");
+  });
+
   it("provides a control-safe cinema fullscreen with idle restoration behavior", async () => {
     const [styles, renderer, preload] = await Promise.all([
       readFile("src/renderer/styles.css", "utf8"),
@@ -432,7 +465,7 @@ describe("Seeing Stone player shell", () => {
   it("revalidates open library views so newly added server items appear without restarting", async () => {
     const renderer = await readFile("src/renderer/app.ts", "utf8");
     expect(renderer).toContain("await refreshLibrary(library, true)");
-    expect(renderer).toContain("state.libraryRequestIds.get(library.id) !== requestId");
+    expect(renderer).toContain("!state.libraryRequestGate.isCurrent(requestToken)");
     expect(renderer).toContain("window.setInterval(() => { void refreshVisibleCatalog(); }, CATALOG_REFRESH_INTERVAL_MS)");
     expect(renderer).toContain('window.addEventListener("focus", () => { void refreshVisibleCatalog(); })');
     expect(renderer).toContain('document.addEventListener("visibilitychange"');

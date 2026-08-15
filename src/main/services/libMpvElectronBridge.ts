@@ -2,6 +2,14 @@ import { dirname } from "node:path";
 import { BrowserWindow, type IpcMain, sharedTexture } from "electron";
 import { AppError } from "./errors";
 import { isStrictlyNewerFrameSequence } from "./libMpvFrameOrder";
+import {
+  LibMpvDiagnosticLog,
+  type LibMpvDiagnosticSettings,
+} from "./libMpvDiagnostics";
+import {
+  SharedTextureSlotLifecycle,
+  type SharedTextureSlotLifecycleEvent,
+} from "./libMpvSharedTextureLifecycle";
 import type {
   LibMpvGeneration,
   LibMpvHostCommand,
@@ -16,7 +24,10 @@ export const LIBMPV_PRESENTER_IPC = Object.freeze({
   start: "seeing-stone:libmpv-presenter-start",
   ready: "seeing-stone:libmpv-presenter-ready",
   stop: "seeing-stone:libmpv-presenter-stop",
+  cpuFrame: "seeing-stone:libmpv-presenter-cpu-frame",
   presented: "seeing-stone:libmpv-presenter-presented",
+  recover: "seeing-stone:libmpv-presenter-recover",
+  textureLifecycle: "seeing-stone:libmpv-presenter-texture-lifecycle",
   error: "seeing-stone:libmpv-presenter-error",
 });
 
@@ -26,15 +37,28 @@ interface NativeFrame {
   width: number;
   height: number;
   timestampMicroseconds: number;
-  ntHandle: Buffer;
+  ntHandle?: Buffer;
+  pixels?: Buffer;
+  pixelFormat?: "rgba";
+  readbackMilliseconds?: number;
 }
 
 interface NativeStats {
   renderedFrames: number;
   droppedFrames: number;
+  readbackFrames?: number;
+  readbackFailures?: number;
   outstandingFrames: number;
   poolSize: number;
   unusable: boolean;
+}
+
+interface NativeDiagnosticEvent {
+  kind: string;
+  prefix?: string;
+  level?: string;
+  text?: string;
+  error?: number;
 }
 
 interface NativeProducer {
@@ -42,6 +66,7 @@ interface NativeProducer {
   releaseFrame(slot: number, sequence: number): boolean;
   command(values: string[]): void;
   getProperty(name: string): unknown;
+  drainDiagnostics(): NativeDiagnosticEvent[];
   setSuspended(suspended: boolean): void;
   getStats(): NativeStats;
   destroy(): void;
@@ -61,7 +86,9 @@ interface NativeAddon {
     poolSize: number;
     loop: boolean;
     audioEnabled: boolean;
-    hardwareDecoding: boolean;
+    hardwareDecodingMode: "current" | "software" | "auto-copy";
+    diagnosticLogging: boolean;
+    cpuReadback: boolean;
     startPositionSeconds: number;
   }) => NativeProducer;
 }
@@ -75,7 +102,16 @@ interface PendingOpen {
 
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const PRESENTATION_ACK_TIMEOUT_MS = 5_000;
+const PRESENTER_RECOVERY_DEBOUNCE_MS = 150;
 const TEXTURE_RELEASE_TIMEOUT_MS = 5_000;
+const DIAGNOSTIC_POLL_INTERVAL_MS = 1_000;
+const DIAGNOSTIC_COUNTER_INTERVAL = 5;
+const diagnosticProperties = [
+  "video-codec", "video-codec-name", "video-format", "video-params", "video-dec-params", "video-out-params",
+  "container-fps", "estimated-vf-fps", "display-fps", "deinterlace", "hwdec", "hwdec-current", "hwdec-codecs",
+  "current-vo", "gpu-api", "gpu-context", "video-sync", "interpolation", "vd-lavc-threads", "vd-lavc-dr",
+  "vd-lavc-framedrop", "decoder-frame-drop-count", "frame-drop-count", "vo-drop-frame-count", "mistimed-frame-count",
+] as const;
 
 function generationMatches(left: LibMpvGeneration | null, right: LibMpvGeneration): boolean {
   return Boolean(left && left.playback === right.playback && left.surface === right.surface);
@@ -99,9 +135,16 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   private presenterReady = false;
   private awaitingPresentedSequence: number | null = null;
   private presentationTimer: ReturnType<typeof setTimeout> | null = null;
+  private presenterRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private surfaceEpoch = 0;
   private pendingOpen: PendingOpen | null = null;
   private lastTransferredSequence = 0;
+  private awaitingCpuFrameRelease: { slot: number; sequence: number } | null = null;
+  private diagnosticsTimer: ReturnType<typeof setInterval> | null = null;
+  private diagnosticPollCount = 0;
+  private lastDiagnosticSignature = "";
+  private readonly diagnosticLog: LibMpvDiagnosticLog | null;
+  private readonly sharedTextureSlots: SharedTextureSlotLifecycle;
 
   private readonly onListenerReady = (event: Electron.IpcMainEvent): void => {
     if (!this.authorized(event)) return;
@@ -120,6 +163,13 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     const record = input as Record<string, unknown>;
     if (!Number.isSafeInteger(record.sequence)) return;
     if (record.sequence !== this.awaitingPresentedSequence) return;
+    const presentationMode = this.diagnostics?.presentationMode ?? "shared-texture";
+    if (presentationMode === "cpu-readback") this.releasePendingCpuFrame(Number(record.sequence));
+    this.diagnosticLog?.write("presentation-complete", {
+      presentationMode,
+      sequence: Number(record.sequence),
+      durationMilliseconds: Number.isFinite(record.durationMilliseconds) ? record.durationMilliseconds : null,
+    });
     this.awaitingPresentedSequence = null;
     if (this.presentationTimer) clearTimeout(this.presentationTimer);
     this.presentationTimer = null;
@@ -141,16 +191,55 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.fail("PRESENTER_INITIALIZATION_FAILED");
   };
 
+  private readonly onPresenterRecover = (event: Electron.IpcMainEvent, input: unknown): void => {
+    if (!this.authorized(event) || !this.matchesSurface(input)) return;
+    const record = input as Record<string, unknown>;
+    this.requestPresenterRecovery(typeof record.reason === "string" ? record.reason : "renderer-request");
+  };
+
+  private readonly onTextureLifecycle = (event: Electron.IpcMainEvent, input: unknown): void => {
+    if (!this.authorized(event) || !input || typeof input !== "object") return;
+    const record = input as Record<string, unknown>;
+    const sequence = Number(record.sequence);
+    const surfaceGeneration = Number(record.surfaceGeneration);
+    const phase = typeof record.phase === "string" ? record.phase : "";
+    if (!Number.isSafeInteger(sequence) || !Number.isSafeInteger(surfaceGeneration)) return;
+    if (!this.sharedTextureSlots.matches(sequence, surfaceGeneration)) {
+      if (!this.stopped) this.textureLifecycleViolation("LIBMPV_TEXTURE_RELEASE_SIGNAL_WITHOUT_MATCHING_SLOT", {
+        phase, sequence, surfaceGeneration,
+      });
+      return;
+    }
+    this.diagnosticLog?.write(`texture-${phase}`, {
+      sequence,
+      surfaceGeneration,
+      textureId: typeof record.textureId === "string" ? record.textureId : null,
+      reason: typeof record.reason === "string" ? record.reason : null,
+    });
+    if (phase !== "renderer-gpu-release-complete") return;
+    try {
+      this.sharedTextureSlots.markRendererGpuReleaseComplete(sequence);
+    } catch (error) {
+      this.textureLifecycleViolation(error instanceof Error ? error.message : String(error), { sequence, surfaceGeneration });
+    }
+  };
+
   constructor(
     private readonly window: BrowserWindow,
     private readonly ipcMain: IpcMain,
     private readonly libraryPath: string,
     nativeAddonPath: string,
     expectedClientApiVersion: string,
+    private readonly diagnostics?: LibMpvDiagnosticSettings,
   ) {
+    this.diagnosticLog = diagnostics?.enabled ? new LibMpvDiagnosticLog(diagnostics) : null;
+    this.sharedTextureSlots = new SharedTextureSlotLifecycle((event, state) => {
+      this.logSharedTextureSlotLifecycle(event, state);
+    });
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     this.addon = require(nativeAddonPath) as NativeAddon;
-    if (typeof this.addon.LibMpvVideoProducer !== "function" || typeof this.addon.probeLibMpvRuntime !== "function" || !sharedTexture) {
+    if (typeof this.addon.LibMpvVideoProducer !== "function" || typeof this.addon.probeLibMpvRuntime !== "function"
+      || ((diagnostics?.presentationMode ?? "shared-texture") === "shared-texture" && !sharedTexture)) {
       throw new AppError("LIBMPV_NATIVE_UNAVAILABLE", "The experimental playback bridge is unavailable.", 503);
     }
     const probe = this.addon.probeLibMpvRuntime({
@@ -164,6 +253,8 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     ipcMain.on(LIBMPV_PRESENTER_IPC.listenerReady, this.onListenerReady);
     ipcMain.on(LIBMPV_PRESENTER_IPC.ready, this.onPresenterReady);
     ipcMain.on(LIBMPV_PRESENTER_IPC.presented, this.onPresented);
+    ipcMain.on(LIBMPV_PRESENTER_IPC.recover, this.onPresenterRecover);
+    ipcMain.on(LIBMPV_PRESENTER_IPC.textureLifecycle, this.onTextureLifecycle);
     ipcMain.on(LIBMPV_PRESENTER_IPC.error, this.onPresenterError);
     window.webContents.on("did-start-loading", () => {
       this.listenerReady = false;
@@ -176,7 +267,11 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       this.viewport = { ...this.viewport, visible: false };
       this.producer?.setSuspended(true);
     });
-    window.on("restore", () => { this.schedulePump(); });
+    window.on("restore", () => this.requestPresenterRecovery("window-restore"));
+    window.on("maximize", () => this.requestPresenterRecovery("window-maximize"));
+    window.on("unmaximize", () => this.requestPresenterRecovery("window-unmaximize"));
+    window.on("enter-full-screen", () => this.requestPresenterRecovery("window-enter-full-screen"));
+    window.on("leave-full-screen", () => this.requestPresenterRecovery("window-leave-full-screen"));
   }
 
   async initialize(sink: LibMpvNativeSink): Promise<void> {
@@ -201,13 +296,16 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         poolSize: 3,
         loop: false,
         audioEnabled: true,
-        hardwareDecoding: true,
+        hardwareDecodingMode: this.diagnostics?.decoderMode ?? "current",
+        diagnosticLogging: this.diagnostics?.enabled ?? false,
+        cpuReadback: this.diagnostics?.presentationMode === "cpu-readback",
         startPositionSeconds: Math.max(0, startPositionTicks / 10_000_000),
       });
     } catch {
       this.stopped = true;
       throw new AppError("LIBMPV_INITIALIZATION_FAILED", "The experimental player could not initialize.", 503);
     }
+    this.startDiagnostics();
     const firstFrame = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pendingOpen?.timer !== timer) return;
@@ -275,6 +373,8 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.listenerReady, this.onListenerReady);
     this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.ready, this.onPresenterReady);
     this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.presented, this.onPresented);
+    this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.recover, this.onPresenterRecover);
+    this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.textureLifecycle, this.onTextureLifecycle);
     this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.error, this.onPresenterError);
   }
 
@@ -303,8 +403,26 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.surfaceEpoch += 1;
     this.window.webContents.send(LIBMPV_PRESENTER_IPC.start, {
       surfaceGeneration: this.surfaceEpoch,
-      mechanism: "image-bitmap-renderer",
+      mechanism: this.diagnostics?.presentationMode === "cpu-readback" ? "cpu-readback-canvas" : "image-bitmap-renderer",
+      textureLifecycleLogging: Boolean(this.diagnosticLog),
     });
+  }
+
+  private requestPresenterRecovery(reason: string): void {
+    if (!this.producer || this.stopped || this.destroyed || this.window.isDestroyed() || !this.listenerReady) return;
+    // Stop feeding the stale surface immediately. The producer (and therefore
+    // audio) remains alive while preload releases the old canvas textures and
+    // acknowledges a fresh pair of presentation canvases.
+    this.presenterReady = false;
+    if (this.presenterRecoveryTimer) clearTimeout(this.presenterRecoveryTimer);
+    this.presenterRecoveryTimer = setTimeout(() => {
+      this.presenterRecoveryTimer = null;
+      if (!this.producer || this.stopped || this.destroyed || this.window.isDestroyed() || !this.listenerReady) return;
+      this.diagnosticLog?.write("presenter-recovery", { reason, surfaceGeneration: this.surfaceEpoch });
+      this.releasePendingCpuFrame(this.awaitingPresentedSequence ?? -1);
+      this.startPresenter();
+      this.window.webContents.invalidate();
+    }, PRESENTER_RECOVERY_DEBOUNCE_MS);
   }
 
   private schedulePump(): void {
@@ -322,6 +440,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       return;
     }
     const producer = this.producer;
+    const surfaceGeneration = this.surfaceEpoch;
     let frame: NativeFrame | null = null;
     try {
       frame = producer.nextFrame();
@@ -343,12 +462,32 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.awaitingPresentedSequence = frame.sequence;
     this.presentationTimer = setTimeout(() => {
       if (this.awaitingPresentedSequence !== frame!.sequence) return;
+      this.releasePendingCpuFrame(frame!.sequence);
       this.awaitingPresentedSequence = null;
       this.presentationTimer = null;
-      this.fail("LIBMPV_PRESENTATION_TIMEOUT");
+      this.requestPresenterRecovery("presentation-ack-timeout");
     }, PRESENTATION_ACK_TIMEOUT_MS);
+    this.diagnosticLog?.write("frame-render-complete", {
+      presentationMode: this.diagnostics?.presentationMode ?? "shared-texture",
+      sequence: frame.sequence,
+      slot: frame.slot,
+      width: frame.width,
+      height: frame.height,
+      timestampMicroseconds: frame.timestampMicroseconds,
+    });
+    if (this.diagnostics?.presentationMode === "cpu-readback") {
+      await this.sendCpuReadbackFrame(producer, frame);
+      return;
+    }
     let imported: ReturnType<typeof sharedTexture.importSharedTexture> | null = null;
     try {
+      if (!frame.ntHandle) throw new Error("LIBMPV_SHARED_TEXTURE_HANDLE_MISSING");
+      this.sharedTextureSlots.claim({
+        slot: frame.slot,
+        sequence: frame.sequence,
+        surfaceGeneration,
+        releaseNative: () => producer.releaseFrame(frame!.slot, frame!.sequence),
+      });
       imported = sharedTexture.importSharedTexture({
         textureInfo: {
           pixelFormat: "bgra",
@@ -357,12 +496,47 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
           timestamp: frame.timestampMicroseconds,
           handle: { ntHandle: frame.ntHandle },
         },
-        allReferencesReleased: () => { producer.releaseFrame(frame!.slot, frame!.sequence); },
+        allReferencesReleased: () => {
+          this.diagnosticLog?.write("texture-electron-all-references-released", {
+            sequence: frame!.sequence,
+            slot: frame!.slot,
+          });
+          try {
+            if (!this.sharedTextureSlots.has(frame!.sequence)) return;
+            this.sharedTextureSlots.markAllReferencesReleased(frame!.sequence);
+          } catch (error) {
+            this.textureLifecycleViolation(error instanceof Error ? error.message : String(error), {
+              sequence: frame!.sequence,
+              slot: frame!.slot,
+            });
+          }
+        },
+      });
+      this.diagnosticLog?.write("texture-import", {
+        sequence: frame.sequence,
+        slot: frame.slot,
+        textureId: imported.textureId,
+        pixelFormat: "bgra",
+      });
+      this.diagnosticLog?.write("texture-send-start", {
+        sequence: frame.sequence,
+        slot: frame.slot,
+        textureId: imported.textureId,
       });
       await sharedTexture.sendSharedTexture({
         frame: this.window.webContents.mainFrame,
         importedSharedTexture: imported,
-      }, { sequence: frame.sequence, surfaceGeneration: this.surfaceEpoch });
+      }, { sequence: frame.sequence, surfaceGeneration });
+      this.diagnosticLog?.write("texture-send-complete", {
+        sequence: frame.sequence,
+        slot: frame.slot,
+        textureId: imported.textureId,
+      });
+      this.diagnosticLog?.write("ipc-delivery", {
+        presentationMode: "shared-texture",
+        sequence: frame.sequence,
+        transport: "Electron sharedTexture",
+      });
       if (this.generation) {
         this.sink?.frame(this.generation, {
           sequence: frame.sequence,
@@ -371,7 +545,20 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
           timestampMicroseconds: frame.timestampMicroseconds,
         });
       }
-    } catch {
+    } catch (error) {
+      if (!imported && frame && this.sharedTextureSlots.has(frame.sequence)) {
+        try { this.sharedTextureSlots.abandonUnimported(frame.sequence); } catch (releaseError) {
+          this.textureLifecycleViolation(releaseError instanceof Error ? releaseError.message : String(releaseError), {
+            sequence: frame.sequence,
+            slot: frame.slot,
+          });
+        }
+      }
+      this.diagnosticLog?.write("texture-transfer-failed", {
+        sequence: frame?.sequence ?? null,
+        slot: frame?.slot ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      });
       this.awaitingPresentedSequence = null;
       if (this.presentationTimer) clearTimeout(this.presentationTimer);
       this.presentationTimer = null;
@@ -381,6 +568,172 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       this.pumping = false;
       this.schedulePump();
     }
+  }
+
+  private async sendCpuReadbackFrame(producer: NativeProducer, frame: NativeFrame): Promise<void> {
+    this.awaitingCpuFrameRelease = { slot: frame.slot, sequence: frame.sequence };
+    try {
+      if (!frame.pixels || frame.pixelFormat !== "rgba") throw new Error("LIBMPV_CPU_READBACK_FRAME_INVALID");
+      this.diagnosticLog?.write("readback-complete", {
+        sequence: frame.sequence,
+        slot: frame.slot,
+        pixelFormat: "rgba",
+        bytes: frame.pixels.byteLength,
+        readbackMilliseconds: frame.readbackMilliseconds ?? null,
+      });
+      this.window.webContents.send(LIBMPV_PRESENTER_IPC.cpuFrame, {
+        surfaceGeneration: this.surfaceEpoch,
+        sequence: frame.sequence,
+        width: frame.width,
+        height: frame.height,
+        timestampMicroseconds: frame.timestampMicroseconds,
+        pixelFormat: "rgba",
+        pixels: frame.pixels,
+      });
+      this.diagnosticLog?.write("ipc-delivery", {
+        presentationMode: "cpu-readback",
+        sequence: frame.sequence,
+        bytes: frame.pixels.byteLength,
+        transport: "ipcRenderer event",
+      });
+      if (this.generation) {
+        this.sink?.frame(this.generation, {
+          sequence: frame.sequence,
+          width: frame.width,
+          height: frame.height,
+          timestampMicroseconds: frame.timestampMicroseconds,
+        });
+      }
+    } catch {
+      this.releasePendingCpuFrame(frame.sequence);
+      this.awaitingPresentedSequence = null;
+      if (this.presentationTimer) clearTimeout(this.presentationTimer);
+      this.presentationTimer = null;
+      this.fail("LIBMPV_CPU_FRAME_TRANSFER_FAILED");
+    } finally {
+      this.pumping = false;
+      this.schedulePump();
+    }
+  }
+
+  private startDiagnostics(): void {
+    this.stopDiagnostics();
+    if (!this.diagnosticLog || !this.diagnostics || !this.producer) return;
+    this.diagnosticPollCount = 0;
+    this.lastDiagnosticSignature = "";
+    this.diagnosticLog.write("session-config", {
+      requestedDecoderMode: this.diagnostics.requestedDecoderMode,
+      activeDecoderTestMode: this.diagnostics.decoderMode,
+      configuredHwdec: this.diagnostics.hwdec,
+      presentationMode: this.diagnostics.presentationMode,
+      unsupportedReason: this.diagnostics.unsupportedReason,
+      playbackEngine: "libmpv",
+      videoOutput: "libmpv render API",
+      renderApi: "OpenGL",
+      gpuApi: "OpenGL ES 2",
+      gpuContext: "ANGLE D3D11",
+      frameTransport: this.diagnostics.presentationMode === "cpu-readback"
+        ? "fixed 1920x1080 GL_RGBA/GL_UNSIGNED_BYTE CPU readback over IPC"
+        : "fixed 1920x1080 BGRA shared textures",
+      texturePoolSize: 3,
+      presenter: this.diagnostics.presentationMode === "cpu-readback"
+        ? "IPC Uint8Array to ImageData on a 2D canvas"
+        : "Electron sharedTexture to ImageBitmapRenderingContext",
+      videoSync: "audio",
+      interpolation: false,
+      deinterlace: false,
+      hwdecCodecs: "h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx",
+      vdLavc: { threads: 0, directRendering: "auto", framedrop: "nonref" },
+      mpvD3d11VideoOutputOptions: "not active; vo=libmpv uses the external ANGLE/OpenGL render context",
+      vulkan: "disabled in the controlled mpv build",
+      nvdec: "not advertised by the controlled mpv/FFmpeg build",
+    });
+    this.collectDiagnostics();
+    this.diagnosticsTimer = setInterval(() => this.collectDiagnostics(), DIAGNOSTIC_POLL_INTERVAL_MS);
+  }
+
+  private stopDiagnostics(): void {
+    if (this.diagnosticsTimer) clearInterval(this.diagnosticsTimer);
+    this.diagnosticsTimer = null;
+    this.diagnosticPollCount = 0;
+    this.lastDiagnosticSignature = "";
+  }
+
+  private collectDiagnostics(): void {
+    const producer = this.producer;
+    if (!producer || !this.diagnosticLog) return;
+    const properties = Object.fromEntries(diagnosticProperties.map((name) => {
+      try { return [name, producer.getProperty(name)]; } catch { return [name, null]; }
+    }));
+    let events: NativeDiagnosticEvent[] = [];
+    try { events = producer.drainDiagnostics(); } catch { /* Diagnostic collection must not disturb playback. */ }
+    for (const event of events) this.diagnosticLog.write(event.kind, event);
+    let stats: NativeStats | null = null;
+    try { stats = producer.getStats(); } catch { /* The next poll will retry. */ }
+    const configuration = {
+      videoCodec: properties["video-codec"],
+      videoCodecName: properties["video-codec-name"],
+      videoFormat: properties["video-format"],
+      videoParams: properties["video-params"],
+      decoderParams: properties["video-dec-params"],
+      outputParams: properties["video-out-params"],
+      containerFps: properties["container-fps"],
+      estimatedFps: properties["estimated-vf-fps"],
+      displayFps: properties["display-fps"],
+      deinterlace: properties.deinterlace,
+      configuredHwdec: properties.hwdec,
+      activeHwdec: properties["hwdec-current"],
+      hwdecCodecs: properties["hwdec-codecs"],
+      activeVo: properties["current-vo"],
+      gpuApi: properties["gpu-api"],
+      gpuContext: properties["gpu-context"],
+      videoSync: properties["video-sync"],
+      interpolation: properties.interpolation,
+      vdLavcThreads: properties["vd-lavc-threads"],
+      vdLavcDirectRendering: properties["vd-lavc-dr"],
+      vdLavcFramedrop: properties["vd-lavc-framedrop"],
+    };
+    const signature = JSON.stringify(configuration);
+    if (signature !== this.lastDiagnosticSignature) {
+      this.lastDiagnosticSignature = signature;
+      this.diagnosticLog.write("video-state-change", configuration);
+    }
+    this.diagnosticPollCount += 1;
+    if (this.diagnosticPollCount % DIAGNOSTIC_COUNTER_INTERVAL === 0) {
+      this.diagnosticLog.write("frame-counters", {
+        decoderDroppedFrames: properties["decoder-frame-drop-count"],
+        frameDropCount: properties["frame-drop-count"],
+        videoOutputDroppedFrames: properties["vo-drop-frame-count"],
+        mistimedFrames: properties["mistimed-frame-count"],
+        sharedTextureTransport: stats,
+      });
+    }
+  }
+
+  private releasePendingCpuFrame(sequence: number): void {
+    const pending = this.awaitingCpuFrameRelease;
+    if (!pending || pending.sequence !== sequence) return;
+    this.awaitingCpuFrameRelease = null;
+    try { this.producer?.releaseFrame(pending.slot, pending.sequence); } catch { /* Release is best-effort during shutdown. */ }
+  }
+
+  private logSharedTextureSlotLifecycle(
+    event: SharedTextureSlotLifecycleEvent,
+    state: { slot: number; sequence: number; surfaceGeneration: number; allReferencesReleased: boolean; rendererGpuReleaseComplete: boolean },
+  ): void {
+    this.diagnosticLog?.write(`texture-${event}`, {
+      slot: state.slot,
+      sequence: state.sequence,
+      surfaceGeneration: state.surfaceGeneration,
+      allReferencesReleased: state.allReferencesReleased,
+      rendererGpuReleaseComplete: state.rendererGpuReleaseComplete,
+    });
+  }
+
+  private textureLifecycleViolation(code: string, details: Record<string, unknown>): void {
+    this.diagnosticLog?.write("texture-lifecycle-violation", { code, ...details });
+    console.error(`[Seeing Stone] ${code}`, details);
+    this.fail("LIBMPV_TEXTURE_LIFETIME_VIOLATION");
   }
 
   private fail(code: string): void {
@@ -399,6 +752,13 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   private async stopCurrent(): Promise<void> {
     this.stopped = true;
     const producer = this.producer;
+    if (producer && this.diagnosticLog) {
+      this.collectDiagnostics();
+      let finalStats: NativeStats | null = null;
+      try { finalStats = producer.getStats(); } catch { /* Best-effort final diagnostic snapshot. */ }
+      this.diagnosticLog.write("session-stop", { sharedTextureTransport: finalStats });
+    }
+    this.stopDiagnostics();
     if (producer) {
       // Audio must stop independently of renderer responsiveness or shared-
       // texture reference release. Texture cleanup may remain bounded and
@@ -408,6 +768,9 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       producer.setSuspended(true);
     }
     this.presenterReady = false;
+    if (this.presenterRecoveryTimer) clearTimeout(this.presenterRecoveryTimer);
+    this.presenterRecoveryTimer = null;
+    if (this.awaitingCpuFrameRelease) this.releasePendingCpuFrame(this.awaitingCpuFrameRelease.sequence);
     this.awaitingPresentedSequence = null;
     if (this.presentationTimer) clearTimeout(this.presentationTimer);
     this.presentationTimer = null;
@@ -424,9 +787,18 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     if (producer) {
       const deadline = Date.now() + TEXTURE_RELEASE_TIMEOUT_MS;
       while (producer.getStats().outstandingFrames > 0 && Date.now() < deadline) await delay(25);
+      const outstandingFrames = producer.getStats().outstandingFrames;
+      if (outstandingFrames > 0 || this.sharedTextureSlots.pendingCount > 0) {
+        this.diagnosticLog?.write("texture-release-timeout", {
+          outstandingFrames,
+          trackedSlots: this.sharedTextureSlots.pendingCount,
+        });
+      }
       producer.destroy();
     }
+    this.sharedTextureSlots.discardAll();
     this.generation = null;
     this.lastTransferredSequence = 0;
+    await this.diagnosticLog?.flush();
   }
 }

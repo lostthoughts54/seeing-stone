@@ -3,6 +3,7 @@ export type ImageKind = "Primary" | "Backdrop" | "Thumb";
 
 export interface SafeUserData {
   played: boolean;
+  favorite?: boolean;
   playbackPositionTicks: number;
   playedPercentage: number;
 }
@@ -18,9 +19,20 @@ export type BrowseSort = "title-ascending" | "title-descending" | "date-added-de
 export interface BrowseQuery {
   libraryId?: string;
   type: "Movie" | "Series" | "Episode" | "Mixed";
+  searchTerm?: string;
   genre?: string;
+  genres?: string[];
   personId?: string;
+  personIds?: string[];
   watched?: boolean;
+  favorite?: boolean;
+  resumable?: boolean;
+  officialRatings?: string[];
+  minPremiereDate?: string;
+  maxPremiereDate?: string;
+  minCommunityRating?: number;
+  is4K?: boolean;
+  enableTotalRecordCount?: boolean;
   sort: BrowseSort;
   startIndex: number;
   limit: number;
@@ -40,6 +52,7 @@ export interface MediaItem {
   overview: string;
   productionYear: number | null;
   premiereYear: number | null;
+  dateCreated?: string | null;
   officialRating: string | null;
   communityRating: number | null;
   runTimeTicks: number;
@@ -258,6 +271,8 @@ export interface LiveTvChannel {
   id: string;
   name: string;
   number: string | null;
+  /** Sanitized Jellyfin-supplied groups, genres, tags, and channel type. */
+  categories: string[];
   imageTag: string | null;
   isFavorite: boolean;
   currentProgramId: string | null;
@@ -268,6 +283,7 @@ export interface LiveTvProgram {
   channelId: string;
   name: string;
   overview: string;
+  genres: string[];
   startUtc: string;
   endUtc: string;
   episodeTitle: string | null;

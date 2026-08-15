@@ -1,7 +1,7 @@
 {
   "name": "seeing-stone",
   "productName": "Seeing Stone",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "author": "Seeing Stone contributors",
   "description": "Seeing Stone — a Windows-first, local-first Jellyfin client.",

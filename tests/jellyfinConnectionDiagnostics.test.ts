@@ -116,4 +116,87 @@ describe("Jellyfin connection diagnostics", () => {
       measuredAt: "2026-07-17T13:00:00.000Z",
     });
   });
+
+  it("retries a failed library count without declaring the connected server offline", async () => {
+    const browseCountValues: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") return serverInfo();
+      if (url.pathname === "/Users/AuthenticateByName") {
+        return Response.json({ AccessToken: "TEST_ONLY_TOKEN", User: { Id: "user-1", Name: "Viewer" } });
+      }
+      if (url.pathname === "/Users/user-1/Views") return Response.json({ Items: [] });
+      if (url.pathname === "/Users/user-1/Items") {
+        const enableCount = url.searchParams.get("EnableTotalRecordCount") ?? "";
+        browseCountValues.push(enableCount);
+        if (enableCount === "true") throw new Error("large count query dropped");
+        return Response.json({ Items: [{ Id: "movie-1", Name: "Movie", Type: "Movie" }] });
+      }
+      throw new Error(`Unexpected endpoint ${url.pathname}`);
+    }));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-library-count-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    await api.getLibraries();
+    const transitions: string[] = [];
+    const unsubscribe = api.onConnectionDiagnostics((diagnostics) => transitions.push(diagnostics.state));
+
+    await expect(api.browse({
+      libraryId: "large-vod-library",
+      type: "Movie",
+      sort: "title-ascending",
+      startIndex: 0,
+      limit: 60,
+      enableTotalRecordCount: true,
+    })).resolves.toMatchObject({
+      items: [{ id: "movie-1" }],
+      totalRecordCount: -1,
+    });
+
+    expect(browseCountValues).toEqual(["true", "false"]);
+    expect(api.getConnectionDiagnostics()).toMatchObject({ state: "connected" });
+    expect(transitions).not.toContain("offline");
+    unsubscribe();
+  });
+
+  it("renders the remaining home rows when one library's latest request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") return serverInfo();
+      if (url.pathname === "/Users/AuthenticateByName") {
+        return Response.json({ AccessToken: "TEST_ONLY_TOKEN", User: { Id: "user-1", Name: "Viewer" } });
+      }
+      if (url.pathname === "/Users/user-1/Views") return Response.json({ Items: [
+        { Id: "slow-library", Name: "Slow VOD", CollectionType: "movies" },
+        { Id: "fast-library", Name: "Fast Movies", CollectionType: "movies" },
+      ] });
+      if (url.pathname === "/Users/user-1/Items/Resume" || url.pathname === "/Shows/NextUp") {
+        return Response.json({ Items: [] });
+      }
+      if (url.pathname === "/Items/Latest" && url.searchParams.get("ParentId") === "slow-library") {
+        throw new Error("one catalog source failed");
+      }
+      if (url.pathname === "/Items/Latest" && url.searchParams.get("ParentId") === "fast-library") {
+        return Response.json([{ Id: "movie-1", Name: "Movie", Type: "Movie" }]);
+      }
+      throw new Error(`Unexpected endpoint ${url.pathname}`);
+    }));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-home-row-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    const transitions: string[] = [];
+    const unsubscribe = api.onConnectionDiagnostics((diagnostics) => transitions.push(diagnostics.state));
+
+    await expect(api.getHome()).resolves.toMatchObject({
+      latestRows: [
+        { library: { id: "slow-library" }, items: [] },
+        { library: { id: "fast-library" }, items: [{ id: "movie-1" }] },
+      ],
+    });
+    expect(api.getConnectionDiagnostics()).toMatchObject({ state: "connected" });
+    expect(transitions).not.toContain("offline");
+    unsubscribe();
+  });
 });

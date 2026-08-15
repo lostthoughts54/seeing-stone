@@ -97,6 +97,7 @@ describe("offline cache schemas", () => {
     overview: "Cached metadata",
     productionYear: 2026,
     premiereYear: 2026,
+    dateCreated: "2026-08-13T05:00:00.000Z",
     officialRating: "TV-14",
     communityRating: 8.4,
     runTimeTicks: 600_000_000,
@@ -111,7 +112,7 @@ describe("offline cache schemas", () => {
     seasonId: "season-1",
     indexNumber: 1,
     parentIndexNumber: 1,
-    userData: { played: false, playbackPositionTicks: 10_000_000, playedPercentage: 1.67 },
+    userData: { played: false, favorite: true, playbackPositionTicks: 10_000_000, playedPercentage: 1.67 },
     hasTrailer: false,
     playable: true,
   };

@@ -284,19 +284,79 @@ const libmpvPresenterIpc = Object.freeze({
   start: "seeing-stone:libmpv-presenter-start",
   ready: "seeing-stone:libmpv-presenter-ready",
   stop: "seeing-stone:libmpv-presenter-stop",
+  cpuFrame: "seeing-stone:libmpv-presenter-cpu-frame",
   presented: "seeing-stone:libmpv-presenter-presented",
+  recover: "seeing-stone:libmpv-presenter-recover",
+  textureLifecycle: "seeing-stone:libmpv-presenter-texture-lifecycle",
   error: "seeing-stone:libmpv-presenter-error",
 });
 
 let libmpvSurfaceGeneration = 0;
 let libmpvSurface: HTMLCanvasElement | null = null;
 let libmpvSurfaceContext: ImageBitmapRenderingContext | null = null;
+let libmpvCpuSurfaceContext: CanvasRenderingContext2D | null = null;
+let libmpvCpuSourceSurface: HTMLCanvasElement | null = null;
+let libmpvCpuSourceContext: CanvasRenderingContext2D | null = null;
 let libmpvBackSurface: HTMLCanvasElement | null = null;
 let libmpvBackSurfaceContext: ImageBitmapRenderingContext | null = null;
-let libmpvPresentedTexture: SharedTextureImported | null = null;
+interface LibMpvRetainedTexture {
+  imported: SharedTextureImported;
+  sequence: number;
+  surfaceGeneration: number;
+  released: boolean;
+}
+const libmpvSurfaceTextures = new Map<HTMLCanvasElement, LibMpvRetainedTexture>();
 let libmpvResizeObserver: ResizeObserver | null = null;
 let libmpvStopped = true;
 let libmpvLastAcceptedSequence = 0;
+let libmpvPresentationMechanism = "image-bitmap-renderer";
+let libmpvTextureLifecycleLogging = false;
+let libmpvRecoveryRequested = false;
+
+function requestLibMpvPresenterRecovery(reason: string): void {
+  if (libmpvStopped || libmpvRecoveryRequested || libmpvSurfaceGeneration <= 0) return;
+  libmpvRecoveryRequested = true;
+  // Stop accepting frames for the damaged canvas immediately. Main keeps the
+  // native producer and audio alive, then starts a fresh surface generation.
+  libmpvStopped = true;
+  ipcRenderer.send(libmpvPresenterIpc.recover, {
+    surfaceGeneration: libmpvSurfaceGeneration,
+    reason,
+  });
+}
+
+function reportLibMpvTextureLifecycle(
+  phase: string,
+  texture: Pick<LibMpvRetainedTexture, "imported" | "sequence" | "surfaceGeneration">,
+  details: Record<string, unknown> = {},
+): void {
+  if (!libmpvTextureLifecycleLogging && phase !== "renderer-gpu-release-complete") return;
+  ipcRenderer.send(libmpvPresenterIpc.textureLifecycle, {
+    phase,
+    sequence: texture.sequence,
+    surfaceGeneration: texture.surfaceGeneration,
+    textureId: texture.imported.textureId,
+    ...details,
+  });
+}
+
+function releaseLibMpvTexture(texture: LibMpvRetainedTexture, reason: string): void {
+  if (texture.released) throw new Error(`LIBMPV_RENDERER_TEXTURE_RELEASED_TWICE:${texture.sequence}`);
+  texture.released = true;
+  reportLibMpvTextureLifecycle("renderer-release-requested", texture, { reason });
+  const release = texture.imported.subtle?.release;
+  if (typeof release !== "function") {
+    texture.imported.release();
+    ipcRenderer.send(libmpvPresenterIpc.error, {
+      surfaceGeneration: texture.surfaceGeneration,
+      code: "LIBMPV_GPU_RELEASE_CALLBACK_UNAVAILABLE",
+    });
+    return;
+  }
+  release.call(texture.imported.subtle, () => {
+    reportLibMpvTextureLifecycle("renderer-gpu-release-complete", texture, { reason });
+  });
+}
 
 async function playerViewport(): Promise<HTMLElement> {
   const existing = document.getElementById("playerViewport");
@@ -309,17 +369,23 @@ async function playerViewport(): Promise<HTMLElement> {
 
 function stopLibMpvPresenter(): void {
   libmpvStopped = true;
+  libmpvRecoveryRequested = false;
   libmpvLastAcceptedSequence = 0;
   libmpvResizeObserver?.disconnect();
   libmpvResizeObserver = null;
-  libmpvPresentedTexture?.release();
-  libmpvPresentedTexture = null;
+  for (const texture of libmpvSurfaceTextures.values()) releaseLibMpvTexture(texture, "presenter-stop");
+  libmpvSurfaceTextures.clear();
   libmpvSurfaceContext = null;
+  libmpvCpuSurfaceContext = null;
+  libmpvCpuSourceContext = null;
   libmpvBackSurfaceContext = null;
   libmpvSurface?.remove();
   libmpvBackSurface?.remove();
   libmpvSurface = null;
+  libmpvCpuSourceSurface = null;
   libmpvBackSurface = null;
+  libmpvPresentationMechanism = "image-bitmap-renderer";
+  libmpvTextureLifecycleLogging = false;
 }
 
 async function startLibMpvPresenter(input: unknown): Promise<void> {
@@ -327,11 +393,12 @@ async function startLibMpvPresenter(input: unknown): Promise<void> {
   if (!input || typeof input !== "object") throw new Error("PRESENTER_INPUT_INVALID");
   const generation = (input as Record<string, unknown>).surfaceGeneration;
   if (!Number.isSafeInteger(generation) || Number(generation) <= 0) throw new Error("PRESENTER_GENERATION_INVALID");
+  const mechanism = (input as Record<string, unknown>).mechanism === "cpu-readback-canvas"
+    ? "cpu-readback-canvas"
+    : "image-bitmap-renderer";
+  libmpvTextureLifecycleLogging = (input as Record<string, unknown>).textureLifecycleLogging === true;
   const viewport = await playerViewport();
-  const createSurface = (id: string, zIndex: number): { surface: HTMLCanvasElement; context: ImageBitmapRenderingContext } => {
-    const surface = document.createElement("canvas");
-    surface.id = id;
-    surface.setAttribute("aria-hidden", "true");
+  const baseSurfaceStyle = (surface: HTMLCanvasElement, zIndex: number): void => {
     Object.assign(surface.style, {
       position: "absolute",
       inset: "0",
@@ -346,12 +413,34 @@ async function startLibMpvPresenter(input: unknown): Promise<void> {
       transformOrigin: "center",
       willChange: "transform",
     });
+  };
+  const createSurface = (id: string, zIndex: number): { surface: HTMLCanvasElement; context: ImageBitmapRenderingContext } => {
+    const surface = document.createElement("canvas");
+    surface.id = id;
+    surface.setAttribute("aria-hidden", "true");
+    baseSurfaceStyle(surface, zIndex);
     const context = surface.getContext("bitmaprenderer");
     if (!context) throw new Error("GPU_PRESENTER_UNAVAILABLE");
+    const recover = (event: Event): void => {
+      if (event.cancelable) event.preventDefault();
+      requestLibMpvPresenterRecovery("canvas-context-lost");
+    };
+    surface.addEventListener("contextlost", recover);
+    surface.addEventListener("webglcontextlost", recover);
     return { surface, context };
   };
-  const front = createSurface("libmpvVideoSurface", 1);
-  const back = createSurface("libmpvVideoSurfaceBack", 0);
+  const createCpuSurface = (): { surface: HTMLCanvasElement; context: CanvasRenderingContext2D } => {
+    const surface = document.createElement("canvas");
+    surface.id = "libmpvVideoSurface";
+    surface.setAttribute("aria-hidden", "true");
+    baseSurfaceStyle(surface, 1);
+    const context = surface.getContext("2d", { alpha: false });
+    if (!context) throw new Error("CPU_PRESENTER_UNAVAILABLE");
+    return { surface, context };
+  };
+  const front = mechanism === "cpu-readback-canvas" ? null : createSurface("libmpvVideoSurface", 1);
+  const back = mechanism === "cpu-readback-canvas" ? null : createSurface("libmpvVideoSurfaceBack", 0);
+  const cpu = mechanism === "cpu-readback-canvas" ? createCpuSurface() : null;
   const resize = (): void => {
     const bounds = viewport.getBoundingClientRect();
     const scale = Math.max(0.5, Math.min(4, window.devicePixelRatio || 1));
@@ -359,7 +448,8 @@ async function startLibMpvPresenter(input: unknown): Promise<void> {
     const height = Math.max(1, Math.round(bounds.height * scale));
     // Assigning either canvas dimension clears the bitmap. ResizeObserver can
     // report an unchanged box after insertion, so only resize when necessary.
-    for (const surface of [front.surface, back.surface]) {
+    for (const surface of [front?.surface, back?.surface, cpu?.surface]) {
+      if (!surface) continue;
       if (surface.width !== width) surface.width = width;
       if (surface.height !== height) surface.height = height;
     }
@@ -367,27 +457,44 @@ async function startLibMpvPresenter(input: unknown): Promise<void> {
   libmpvResizeObserver = new ResizeObserver(resize);
   libmpvResizeObserver.observe(viewport);
   resize();
-  viewport.append(front.surface, back.surface);
+  if (cpu) viewport.append(cpu.surface);
+  else if (front && back) viewport.append(front.surface, back.surface);
   libmpvSurfaceGeneration = Number(generation);
   libmpvLastAcceptedSequence = 0;
-  libmpvSurface = front.surface;
-  libmpvSurfaceContext = front.context;
-  libmpvBackSurface = back.surface;
-  libmpvBackSurfaceContext = back.context;
+  libmpvSurface = cpu?.surface ?? front?.surface ?? null;
+  libmpvSurfaceContext = front?.context ?? null;
+  libmpvCpuSurfaceContext = cpu?.context ?? null;
+  libmpvCpuSourceSurface = mechanism === "cpu-readback-canvas" ? document.createElement("canvas") : null;
+  libmpvCpuSourceContext = libmpvCpuSourceSurface?.getContext("2d", { alpha: false }) ?? null;
+  libmpvBackSurface = back?.surface ?? null;
+  libmpvBackSurfaceContext = back?.context ?? null;
+  libmpvPresentationMechanism = mechanism;
+  libmpvRecoveryRequested = false;
   libmpvStopped = false;
   ipcRenderer.send(libmpvPresenterIpc.ready, {
     surfaceGeneration: libmpvSurfaceGeneration,
-    mechanism: "image-bitmap-renderer",
+    mechanism,
     deviceScaleFactor: window.devicePixelRatio,
   });
 }
 
 sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metadata: unknown) => {
   let frame: VideoFrame | null = null;
-  let retainedForPresentation = false;
+  let retainedForSurface = false;
+  let receivedTexture: LibMpvRetainedTexture | null = null;
   try {
     const record = metadata && typeof metadata === "object" ? metadata as Record<string, unknown> : null;
     const sequence = record?.sequence;
+    const receivedGeneration = Number(record?.surfaceGeneration);
+    if (Number.isSafeInteger(sequence) && Number.isSafeInteger(receivedGeneration)) {
+      receivedTexture = {
+        imported: importedSharedTexture,
+        sequence: Number(sequence),
+        surfaceGeneration: receivedGeneration,
+        released: false,
+      };
+      reportLibMpvTextureLifecycle("renderer-receipt", receivedTexture);
+    }
     if (libmpvStopped || !record || record.surfaceGeneration !== libmpvSurfaceGeneration
       || !Number.isSafeInteger(sequence) || Number(sequence) <= libmpvLastAcceptedSequence
       || !libmpvSurfaceContext || !libmpvSurface || !libmpvBackSurfaceContext || !libmpvBackSurface) return;
@@ -397,6 +504,7 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metada
     const backSurfaceContext = libmpvBackSurfaceContext;
     libmpvLastAcceptedSequence = acceptedSequence;
     frame = importedSharedTexture.getVideoFrame();
+    reportLibMpvTextureLifecycle("video-frame-created", receivedTexture!);
     const bitmap = await createImageBitmap(frame);
     if (libmpvStopped || acceptedGeneration !== libmpvSurfaceGeneration
       || acceptedSequence !== libmpvLastAcceptedSequence
@@ -404,7 +512,10 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metada
       bitmap.close();
       return;
     }
+    const displacedTexture = libmpvSurfaceTextures.get(backSurface) ?? null;
     backSurfaceContext.transferFromImageBitmap(bitmap);
+    libmpvSurfaceTextures.set(backSurface, receivedTexture!);
+    retainedForSurface = true;
     // Keep both video buffers permanently below the renderer controls. The
     // previous monotonically increasing layer eventually covered every HTML
     // overlay after only a few frames.
@@ -412,17 +523,74 @@ sharedTexture?.setSharedTextureReceiver(async ({ importedSharedTexture }, metada
     libmpvBackSurface.style.zIndex = "2";
     [libmpvSurface, libmpvBackSurface] = [libmpvBackSurface, libmpvSurface];
     [libmpvSurfaceContext, libmpvBackSurfaceContext] = [libmpvBackSurfaceContext, libmpvSurfaceContext];
-    const previousTexture = libmpvPresentedTexture;
-    libmpvPresentedTexture = importedSharedTexture;
-    retainedForPresentation = true;
     ipcRenderer.send(libmpvPresenterIpc.presented, {
       surfaceGeneration: libmpvSurfaceGeneration,
       sequence: acceptedSequence,
     });
-    previousTexture?.release();
+    if (displacedTexture) releaseLibMpvTexture(displacedTexture, "canvas-overwritten");
+  } catch {
+    requestLibMpvPresenterRecovery("shared-texture-presentation-failed");
   } finally {
-    frame?.close();
-    if (!retainedForPresentation) importedSharedTexture.release();
+    if (frame) {
+      frame.close();
+      if (receivedTexture) reportLibMpvTextureLifecycle("video-frame-closed", receivedTexture);
+    }
+    if (!retainedForSurface) {
+      if (receivedTexture) releaseLibMpvTexture(receivedTexture, "frame-not-retained");
+      else importedSharedTexture.release();
+    }
+  }
+});
+
+ipcRenderer.on(libmpvPresenterIpc.cpuFrame, (_event, input: unknown) => {
+  const started = performance.now();
+  try {
+    const record = input && typeof input === "object" ? input as Record<string, unknown> : null;
+    const sequence = record?.sequence;
+    const width = record?.width;
+    const height = record?.height;
+    const pixels = record?.pixels;
+    if (libmpvStopped || libmpvPresentationMechanism !== "cpu-readback-canvas" || !record
+      || record.surfaceGeneration !== libmpvSurfaceGeneration
+      || !Number.isSafeInteger(sequence) || Number(sequence) <= libmpvLastAcceptedSequence
+      || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+      || Number(width) <= 0 || Number(height) <= 0
+      || !(pixels instanceof Uint8Array)
+      || !libmpvSurface || !libmpvCpuSurfaceContext || !libmpvCpuSourceSurface || !libmpvCpuSourceContext) return;
+    const acceptedSequence = Number(sequence);
+    const sourceWidth = Number(width);
+    const sourceHeight = Number(height);
+    const expectedBytes = sourceWidth * sourceHeight * 4;
+    if (pixels.byteLength !== expectedBytes || record.pixelFormat !== "rgba") throw new Error("CPU_FRAME_INVALID");
+    libmpvLastAcceptedSequence = acceptedSequence;
+    if (libmpvCpuSourceSurface.width !== sourceWidth) libmpvCpuSourceSurface.width = sourceWidth;
+    if (libmpvCpuSourceSurface.height !== sourceHeight) libmpvCpuSourceSurface.height = sourceHeight;
+    const rgba = new Uint8ClampedArray(expectedBytes);
+    rgba.set(pixels);
+    libmpvCpuSourceContext.putImageData(new ImageData(rgba, sourceWidth, sourceHeight), 0, 0);
+
+    const outputWidth = libmpvSurface.width;
+    const outputHeight = libmpvSurface.height;
+    const scale = Math.min(outputWidth / sourceWidth, outputHeight / sourceHeight);
+    const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const drawX = Math.floor((outputWidth - drawWidth) / 2);
+    const drawY = Math.floor((outputHeight - drawHeight) / 2);
+    libmpvCpuSurfaceContext.setTransform(1, 0, 0, 1, 0, 0);
+    libmpvCpuSurfaceContext.fillStyle = "#020207";
+    libmpvCpuSurfaceContext.fillRect(0, 0, outputWidth, outputHeight);
+    libmpvCpuSurfaceContext.imageSmoothingEnabled = true;
+    libmpvCpuSurfaceContext.drawImage(libmpvCpuSourceSurface, drawX, drawY, drawWidth, drawHeight);
+    ipcRenderer.send(libmpvPresenterIpc.presented, {
+      surfaceGeneration: libmpvSurfaceGeneration,
+      sequence: acceptedSequence,
+      durationMilliseconds: performance.now() - started,
+    });
+  } catch {
+    ipcRenderer.send(libmpvPresenterIpc.error, {
+      surfaceGeneration: input && typeof input === "object" ? (input as Record<string, unknown>).surfaceGeneration : null,
+      code: "CPU_PRESENTATION_FAILED",
+    });
   }
 });
 
@@ -435,5 +603,8 @@ ipcRenderer.on(libmpvPresenterIpc.start, (_event, input) => {
   });
 });
 ipcRenderer.on(libmpvPresenterIpc.stop, () => stopLibMpvPresenter());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !libmpvStopped) requestLibMpvPresenterRecovery("document-visible");
+});
 window.addEventListener("beforeunload", () => stopLibMpvPresenter(), { once: true });
 ipcRenderer.send(libmpvPresenterIpc.listenerReady);

@@ -7,12 +7,12 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.7.0 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.7.1 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
 | native | Controlled source-built mpv/libmpv runtime | 0.41.0 | GPL-2.0-or-later | source-and-binary |
-| native | Seeing Stone libmpv bridge | 0.7.0 | GPL-2.0-or-later | source-and-binary |
+| native | Seeing Stone libmpv bridge | 0.7.1 | GPL-2.0-or-later | source-and-binary |
 | native | ANGLE runtime from Electron | Electron 43.1.0 / Chromium 150.0.7871.47 | BSD-3-Clause | source-and-binary |
 | native | Controlled source-built FFmpeg runtime | 8.1.2 | LGPL-2.1-or-later | source-and-binary |
 | plugin | Seeing Stone Participant Telemetry | protocol-v1-disabled | GPL-2.0-or-later | source-only |

@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { existsSync, readFileSync, rmSync } = require("node:fs");
 const { resolve } = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
 app.commandLine.appendSwitch("disable-error-dialogs");
@@ -10,6 +11,11 @@ const resourcesArgument = process.argv.find((argument) => argument.startsWith("-
 const resourcesRoot = resourcesArgument
   ? resolve(resourcesArgument.slice("--resources=".length))
   : null;
+const cpuReadback = process.argv.includes("--cpu-readback");
+const diagnosticLogPath = resolve(root, "artifacts", cpuReadback
+  ? "libmpv-cpu-readback-smoke.ndjson"
+  : "libmpv-shared-texture-smoke.ndjson");
+if (existsSync(diagnosticLogPath)) rmSync(diagnosticLogPath);
 const { LibMpvHost } = require(resolve(root, "dist", "main", "services", "libMpvHost.js"));
 const { ElectronLibMpvBridge } = require(resolve(root, "dist", "main", "services", "libMpvElectronBridge.js"));
 const manifest = require(resourcesRoot
@@ -81,6 +87,15 @@ app.whenReady().then(async () => {
     resolve(libmpvRoot, manifest.libmpv.library.filename),
     resolve(libmpvRoot, manifest.libmpv.nativeAddon.filename),
     manifest.libmpv.clientApiVersion,
+    {
+      enabled: true,
+      decoderMode: "current",
+      requestedDecoderMode: "current",
+      hwdec: "auto-safe",
+      presentationMode: cpuReadback ? "cpu-readback" : "shared-texture",
+      logFilePath: diagnosticLogPath,
+      unsupportedReason: null,
+    },
   );
   host = new LibMpvHost({ available: true, reason: null, clientApiVersion: manifest.libmpv.clientApiVersion, renderApi: "opengl-angle" }, bridge);
   await host.initialize();
@@ -104,6 +119,13 @@ app.whenReady().then(async () => {
   }
   await session.command({ kind: "seek", positionTicks: 2_500_000 });
   await session.command({ kind: "play" });
+  if (!cpuReadback) {
+    const steadyStateStart = await session.query("seeing-stone-frame-stats");
+    await waitFor(async () => {
+      const stats = await session.query("seeing-stone-frame-stats");
+      return stats.renderedFrames >= steadyStateStart.renderedFrames + 6;
+    }, 5000, "shared-texture slot reuse during steady playback");
+  }
   const beforeReload = await session.query("seeing-stone-frame-stats");
   window.webContents.reload();
   await waitFor(async () => {
@@ -112,20 +134,44 @@ app.whenReady().then(async () => {
   }, 7500, "frames after production renderer reload");
   window.setFullScreen(true);
   let presenterLayers = [];
-  await waitFor(async () => {
-    presenterLayers = await window.webContents.executeJavaScript(`[
-      document.getElementById("libmpvVideoSurface")?.style.zIndex,
-      document.getElementById("libmpvVideoSurfaceBack")?.style.zIndex,
-    ].filter(Boolean).map(Number)`);
-    return presenterLayers.length === 2 && presenterLayers.every((layer) => layer === 1 || layer === 2);
-  }, 3000, "both bounded production presenter layers");
+  if (cpuReadback) {
+    await waitFor(async () => {
+      const stats = await session.query("seeing-stone-frame-stats");
+      presenterLayers = await window.webContents.executeJavaScript(`[
+        document.getElementById("libmpvVideoSurface")?.style.zIndex,
+        document.getElementById("libmpvVideoSurfaceBack")?.style.zIndex,
+      ].filter(Boolean).map(Number)`);
+      return stats.readbackFrames > 0 && presenterLayers.length === 1 && presenterLayers[0] === 1;
+    }, 5000, "CPU readback presenter layer and native readback frames");
+  } else {
+    await waitFor(async () => {
+      presenterLayers = await window.webContents.executeJavaScript(`[
+        document.getElementById("libmpvVideoSurface")?.style.zIndex,
+        document.getElementById("libmpvVideoSurfaceBack")?.style.zIndex,
+      ].filter(Boolean).map(Number)`);
+      return presenterLayers.length === 2 && presenterLayers.every((layer) => layer === 1 || layer === 2);
+    }, 3000, "both bounded production presenter layers");
+  }
   window.setFullScreen(false);
   await delay(500);
   await session.stop();
+  const diagnosticEvents = readFileSync(diagnosticLogPath, "utf8")
+    .trim().split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
+  if (!cpuReadback) {
+    const eventNames = diagnosticEvents.map((event) => event.event);
+    assert.ok(eventNames.includes("texture-renderer-receipt"), "Shared texture was not received by the renderer.");
+    assert.ok(eventNames.includes("texture-video-frame-created"), "Shared texture did not create a VideoFrame.");
+    assert.ok(eventNames.includes("texture-video-frame-closed"), "Shared texture VideoFrame was not closed.");
+    assert.ok(eventNames.includes("texture-renderer-gpu-release-complete"), "Renderer GPU release callback did not complete.");
+    assert.ok(eventNames.includes("texture-slot-reusable"), "No native texture slot reached the definitive reusable state.");
+    assert.ok(diagnosticEvents.some((event) => event.event === "texture-renderer-gpu-release-complete"
+      && event.details?.reason === "canvas-overwritten"), "A canvas overwrite did not produce a GPU completion callback.");
+    assert.ok(!eventNames.includes("texture-lifecycle-violation"), "A shared-texture lifecycle assertion failed.");
+  }
   await shutdown();
   process.stdout.write(`${JSON.stringify({
     result: "passed",
-    presenter: "production-preload",
+    presenter: cpuReadback ? "cpu-readback-preload" : "production-preload",
     presenterLayers,
     trackCount: tracks.length,
     playbackRates: [1.04, 0.94, 1],

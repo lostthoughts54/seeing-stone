@@ -199,6 +199,14 @@ describe("JellyfinApi main-side boundary", () => {
     const libraries = await api.getLibraries();
     const libraryItems = await api.getLibraryItems("library-1", "Movie", 100);
     const libraryPage = await api.getLibraryItemsPage("library-1", "Movie", 30, 30, "recently-added");
+    const browsePage = await api.browse({
+      libraryId: "library-1", type: "Movie", genres: ["Action", "Comedy"],
+      sort: "title-ascending", startIndex: 1_140, limit: 60, enableTotalRecordCount: true,
+    });
+    const browsePageWithoutCount = await api.browse({
+      libraryId: "library-1", type: "Movie", sort: "title-ascending",
+      startIndex: 1_200, limit: 60, enableTotalRecordCount: false,
+    });
     const searchItems = await api.search("movie");
     const details = await api.getDetails("movie-1");
     const seasons = await api.getSeasons("series-1");
@@ -323,11 +331,24 @@ describe("JellyfinApi main-side boundary", () => {
     expect(libraries[0]).toEqual({ id: "library-1", name: "Movies", collectionType: "movies" });
     expect(libraryItems[0].id).toBe("movie-1");
     expect(libraryPage).toMatchObject({ totalRecordCount: 61, items: [{ id: "movie-1" }] });
+    expect(browsePage).toMatchObject({ totalRecordCount: 61, items: [{ id: "movie-1" }] });
+    expect(browsePageWithoutCount.totalRecordCount).toBe(-1);
     const pagedLibraryRequest = observedRequests.find(({ url }) => url.pathname === "/Users/user-1/Items"
       && url.searchParams.get("StartIndex") === "30");
     expect(pagedLibraryRequest?.url.searchParams.get("SortBy")).toBe("DateCreated,SortName");
     expect(pagedLibraryRequest?.url.searchParams.get("SortOrder")).toBe("Descending");
     expect(pagedLibraryRequest?.url.searchParams.get("EnableTotalRecordCount")).toBe("true");
+    const browseRequest = observedRequests.find(({ url }) => url.pathname === "/Users/user-1/Items"
+      && url.searchParams.get("StartIndex") === "1140");
+    expect(browseRequest?.url.searchParams.get("Limit")).toBe("60");
+    expect(browseRequest?.url.searchParams.get("Genres")).toBe("Action|Comedy");
+    expect(browseRequest?.url.searchParams.get("EnableTotalRecordCount")).toBe("true");
+    expect(browseRequest?.url.searchParams.get("Fields")).toBe("Genres,PrimaryImageAspectRatio,DateCreated");
+    expect(browseRequest?.url.searchParams.get("Fields")).not.toContain("People");
+    expect(browseRequest?.url.searchParams.get("Fields")).not.toContain("MediaStreams");
+    const browseRequestWithoutCount = observedRequests.find(({ url }) => url.pathname === "/Users/user-1/Items"
+      && url.searchParams.get("StartIndex") === "1200");
+    expect(browseRequestWithoutCount?.url.searchParams.get("EnableTotalRecordCount")).toBe("false");
     expect(searchItems[0].id).toBe("movie-1");
     expect(searchItems).toHaveLength(1);
     expect(searchItems[0].mediaVersions).toHaveLength(2);
@@ -382,6 +403,11 @@ describe("JellyfinApi main-side boundary", () => {
     ]) expect(requestedPaths).toContain(expected);
     const resumeRequest = observedRequests.find(({ url }) => url.pathname.endsWith("/Items/Resume"));
     expect(resumeRequest?.url.searchParams.get("MediaTypes")).toBe("Video");
+    expect(resumeRequest?.url.searchParams.get("Fields")).not.toContain("MediaSources");
+    const latestHomeRequest = observedRequests.find(({ url }) => url.pathname === "/Items/Latest");
+    expect(latestHomeRequest?.url.searchParams.get("Limit")).toBe("20");
+    expect(latestHomeRequest?.url.searchParams.get("Fields")).not.toContain("MediaStreams");
+    expect(latestHomeRequest?.url.searchParams.get("Fields")).not.toContain("People");
     const seriesNextUpRequest = observedRequests.find(({ url }) => url.pathname === "/Shows/NextUp" && url.searchParams.has("SeriesId"));
     expect(seriesNextUpRequest?.url.searchParams.get("SeriesId")).toBe("series-1");
     expect(seriesNextUpRequest?.url.searchParams.get("Limit")).toBe("1");
@@ -580,6 +606,44 @@ describe("JellyfinApi main-side boundary", () => {
     expect(requestedPaths).not.toContain("/Search/Hints");
     await api.logout();
     await expect(api.getLiveTvProgramSearch("love island")).rejects.toMatchObject({ code: "NOT_AUTHENTICATED" });
+  });
+
+  it("paginates, deduplicates, and numerically sorts every Jellyfin Live TV channel", async () => {
+    const channelStarts: number[] = [];
+    const source = Array.from({ length: 521 }, (_, index) => ({
+      Id: `channel-${index + 1}`,
+      Name: `Channel ${index + 1}`,
+      Number: String(index + 1),
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/System/Info/Public") return Response.json({ Id: "server-1", ServerName: "Server", Version: "10.11.11" });
+      if (url.pathname === "/Users/AuthenticateByName") return Response.json({ AccessToken: "token", User: { Id: "user-1", Name: "Viewer" } });
+      if (url.pathname === "/LiveTv/Info") return Response.json({ IsEnabled: true });
+      if (url.pathname === "/LiveTv/Channels") {
+        if (url.searchParams.get("Limit") === "1") return Response.json({ Items: source.slice(0, 1) });
+        const start = Number(url.searchParams.get("StartIndex"));
+        channelStarts.push(start);
+        const items = start === 0
+          ? source.slice(0, 250)
+          : start === 250
+            ? [source[249], ...source.slice(250, 499)]
+            : source.slice(499);
+        return Response.json({ TotalRecordCount: 522, Items: items });
+      }
+      if (url.pathname === "/LiveTv/Programs") return Response.json({ TotalRecordCount: 0, Items: [] });
+      throw new Error(`Unexpected mock endpoint: ${url.pathname}`);
+    }));
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-live-tv-pagination-"));
+    const api = new JellyfinApi(identity, new SecureSessionStore(directory, protector), async () => undefined);
+    const connection = await api.connect("http://127.0.0.1:8096");
+    await api.login(connection.connectionId, "Viewer", "password", false);
+    const guide = await api.getLiveTvGuide("2026-08-10T00:00:00.000Z", "2026-08-11T00:00:00.000Z");
+    expect(channelStarts).toEqual([0, 250, 500]);
+    expect(guide.channels).toHaveLength(521);
+    expect(new Set(guide.channels.map((channel) => channel.id)).size).toBe(521);
+    expect(guide.channels.slice(0, 3).map((channel) => channel.number)).toEqual(["1", "2", "3"]);
+    expect(guide.channels.at(-1)?.number).toBe("521");
   });
 
   it("passes a guide window across midnight through to Jellyfin without a date clamp", async () => {

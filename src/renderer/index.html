@@ -159,6 +159,7 @@
             <button id="downloadsButton" type="button">Downloads</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
+            <button id="refreshLibrariesButton" type="button">Refresh Media Libraries</button>
             <button id="refreshButton" type="button">Refresh Connection</button>
             <button id="logoutButton" type="button">Sign Out</button>
           </div>
@@ -194,9 +195,12 @@
               <p class="eyebrow">Library</p>
               <h1 id="libraryTitle">Library</h1>
               <div class="library-controls" aria-label="Library view options">
-                <label>
+                <button id="libraryFiltersButton" class="library-filters-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+                  Filters <span id="libraryFilterCount" class="filter-count is-hidden" aria-label="active filters">0</span>
+                </button>
+                <label id="downloadedFilterControl" class="is-hidden">
                   <span>Filter</span>
-                  <select id="libraryFilter">
+                  <select id="libraryFilter" aria-label="Filter downloaded titles">
                     <option value="all">All titles</option>
                     <option value="unwatched">Unwatched</option>
                     <option value="watched">Watched</option>
@@ -222,6 +226,8 @@
                 </div>
               </div>
             </header>
+            <div id="libraryResultsSummary" class="library-results-summary" aria-live="polite"></div>
+            <div id="libraryFilterChips" class="library-filter-chips" aria-label="Active filters"></div>
             <section id="downloadedFollowedSeries" class="downloaded-followed-series is-hidden" aria-labelledby="downloadedFollowedSeriesTitle">
               <header>
                 <div>
@@ -233,7 +239,33 @@
               <div id="downloadedFollowedSeriesList" class="downloaded-followed-series-list"></div>
             </section>
             <div id="libraryGrid" class="poster-grid-view" aria-live="polite"></div>
+            <nav id="libraryPagination" class="library-pagination is-hidden" aria-label="Library pages">
+              <div id="libraryPaginationContext" class="library-pagination-context"></div>
+              <div class="library-pagination-controls">
+                <button id="libraryPreviousPageButton" type="button">Previous</button>
+                <span id="libraryPageNumbers" class="library-page-numbers"></span>
+                <button id="libraryNextPageButton" type="button">Next</button>
+              </div>
+              <form id="libraryJumpForm" class="library-jump-form">
+                <label for="libraryJumpInput">Jump to page</label>
+                <input id="libraryJumpInput" type="number" min="1" step="1" inputmode="numeric" />
+                <button type="submit">Go</button>
+              </form>
+              <button id="libraryRetryButton" class="is-hidden" type="button">Retry page</button>
+            </nav>
           </section>
+
+          <div id="libraryFilterScrim" class="filter-drawer-scrim is-hidden"></div>
+          <aside id="libraryFilterDrawer" class="filter-drawer is-hidden" role="dialog" aria-modal="true" aria-labelledby="libraryFilterDrawerTitle">
+            <header class="filter-drawer-header">
+              <div><p class="eyebrow">Library</p><h2 id="libraryFilterDrawerTitle">Filters</h2></div>
+              <div class="filter-drawer-actions">
+                <button id="clearLibraryFiltersButton" type="button">Clear all</button>
+                <button id="closeLibraryFiltersButton" type="button" aria-label="Close filters">&times;</button>
+              </div>
+            </header>
+            <div id="libraryFilterSections" class="filter-drawer-sections"></div>
+          </aside>
 
           <section id="searchView" class="view search-view is-hidden">
             <header class="page-heading">
@@ -244,22 +276,25 @@
           </section>
 
           <section id="liveTvView" class="view live-tv-view is-hidden">
-            <header class="page-heading live-tv-heading">
-              <div><p class="eyebrow">Jellyfin Live TV <span class="beta-badge">Beta</span></p><h1>Live TV</h1></div>
-              <button id="refreshLiveTvButton" type="button">Refresh guide</button>
+            <header class="live-tv-toolbar">
+              <div class="live-tv-title">
+                <h1>Live TV</h1>
+                <span class="beta-badge">Beta</span>
+              </div>
+              <nav class="live-tv-tabs" aria-label="Live TV sections">
+                <button id="liveTvGuideTab" class="is-active" type="button">Guide</button>
+                <button id="liveTvRecordingsTab" type="button">Recordings</button>
+                <button id="liveTvScheduledTab" type="button">Scheduled</button>
+              </nav>
+              <div id="liveTvGuideTools" class="live-tv-guide-tools">
+                <label for="liveTvChannelSearch">Search channels or programs</label>
+                <input id="liveTvChannelSearch" type="search" placeholder="Search channels or programs" autocomplete="off" spellcheck="false" />
+                <button id="liveTvNowButton" type="button">Now</button>
+                <span id="liveTvChannelSearchStatus" role="status" aria-live="polite"></span>
+              </div>
+              <div id="liveTvStatus" class="live-tv-status" role="status"></div>
+              <button id="refreshLiveTvButton" class="live-tv-refresh" type="button">Refresh guide</button>
             </header>
-            <nav class="live-tv-tabs" aria-label="Live TV sections">
-              <button id="liveTvGuideTab" class="is-active" type="button">Guide</button>
-              <button id="liveTvRecordingsTab" type="button">Recordings</button>
-              <button id="liveTvScheduledTab" type="button">Scheduled</button>
-            </nav>
-            <div id="liveTvGuideTools" class="live-tv-guide-tools">
-              <label for="liveTvChannelSearch">Search channels or programs</label>
-              <input id="liveTvChannelSearch" type="search" placeholder="Search channels or programs" autocomplete="off" spellcheck="false" />
-              <button id="liveTvNowButton" type="button">Now</button>
-              <span id="liveTvChannelSearchStatus" role="status" aria-live="polite"></span>
-            </div>
-            <div id="liveTvStatus" class="live-tv-status" role="status"></div>
             <div id="liveTvContent" class="live-tv-content" aria-live="polite"></div>
           </section>
 

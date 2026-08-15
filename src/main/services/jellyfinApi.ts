@@ -33,6 +33,7 @@ import type { PlaybackActionKind } from "./persistenceTypes";
 import type { DeviceIdentity } from "./deviceIdentity";
 import { AppError } from "./errors";
 import type { SecureSessionStore, StoredSession } from "./secureSession";
+import { logger } from "./logger";
 
 const ITEM_FIELDS = [
   "Overview",
@@ -58,7 +59,40 @@ const ITEM_FIELDS = [
   "ProviderIds",
 ].join(",");
 
+// Library grids intentionally avoid details-only payloads such as People,
+// MediaStreams, MediaSources, ProviderIds, and full overviews.
+const BROWSE_ITEM_FIELDS = [
+  "Genres",
+  "PrimaryImageAspectRatio",
+  "DateCreated",
+].join(",");
+
+// Home only renders cards. Playback sources, streams, people, trailers, and
+// provider IDs are fetched later by the details/playback paths.
+const HOME_ITEM_FIELDS = [
+  "Overview",
+  "Genres",
+  "PrimaryImageAspectRatio",
+  "ParentId",
+  "SeriesId",
+  "SeriesName",
+  "SeasonId",
+  "SeasonName",
+  "IndexNumber",
+  "ParentIndexNumber",
+  "RunTimeTicks",
+  "DateCreated",
+  "ProductionYear",
+  "PremiereDate",
+  "OfficialRating",
+  "CommunityRating",
+].join(",");
+const HOME_ROW_TIMEOUT_MS = 6_000;
+
 type JsonRecord = Record<string, unknown>;
+type AuthenticatedRequestOptions = {
+  markUnavailableOnFailure?: boolean;
+};
 const MAX_PLAYBACK_TICKS = 864_000_000_000;
 const MEDIA_SEGMENT_TYPES = new Set<PlaybackMediaSegmentType>(["Intro", "Recap", "Outro"]);
 
@@ -330,6 +364,7 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
     overview: asString(item.Overview),
     productionYear: nullableNumber(item.ProductionYear),
     premiereYear: premiereYear(item.PremiereDate),
+    dateCreated: nullableString(item.DateCreated),
     officialRating: nullableString(item.OfficialRating)?.slice(0, 32) ?? null,
     communityRating: nullableNumber(item.CommunityRating),
     runTimeTicks: asNumber(item.RunTimeTicks),
@@ -357,6 +392,7 @@ export function sanitizeMediaItem(value: unknown): MediaItem {
     parentIndexNumber: nullableNumber(item.ParentIndexNumber),
     userData: {
       played: userData.Played === true,
+      favorite: userData.IsFavorite === true,
       playbackPositionTicks: asNumber(userData.PlaybackPositionTicks),
       playedPercentage: asNumber(userData.PlayedPercentage),
     },
@@ -392,6 +428,25 @@ function safeLiveTvText(value: unknown, fallback: string, maximum: number): stri
   return text && !SENSITIVE_DIAGNOSTIC.test(text) ? text : fallback;
 }
 
+function safeLiveTvStrings(...values: unknown[]): string[] {
+  const strings: string[] = [];
+  const append = (value: unknown): void => {
+    if (typeof value === "string") {
+      const sanitized = safeLiveTvText(value, "", 256);
+      if (sanitized) strings.push(sanitized);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value.slice(0, 64)) append(entry);
+      return;
+    }
+    const record = asRecord(value);
+    if (record.Name !== undefined) append(record.Name);
+  };
+  for (const value of values) append(value);
+  return [...new Set(strings)].slice(0, 64);
+}
+
 function sanitizeLiveTvProgram(value: unknown): LiveTvProgram {
   const item = asRecord(value);
   return {
@@ -399,6 +454,7 @@ function sanitizeLiveTvProgram(value: unknown): LiveTvProgram {
     channelId: safeOpaqueIdentifier(item.ChannelId) ?? "",
     name: safeLiveTvText(item.Name, "Untitled", 1024),
     overview: safeLiveTvText(item.Overview, "", 32_768),
+    genres: safeLiveTvStrings(item.Genres, item.Tags),
     startUtc: isoDate(item.StartDate),
     endUtc: isoDate(item.EndDate),
     episodeTitle: boundedNullableString(item.EpisodeTitle, 1024),
@@ -424,6 +480,7 @@ function sanitizeLiveTvChannel(value: unknown): LiveTvChannel {
     id: safeOpaqueIdentifier(channel.Id) ?? "",
     name: safeLiveTvText(channel.Name, "Channel", 1024),
     number: boundedNullableString(channel.Number, 32),
+    categories: safeLiveTvStrings(channel.ChannelType, channel.Genres, channel.Tags, channel.Studios, channel.Groups, channel.Category, channel.GroupName),
     imageTag: boundedNullableString(imageTags.Primary, 256),
     isFavorite: userData.IsFavorite === true,
     currentProgramId: safeOpaqueIdentifier(current.Id),
@@ -434,6 +491,8 @@ const LIVE_TV_SEARCH_TTL_MS = 5 * 60_000;
 const LIVE_TV_SEARCH_HORIZON_MS = 7 * 24 * 60 * 60_000;
 const LIVE_TV_SEARCH_PAGE_SIZE = 1000;
 const LIVE_TV_SEARCH_MAX_PAGES = 10;
+const LIVE_TV_CHANNEL_PAGE_SIZE = 250;
+const EXPECTED_UPSTREAM_CHANNEL_COUNT = 691;
 
 interface LiveTvSearchCache {
   expiresAt: number;
@@ -562,6 +621,7 @@ export class JellyfinApi {
   private connectionMeasurement: ConnectionMeasurement | null = null;
   private liveTvSearchCache: LiveTvSearchCache | null = null;
   private liveTvSearchCachePromise: Promise<LiveTvSearchCache> | null = null;
+  private browseController: AbortController | null = null;
   private readonly connectionListeners = new Set<(diagnostics: JellyfinConnectionDiagnostics) => void>();
 
   constructor(
@@ -764,20 +824,31 @@ export class JellyfinApi {
   async getHome(): Promise<HomePayload> {
     const libraries = await this.getLibraries();
     const session = this.requireSession();
-    const [resumeResult, nextUpResult, ...latestResults] = await Promise.all([
-      this.request(`/Users/${encodeURIComponent(session.userId)}/Items/Resume`, { Limit: "20", MediaTypes: "Video", Fields: ITEM_FIELDS }),
-      this.request("/Shows/NextUp", { UserId: session.userId, Limit: "20", Fields: ITEM_FIELDS }),
-      ...libraries
-        .filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows")
-        .map((library) => this.request("/Items/Latest", {
+    const homeRequest = (path: string, params: Record<string, string>): Promise<unknown> => this.request(
+      path,
+      params,
+      { signal: AbortSignal.timeout(HOME_ROW_TIMEOUT_MS) },
+      { markUnavailableOnFailure: false },
+    );
+    const rowLibraries = libraries.filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows");
+    const results = await Promise.allSettled([
+      homeRequest(`/Users/${encodeURIComponent(session.userId)}/Items/Resume`, {
+        Limit: "20", MediaTypes: "Video", Fields: HOME_ITEM_FIELDS,
+      }),
+      homeRequest("/Shows/NextUp", { UserId: session.userId, Limit: "20", Fields: HOME_ITEM_FIELDS }),
+      ...rowLibraries
+        .map((library) => homeRequest("/Items/Latest", {
           UserId: session.userId,
           ParentId: library.id,
           GroupItems: "true",
-          Fields: ITEM_FIELDS,
-          Limit: library.collectionType === "movies" ? "60" : "20",
+          Fields: HOME_ITEM_FIELDS,
+          Limit: "20",
         })),
     ]);
-    const rowLibraries = libraries.filter((library) => library.collectionType === "movies" || library.collectionType === "tvshows");
+    const valueOrEmpty = (result: PromiseSettledResult<unknown>): unknown => result.status === "fulfilled" ? result.value : {};
+    const resumeResult = valueOrEmpty(results[0]);
+    const nextUpResult = valueOrEmpty(results[1]);
+    const latestResults = results.slice(2).map(valueOrEmpty);
     const latestRows = rowLibraries.map((library, index) => ({
       library,
       items: groupMovieVersions((Array.isArray(latestResults[index]) ? latestResults[index] : []).map(sanitizeMediaItem)).slice(0, 20),
@@ -850,6 +921,9 @@ export class JellyfinApi {
 
   async browse(query: BrowseQuery): Promise<BrowsePage> {
     const session = this.requireSession();
+    this.browseController?.abort();
+    const controller = new AbortController();
+    this.browseController = controller;
     const sorts: Record<BrowseQuery["sort"], { SortBy: string; SortOrder: string }> = {
       "title-ascending": { SortBy: "SortName", SortOrder: "Ascending" },
       "title-descending": { SortBy: "SortName", SortOrder: "Descending" },
@@ -858,18 +932,53 @@ export class JellyfinApi {
       "release-date-ascending": { SortBy: "PremiereDate,SortName", SortOrder: "Ascending" },
       "rating-descending": { SortBy: "CommunityRating,SortName", SortOrder: "Descending" },
     };
-    const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
-      ...(query.libraryId ? { ParentId: query.libraryId } : {}),
-      Recursive: "true",
-      IncludeItemTypes: query.type === "Mixed" ? "Movie,Series,Episode,Video" : query.type,
-      ...(query.genre ? { Genres: query.genre } : {}),
-      ...(query.personId ? { PersonIds: query.personId } : {}),
-      ...(query.watched === undefined ? {} : { IsPlayed: String(query.watched) }),
-      ...sorts[query.sort], Fields: ITEM_FIELDS,
-      StartIndex: String(query.startIndex), Limit: String(query.limit), EnableTotalRecordCount: "true",
-    }));
-    const items = this.items(result).map(sanitizeMediaItem);
-    return { items, totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))) };
+    const loadPage = async (enableTotalRecordCount: boolean): Promise<BrowsePage> => {
+      const result = asRecord(await this.request(`/Users/${encodeURIComponent(session.userId)}/Items`, {
+        ...(query.libraryId ? { ParentId: query.libraryId } : {}),
+        Recursive: "true",
+        IncludeItemTypes: query.type === "Mixed" ? "Movie,Series,Episode,Video" : query.type,
+        ...(query.searchTerm ? { SearchTerm: query.searchTerm } : {}),
+        ...((query.genres?.length || query.genre) ? { Genres: query.genres?.join("|") ?? query.genre! } : {}),
+        ...((query.personIds?.length || query.personId) ? { PersonIds: query.personIds?.join(",") ?? query.personId! } : {}),
+        ...(query.officialRatings?.length ? { OfficialRatings: query.officialRatings.join("|") } : {}),
+        ...(query.watched === undefined ? {} : { IsPlayed: String(query.watched) }),
+        ...(query.favorite === undefined ? {} : { IsFavorite: String(query.favorite) }),
+        ...(query.resumable ? { Filters: "IsResumable" } : {}),
+        ...(query.minPremiereDate ? { MinPremiereDate: query.minPremiereDate } : {}),
+        ...(query.maxPremiereDate ? { MaxPremiereDate: query.maxPremiereDate } : {}),
+        ...(query.minCommunityRating === undefined ? {} : { MinCommunityRating: String(query.minCommunityRating) }),
+        ...(query.is4K === undefined ? {} : { Is4K: String(query.is4K) }),
+        ...sorts[query.sort], Fields: BROWSE_ITEM_FIELDS,
+        StartIndex: String(query.startIndex), Limit: String(query.limit),
+        EnableTotalRecordCount: String(enableTotalRecordCount),
+      }, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) }, { markUnavailableOnFailure: false }));
+      const items = this.items(result).map(sanitizeMediaItem);
+      const totalRecordCount = enableTotalRecordCount
+        ? Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length)))
+        : -1;
+      return { items, totalRecordCount };
+    };
+    const wantsTotalRecordCount = query.enableTotalRecordCount !== false;
+    try {
+      try {
+        return await loadPage(wantsTotalRecordCount);
+      } catch (error) {
+        const retryWithoutCount = wantsTotalRecordCount
+          && error instanceof AppError
+          && (error.code === "REQUEST_TIMEOUT"
+            || error.code === "BROWSE_REQUEST_FAILED"
+            || (error.code === "JELLYFIN_REQUEST_FAILED" && (error.status ?? 0) >= 500));
+        if (!retryWithoutCount) throw error;
+        logger.warn("Jellyfin library count failed; retrying the bounded page without an exact total.", {
+          libraryId: query.libraryId ?? null,
+          startIndex: query.startIndex,
+          errorCode: error.code,
+        });
+        return await loadPage(false);
+      }
+    } finally {
+      if (this.browseController === controller) this.browseController = null;
+    }
   }
 
   async getPersonMediaResults(personId: string): Promise<PersonMediaResult[]> {
@@ -1026,24 +1135,107 @@ export class JellyfinApi {
     }
   }
 
+  private async getAllLiveTvChannels(addCurrentProgram: boolean): Promise<LiveTvChannel[]> {
+    const session = this.requireSession();
+    const channels = new Map<string, LiveTvChannel>();
+    let startIndex = 0;
+    let rawItemsReceived = 0;
+    let pagesFetched = 0;
+    let totalRecordCount: number | null = null;
+    let previousPageIdentity = "";
+    while (true) {
+      const result = asRecord(await this.request("/LiveTv/Channels", {
+        UserId: session.userId,
+        StartIndex: String(startIndex),
+        Limit: String(LIVE_TV_CHANNEL_PAGE_SIZE),
+        AddCurrentProgram: String(addCurrentProgram),
+        Fields: "ChannelInfo,PrimaryImageAspectRatio,Genres,Tags",
+        EnableTotalRecordCount: "true",
+      }));
+      const rawItems = this.items(result);
+      pagesFetched += 1;
+      rawItemsReceived += rawItems.length;
+      if (typeof result.TotalRecordCount === "number" && Number.isSafeInteger(result.TotalRecordCount) && result.TotalRecordCount >= 0) {
+        totalRecordCount = result.TotalRecordCount;
+      }
+      const page = rawItems.map(sanitizeLiveTvChannel).filter((channel) => channel.id);
+      const pageIdentity = page.map((channel) => channel.id).join("\u0000");
+      if (pageIdentity && pageIdentity === previousPageIdentity) {
+        logger.warn("Jellyfin repeated a Live TV channel page; stopping pagination safely.", { startIndex, pageSize: LIVE_TV_CHANNEL_PAGE_SIZE, pagesFetched });
+        break;
+      }
+      previousPageIdentity = pageIdentity;
+      for (const channel of page) channels.set(channel.id, channel);
+      startIndex += rawItems.length;
+      if (rawItems.length === 0 || rawItems.length < LIVE_TV_CHANNEL_PAGE_SIZE) break;
+      if (totalRecordCount !== null && startIndex >= totalRecordCount) break;
+    }
+    const sorted = [...channels.values()].sort((left, right) => {
+      const leftKey = left.number ?? left.name;
+      const rightKey = right.number ?? right.name;
+      return leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" }) || left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+    const numbered = sorted.filter((channel) => channel.number && /\d/.test(channel.number));
+    const diagnostics = {
+      jellyfinTotalRecordCount: totalRecordCount,
+      pageSize: LIVE_TV_CHANNEL_PAGE_SIZE,
+      pagesFetched,
+      rawItemsReceived,
+      uniqueChannelsLoaded: sorted.length,
+      lowestNumericChannel: numbered[0]?.number ?? null,
+      highestNumericChannel: numbered[numbered.length - 1]?.number ?? null,
+    };
+    logger.info("Live TV channel pagination completed.", diagnostics);
+    if (sorted.length < Math.floor(EXPECTED_UPSTREAM_CHANNEL_COUNT * 0.9)) {
+      logger.warn("Jellyfin reports substantially fewer Live TV channels than the expected upstream lineup; Seeing Stone will not fabricate missing channels.", { ...diagnostics, expectedUpstreamChannelCount: EXPECTED_UPSTREAM_CHANNEL_COUNT });
+    }
+    return sorted;
+  }
+
+  private async getAllLiveTvPrograms(startUtc: string, endUtc: string): Promise<LiveTvProgram[]> {
+    const session = this.requireSession();
+    const programs = new Map<string, LiveTvProgram>();
+    const pageSize = 1000;
+    let startIndex = 0;
+    let totalRecordCount: number | null = null;
+    let previousPageIdentity = "";
+    while (true) {
+      const result = asRecord(await this.request("/LiveTv/Programs", {
+        UserId: session.userId,
+        MinStartDate: startUtc,
+        MaxStartDate: endUtc,
+        StartIndex: String(startIndex),
+        Limit: String(pageSize),
+        SortBy: "StartDate",
+        SortOrder: "Ascending",
+        Fields: "Overview,Genres,Tags",
+        EnableTotalRecordCount: "true",
+      }));
+      const rawItems = this.items(result);
+      if (typeof result.TotalRecordCount === "number" && Number.isSafeInteger(result.TotalRecordCount) && result.TotalRecordCount >= 0) totalRecordCount = result.TotalRecordCount;
+      const page = rawItems.map(sanitizeLiveTvProgram).filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
+      const pageIdentity = page.map((program) => program.id).join("\u0000");
+      if (pageIdentity && pageIdentity === previousPageIdentity) {
+        logger.warn("Jellyfin repeated a Live TV program page; stopping pagination safely.", { startIndex, pageSize });
+        break;
+      }
+      previousPageIdentity = pageIdentity;
+      for (const program of page) programs.set(program.id, program);
+      startIndex += rawItems.length;
+      if (rawItems.length === 0 || rawItems.length < pageSize) break;
+      if (totalRecordCount !== null && startIndex >= totalRecordCount) break;
+    }
+    return [...programs.values()].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc));
+  }
+
   async getLiveTvGuide(startUtc: string, endUtc: string): Promise<LiveTvGuide> {
     this.liveTvSearchCache = null;
-    const session = this.requireSession();
     const status = await this.getLiveTvStatus();
     if (status.availability !== "available") return { status, channels: [], programs: [], windowStartUtc: startUtc, windowEndUtc: endUtc };
-    const [channelResult, programResult] = await Promise.all([
-      this.request("/LiveTv/Channels", {
-        UserId: session.userId, StartIndex: "0", Limit: "500", AddCurrentProgram: "true",
-        Fields: "ChannelInfo,PrimaryImageAspectRatio", EnableTotalRecordCount: "false",
-      }),
-      this.request("/LiveTv/Programs", {
-        UserId: session.userId, MinStartDate: startUtc, MaxStartDate: endUtc,
-        StartIndex: "0", Limit: "10000", Fields: "Overview", EnableTotalRecordCount: "false",
-      }),
+    const [channels, programs] = await Promise.all([
+      this.getAllLiveTvChannels(true),
+      this.getAllLiveTvPrograms(startUtc, endUtc),
     ]);
-    const channels = this.items(asRecord(channelResult)).map(sanitizeLiveTvChannel).filter((channel) => channel.id);
-    const programs = this.items(asRecord(programResult)).map(sanitizeLiveTvProgram)
-      .filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
     return { status, channels, programs, windowStartUtc: startUtc, windowEndUtc: endUtc };
   }
 
@@ -1063,10 +1255,7 @@ export class JellyfinApi {
       const windowStart = Math.floor(now / (30 * 60_000)) * 30 * 60_000 - 30 * 60_000;
       const horizonStartUtc = new Date(windowStart).toISOString();
       const horizonEndUtc = new Date(windowStart + LIVE_TV_SEARCH_HORIZON_MS).toISOString();
-      const channelResult = await this.request("/LiveTv/Channels", {
-        UserId: session.userId, StartIndex: "0", Limit: "5000", AddCurrentProgram: "true",
-        Fields: "ChannelInfo,PrimaryImageAspectRatio", EnableTotalRecordCount: "false",
-      });
+      const channels = await this.getAllLiveTvChannels(true);
       const programs: LiveTvProgram[] = [];
       let total = Number.POSITIVE_INFINITY;
       let truncated = false;
@@ -1074,7 +1263,7 @@ export class JellyfinApi {
         const result = asRecord(await this.request("/LiveTv/Programs", {
           UserId: session.userId, MinStartDate: horizonStartUtc, MaxStartDate: horizonEndUtc,
           StartIndex: String(page * LIVE_TV_SEARCH_PAGE_SIZE), Limit: String(LIVE_TV_SEARCH_PAGE_SIZE),
-          SortBy: "StartDate", SortOrder: "Ascending", Fields: "Overview", EnableTotalRecordCount: "true",
+          SortBy: "StartDate", SortOrder: "Ascending", Fields: "Overview,Genres,Tags", EnableTotalRecordCount: "true",
         }));
         const entries = this.items(result).map(sanitizeLiveTvProgram)
           .filter((program) => program.id && program.channelId && Date.parse(program.endUtc) > Date.parse(program.startUtc));
@@ -1090,7 +1279,7 @@ export class JellyfinApi {
       if (sessionRevision !== this.sessionRevision) throw new AppError("SESSION_CHANGED", "Your Jellyfin session changed while the guide search was loading.");
       const value: LiveTvSearchCache = {
         expiresAt: Date.now() + LIVE_TV_SEARCH_TTL_MS,
-        channels: this.items(asRecord(channelResult)).map(sanitizeLiveTvChannel).filter((channel) => channel.id),
+        channels,
         programs,
         horizonStartUtc,
         horizonEndUtc,
@@ -1494,10 +1683,15 @@ export class JellyfinApi {
     await reportStopped();
   }
 
-  private async request(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<unknown> {
+  private async request(
+    path: string,
+    params: Record<string, string> = {},
+    init: RequestInit = {},
+    options: AuthenticatedRequestOptions = {},
+  ): Promise<unknown> {
     const expectedSession = this.session;
     const expectedController = this.sessionController;
-    const response = await this.fetchAuthenticated(path, params, init);
+    const response = await this.fetchAuthenticated(path, params, init, options);
     if (response.status === 204) return null;
     const result = await response.json();
     if (this.session !== expectedSession || this.sessionController !== expectedController) {
@@ -1506,13 +1700,20 @@ export class JellyfinApi {
     return result;
   }
 
-  private async fetchAuthenticated(path: string, params: Record<string, string> = {}, init: RequestInit = {}): Promise<Response> {
+  private async fetchAuthenticated(
+    path: string,
+    params: Record<string, string> = {},
+    init: RequestInit = {},
+    options: AuthenticatedRequestOptions = {},
+  ): Promise<Response> {
     const session = this.requireSession();
     const sessionController = this.sessionController;
     const sessionRevision = this.sessionRevision;
     const requestSequence = ++this.requestMeasurementSequence;
     const startedAt = this.connectionClock.monotonicNow();
-    if (this.connectionMeasurement?.sessionRevision === sessionRevision
+    const markUnavailableOnFailure = options.markUnavailableOnFailure !== false;
+    if (markUnavailableOnFailure
+      && this.connectionMeasurement?.sessionRevision === sessionRevision
       && this.connectionMeasurement.state === "offline") {
       this.recordConnectionMeasurement({
         requestSequence,
@@ -1543,6 +1744,16 @@ export class JellyfinApi {
     } catch {
       if (this.session !== session || this.sessionController !== sessionController) {
         throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
+      }
+      if (init.signal?.aborted) {
+        const reasonName = typeof init.signal.reason === "object" && init.signal.reason !== null
+          ? asString(asRecord(init.signal.reason).name)
+          : "";
+        if (reasonName === "TimeoutError") throw new AppError("REQUEST_TIMEOUT", "The Jellyfin request timed out.");
+        throw new AppError("REQUEST_CANCELLED", "The obsolete Jellyfin request was cancelled.");
+      }
+      if (!markUnavailableOnFailure) {
+        throw new AppError("BROWSE_REQUEST_FAILED", "That library page could not be loaded. Try again.");
       }
       this.recordConnectionMeasurement({
         requestSequence,

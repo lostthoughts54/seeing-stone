@@ -1,5 +1,6 @@
 import type {
   CleanMachineDiagnostics,
+  BrowseSort,
   DiscoveredServer,
   DownloadLocationSummary,
   DownloadStorageSummary,
@@ -48,11 +49,28 @@ import {
 } from "./playerPresentation";
 import { activeMediaSegment, canSkipSegment, segmentLabel } from "./playerSegments";
 import { clampedPreviewLeft, trickplayFrame } from "./trickplayPresentation";
-import { loadAllBrowseItems } from "./browsePagination";
 import { LIVE_TV_GUIDE_WINDOW_MS, LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, currentTimeMarkerPercent, guideScrollLeftForTime, isCurrentProgram, isLocalDateTransition, normalGuideWindow, placeProgramInWindow, timeAxisLabels, visibleChannelSlice } from "./liveTvPresentation";
 import { presentPeople } from "../shared/personPresentation";
 import { groupMovieVersions } from "../shared/mediaVersions";
+import { searchLiveTvGuide } from "../shared/liveTvSearch";
 import { groupDownloadedRecords, type DownloadedGroup } from "./downloadedPresentation";
+import {
+  activeLibraryFilterCount,
+  createLibraryFilterState,
+  deriveLibraryFilterOptions,
+  libraryFiltersToBrowseQuery,
+  type LibraryFilterOption,
+  type LibraryFilterOptions,
+  type LibraryFilterState,
+  type MultiValueFilter,
+} from "./libraryFilters";
+import {
+  compactPageEntries,
+  LIBRARY_PAGE_SIZE,
+  libraryPageCount,
+  libraryPageStartIndex,
+  LibraryPageRequestGate,
+} from "./libraryPagination";
 
 const TICKS_PER_SECOND = 10000000;
 const DOWNLOADED_LIBRARY_ID = "seeing-stone:downloaded";
@@ -111,6 +129,7 @@ const profileAdapterSelectSetting = byId<HTMLElement>("profileAdapterSelectSetti
 const profileAdapterFixed = byId<HTMLElement>("profileAdapterFixed");
 const profileAdapterStatus = byId<HTMLElement>("profileAdapterStatus");
 const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
+const refreshLibrariesButton = byId<HTMLButtonElement>("refreshLibrariesButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
 const checkForUpdatesButton = byId<HTMLButtonElement>("checkForUpdatesButton");
@@ -157,6 +176,16 @@ const homeRows = byId<HTMLElement>("homeRows");
 const libraryTitle = byId<HTMLElement>("libraryTitle");
 const libraryFilter = byId<HTMLSelectElement>("libraryFilter");
 const librarySort = byId<HTMLSelectElement>("librarySort");
+const libraryFiltersButton = byId<HTMLButtonElement>("libraryFiltersButton");
+const libraryFilterCount = byId<HTMLElement>("libraryFilterCount");
+const downloadedFilterControl = byId<HTMLElement>("downloadedFilterControl");
+const libraryResultsSummary = byId<HTMLElement>("libraryResultsSummary");
+const libraryFilterChips = byId<HTMLElement>("libraryFilterChips");
+const libraryFilterScrim = byId<HTMLElement>("libraryFilterScrim");
+const libraryFilterDrawer = byId<HTMLElement>("libraryFilterDrawer");
+const libraryFilterSections = byId<HTMLElement>("libraryFilterSections");
+const clearLibraryFiltersButton = byId<HTMLButtonElement>("clearLibraryFiltersButton");
+const closeLibraryFiltersButton = byId<HTMLButtonElement>("closeLibraryFiltersButton");
 const downloadedLibraryActions = byId<HTMLElement>("downloadedLibraryActions");
 const selectDownloadedButton = byId<HTMLButtonElement>("selectDownloadedButton");
 const selectAllDownloadedButton = byId<HTMLButtonElement>("selectAllDownloadedButton");
@@ -165,6 +194,14 @@ const cancelDownloadedSelectionButton = byId<HTMLButtonElement>("cancelDownloade
 const downloadedFollowedSeries = byId<HTMLElement>("downloadedFollowedSeries");
 const downloadedFollowedSeriesList = byId<HTMLElement>("downloadedFollowedSeriesList");
 const libraryGrid = byId<HTMLElement>("libraryGrid");
+const libraryPagination = byId<HTMLElement>("libraryPagination");
+const libraryPaginationContext = byId<HTMLElement>("libraryPaginationContext");
+const libraryPreviousPageButton = byId<HTMLButtonElement>("libraryPreviousPageButton");
+const libraryNextPageButton = byId<HTMLButtonElement>("libraryNextPageButton");
+const libraryPageNumbers = byId<HTMLElement>("libraryPageNumbers");
+const libraryJumpForm = byId<HTMLFormElement>("libraryJumpForm");
+const libraryJumpInput = byId<HTMLInputElement>("libraryJumpInput");
+const libraryRetryButton = byId<HTMLButtonElement>("libraryRetryButton");
 const searchTitle = byId<HTMLElement>("searchTitle");
 const searchRows = byId<HTMLElement>("searchRows");
 
@@ -368,9 +405,20 @@ interface RendererState {
   searchReturnScrollTop: number;
   selectedLibraryId: string | null;
   libraryFilter: LibraryFilter;
+  libraryFilterStates: Map<string, LibraryFilterState>;
+  libraryFilterOptionCache: Map<string, { items: MediaItem[]; options: LibraryFilterOptions }>;
+  expandedLibraryFilterSections: Set<string>;
+  libraryFilterDrawerScrollTop: number;
   librarySort: LibrarySort;
   libraryCache: Map<string, MediaItem[]>;
-  libraryRequestIds: Map<string, number>;
+  libraryPage: number;
+  libraryLoadedPage: number;
+  libraryTotalRecordCount: number | null;
+  libraryHasMore: boolean;
+  libraryLoading: boolean;
+  libraryPageError: string | null;
+  libraryPageRetryable: boolean;
+  libraryRequestGate: LibraryPageRequestGate;
   downloadedSelectionMode: boolean;
   selectedDownloadIds: Set<string>;
   expandedDownloadedSeriesIds: Set<string>;
@@ -437,9 +485,20 @@ const state: RendererState = {
   searchReturnScrollTop: 0,
   selectedLibraryId: null,
   libraryFilter: "all",
+  libraryFilterStates: new Map(),
+  libraryFilterOptionCache: new Map(),
+  expandedLibraryFilterSections: new Set(["quick", "genres"]),
+  libraryFilterDrawerScrollTop: 0,
   librarySort: "title-ascending",
   libraryCache: new Map(),
-  libraryRequestIds: new Map(),
+  libraryPage: 1,
+  libraryLoadedPage: 0,
+  libraryTotalRecordCount: null,
+  libraryHasMore: false,
+  libraryLoading: false,
+  libraryPageError: null,
+  libraryPageRetryable: false,
+  libraryRequestGate: new LibraryPageRequestGate(),
   downloadedSelectionMode: false,
   selectedDownloadIds: new Set(),
   expandedDownloadedSeriesIds: new Set(),
@@ -521,6 +580,8 @@ let dismissedPlaybackId: string | null = null;
 let liveTvChannelSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const liveTvArtworkUrls = new Map<string, string>();
 let miniGuideSelection = { channelId: "", programIndex: 0 };
+let miniGuideQuery = "";
+let liveTvGuideRenderGeneration = 0;
 let pendingGuideTarget: { programId: string; channelId: string; timeMs: number } | null = null;
 const liveTvRecordedProgramIds = new Set<string>();
 
@@ -1156,17 +1217,61 @@ function initialMiniGuideProgramIndex(channelId: string, guide: LiveTvGuide, now
   return Math.max(0, programs.findIndex((program) => isCurrentProgram(program, now)));
 }
 
+function localLiveTvSearch(query: string, guide: LiveTvGuide): LiveTvProgramSearch {
+  const matches = searchLiveTvGuide(query, guide.channels, guide.programs);
+  return {
+    channels: matches.channels.slice(0, 100),
+    programs: matches.programs.slice(0, 300),
+    horizonStartUtc: guide.windowStartUtc,
+    horizonEndUtc: guide.windowEndUtc,
+    truncated: matches.channels.length > 100 || matches.programs.length > 300,
+  };
+}
+
+function miniGuideChannels(guide: LiveTvGuide): LiveTvGuide["channels"] {
+  return miniGuideQuery.trim() ? searchLiveTvGuide(miniGuideQuery, guide.channels, guide.programs).channels : guide.channels;
+}
+
 function renderPlayerMiniGuide(): void {
   const guide = state.liveTvGuide;
   if (!guide || guide.status.availability !== "available") return;
+  const searchWasFocused = document.activeElement instanceof HTMLInputElement && document.activeElement.classList.contains("mini-guide-search-input");
   const now = Date.now();
   const start = Date.parse(guide.windowStartUtc);
   const end = Date.parse(guide.windowEndUtc);
   const miniStart = Math.max(start, Math.floor(now / LIVE_TV_HALF_HOUR_MS) * LIVE_TV_HALF_HOUR_MS);
   const miniEnd = Math.min(end, miniStart + 2 * 60 * 60_000);
   const marker = currentTimeMarkerPercent(now, miniStart, miniEnd);
-  const channels = guide.channels;
-  if (!channels.length) return;
+  const channels = miniGuideChannels(guide);
+  if (!channels.length && !miniGuideQuery.trim()) return;
+  if (!channels.length) {
+    playerMiniGuide.replaceChildren();
+    const header = document.createElement("header");
+    const title = document.createElement("strong");
+    const search = document.createElement("input");
+    const close = document.createElement("button");
+    title.textContent = "Seeing Stone · Mini Guide";
+    search.className = "mini-guide-search-input";
+    search.type = "search";
+    search.value = miniGuideQuery;
+    search.placeholder = "Search channels, programs, or subjects";
+    search.setAttribute("aria-label", "Search mini guide channels and programs");
+    search.addEventListener("input", () => { miniGuideQuery = search.value; renderPlayerMiniGuide(); });
+    close.type = "button";
+    close.textContent = "Close";
+    close.addEventListener("click", () => closePlayerMiniGuide(true));
+    header.append(title, search, close);
+    const empty = document.createElement("p");
+    empty.className = "mini-guide-empty";
+    empty.textContent = `No channels or programs match “${miniGuideQuery.trim()}”.`;
+    playerMiniGuide.append(header, empty);
+    if (searchWasFocused) requestAnimationFrame(() => {
+      const next = playerMiniGuide.querySelector<HTMLInputElement>(".mini-guide-search-input");
+      next?.focus({ preventScroll: true });
+      next?.setSelectionRange(next.value.length, next.value.length);
+    });
+    return;
+  }
   if (!channels.some((channel) => channel.id === miniGuideSelection.channelId)) {
     miniGuideSelection = { channelId: state.playbackItem?.id || channels[0].id, programIndex: 0 };
   }
@@ -1178,15 +1283,27 @@ function renderPlayerMiniGuide(): void {
   playerMiniGuide.style.setProperty("--live-tv-now", marker === null ? "-10" : String(marker));
   const header = document.createElement("header");
   const title = document.createElement("strong");
+  const searchLabel = document.createElement("label");
+  const search = document.createElement("input");
   const hint = document.createElement("span");
   const fullGuide = document.createElement("button");
   title.textContent = "Seeing Stone · Mini Guide";
-  hint.textContent = "↑↓ Channels · ←→ Programs · Enter Watch · Esc Close";
+  searchLabel.className = "mini-guide-search";
+  search.className = "mini-guide-search-input";
+  search.type = "search";
+  search.placeholder = "Search channels, programs, or subjects";
+  search.autocomplete = "off";
+  search.spellcheck = false;
+  search.value = miniGuideQuery;
+  search.setAttribute("aria-label", "Search mini guide channels and programs");
+  search.addEventListener("input", () => { miniGuideQuery = search.value; renderPlayerMiniGuide(); });
+  searchLabel.append(search);
+  hint.textContent = "↑↓ Channels · ←→ Programs · Enter Watch · / Search · Esc Close";
   fullGuide.type = "button";
   fullGuide.className = "mini-guide-full";
   fullGuide.textContent = "Full Guide";
   fullGuide.addEventListener("click", () => { void closePlayer().then(openLiveTv); });
-  header.append(title, hint, fullGuide);
+  header.append(title, searchLabel, hint, fullGuide);
   const axis = document.createElement("div");
   axis.className = "mini-guide-axis";
   const blank = document.createElement("span");
@@ -1199,6 +1316,12 @@ function renderPlayerMiniGuide(): void {
   }
   const body = document.createElement("div");
   body.className = "mini-guide-body";
+  if (miniGuideQuery.trim()) {
+    const status = document.createElement("p");
+    status.className = "mini-guide-search-status";
+    status.textContent = `${channels.length.toLocaleString()} matching ${channels.length === 1 ? "channel" : "channels"}`;
+    body.append(status);
+  }
   const grouped = programsByLiveTvChannel(guide);
   for (const channel of visible) {
     const row = document.createElement("div");
@@ -1228,6 +1351,11 @@ function renderPlayerMiniGuide(): void {
     body.append(row);
   }
   playerMiniGuide.append(header, axis, body);
+  if (searchWasFocused) requestAnimationFrame(() => {
+    const next = playerMiniGuide.querySelector<HTMLInputElement>(".mini-guide-search-input");
+    next?.focus({ preventScroll: true });
+    next?.setSelectionRange(next.value.length, next.value.length);
+  });
 }
 
 function togglePlayerMiniGuide(): void {
@@ -1237,6 +1365,7 @@ function togglePlayerMiniGuide(): void {
   const open = (): void => {
     const channels = state.liveTvGuide?.channels || [];
     const channelId = state.playbackItem?.id || channels[0]?.id || "";
+    miniGuideQuery = "";
     miniGuideSelection = { channelId, programIndex: channelId ? initialMiniGuideProgramIndex(channelId, state.liveTvGuide as LiveTvGuide) : 0 };
     playerMiniGuide.classList.remove("is-hidden");
     playerMiniGuideButton.setAttribute("aria-expanded", "true");
@@ -1252,13 +1381,42 @@ function handlePlayerMiniGuideKey(event: KeyboardEvent): boolean {
   if (playerMiniGuide.classList.contains("is-hidden")) return false;
   const guide = state.liveTvGuide;
   if (!guide || !guide.channels.length) return false;
-  const currentIndex = Math.max(0, guide.channels.findIndex((channel) => channel.id === miniGuideSelection.channelId));
+  const target = event.target instanceof Element ? event.target : null;
+  const searchInput = target?.closest<HTMLInputElement>(".mini-guide-search-input");
+  if (searchInput) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (miniGuideQuery) {
+        miniGuideQuery = "";
+        renderPlayerMiniGuide();
+        requestAnimationFrame(() => playerMiniGuide.querySelector<HTMLInputElement>(".mini-guide-search-input")?.focus({ preventScroll: true }));
+      } else closePlayerMiniGuide(true);
+      return true;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      playerMiniGuide.focus({ preventScroll: true });
+      return true;
+    }
+    return false;
+  }
+  if (event.key === "/" || (event.ctrlKey && event.key.toLocaleLowerCase() === "f")) {
+    event.preventDefault();
+    playerMiniGuide.querySelector<HTMLInputElement>(".mini-guide-search-input")?.focus({ preventScroll: true });
+    return true;
+  }
+  const channels = miniGuideChannels(guide);
+  if (!channels.length) {
+    if (event.key === "Escape") { event.preventDefault(); closePlayerMiniGuide(true); return true; }
+    return false;
+  }
+  const currentIndex = Math.max(0, channels.findIndex((channel) => channel.id === miniGuideSelection.channelId));
   if (event.key === "Escape") { event.preventDefault(); closePlayerMiniGuide(true); return true; }
   if (event.key === "ArrowUp" || event.key === "ArrowDown") {
     event.preventDefault();
     const direction = event.key === "ArrowUp" ? -1 : 1;
-    const next = (currentIndex + direction + guide.channels.length) % guide.channels.length;
-    const channelId = guide.channels[next].id;
+    const next = (currentIndex + direction + channels.length) % channels.length;
+    const channelId = channels[next].id;
     miniGuideSelection = { channelId, programIndex: initialMiniGuideProgramIndex(channelId, guide) };
     renderPlayerMiniGuide();
     playerMiniGuide.focus({ preventScroll: true });
@@ -1405,6 +1563,7 @@ async function viewProgramInGuide(result: LiveTvProgramSearch["programs"][number
   liveTvChannelSearch.value = "";
   state.liveTvProgramSearch = null;
   state.liveTvProgramSearchRequestId += 1;
+  if (state.currentRoute !== "live-tv") setRoute("live-tv");
   setLiveTvTab("guide");
   const guide = state.liveTvGuide;
   if (guide && timeMs >= Date.parse(guide.windowStartUtc) && timeMs < Date.parse(guide.windowEndUtc)) {
@@ -1520,6 +1679,25 @@ function renderLiveTvSearchResults(): void {
   appendSection("Upcoming", search.programs.filter((entry) => Date.parse(entry.program.startUtc) > now).map(createLiveTvSearchProgramResult));
 }
 
+function appendGlobalLiveTvSearchResults(search: LiveTvProgramSearch): void {
+  const now = Date.now();
+  const appendSection = (title: string, entries: HTMLElement[]): void => {
+    if (!entries.length) return;
+    const section = document.createElement("section");
+    const heading = document.createElement("h2");
+    const list = document.createElement("div");
+    section.className = "live-tv-search-section global-live-tv-search-section";
+    heading.textContent = title;
+    list.className = "live-tv-search-list";
+    list.append(...entries);
+    section.append(heading, list);
+    searchRows.append(section);
+  };
+  appendSection("Channels", search.channels.map((channel) => createLiveTvChannelIdentity(channel)));
+  appendSection("Live Now", search.programs.filter((entry) => isCurrentProgram(entry.program, now)).map(createLiveTvSearchProgramResult));
+  appendSection("Upcoming", search.programs.filter((entry) => Date.parse(entry.program.startUtc) > now).map(createLiveTvSearchProgramResult));
+}
+
 async function runLiveTvSearch(query: string): Promise<void> {
   const normalized = query.trim();
   const requestId = ++state.liveTvProgramSearchRequestId;
@@ -1531,7 +1709,9 @@ async function runLiveTvSearch(query: string): Promise<void> {
   state.liveTvProgramSearch = null;
   renderLiveTv();
   try {
-    const result = await window.jellyfin.liveTv.searchPrograms({ query: normalized });
+    const result = state.liveTvGuide?.status.availability === "available"
+      ? localLiveTvSearch(normalized, state.liveTvGuide)
+      : await window.jellyfin.liveTv.searchPrograms({ query: normalized });
     if (requestId !== state.liveTvProgramSearchRequestId || state.liveTvChannelQuery.trim() !== normalized) return;
     state.liveTvProgramSearch = result;
     renderLiveTv();
@@ -1570,10 +1750,8 @@ function renderLiveTvGuide(): void {
       return queryTerms.every((term) => searchable.includes(term));
     })
     : guide.channels;
-  const visibleChannels = matchingChannels.slice(0, 300);
-  liveTvChannelSearchStatus.textContent = matchingChannels.length > visibleChannels.length
-    ? `Showing ${visibleChannels.length.toLocaleString()} of ${matchingChannels.length.toLocaleString()} matching channels. Refine your search to see more.`
-    : `${matchingChannels.length.toLocaleString()} ${matchingChannels.length === 1 ? "channel" : "channels"}`;
+  const visibleChannels = matchingChannels;
+  liveTvChannelSearchStatus.textContent = `${matchingChannels.length.toLocaleString()} ${matchingChannels.length === 1 ? "channel" : "channels"}`;
   if (!matchingChannels.length) {
     renderMessage(liveTvContent, `No channels match “${state.liveTvChannelQuery.trim()}”.`);
     return;
@@ -1617,7 +1795,7 @@ function renderLiveTvGuide(): void {
   }
   axis.append(axisChannel, axisTrack);
   grid.append(axis);
-  for (const channel of visibleChannels) {
+  const createGuideRow = (channel: LiveTvGuide["channels"][number]): HTMLElement => {
     const row = document.createElement("section");
     row.className = "live-tv-row";
     row.dataset.liveTvChannelId = channel.id;
@@ -1651,10 +1829,26 @@ function renderLiveTvGuide(): void {
       track.append(cell);
     }
     row.append(createLiveTvChannelIdentity(channel), track);
-    grid.append(row);
-  }
+    return row;
+  };
   liveTvContent.append(grid);
-  focusPendingGuideTarget();
+  const renderGeneration = ++liveTvGuideRenderGeneration;
+  let rendered = 0;
+  const renderBatch = (): void => {
+    if (renderGeneration !== liveTvGuideRenderGeneration || !grid.isConnected) return;
+    const fragment = document.createDocumentFragment();
+    const batchEnd = Math.min(visibleChannels.length, rendered + (rendered === 0 ? 120 : 80));
+    while (rendered < batchEnd) fragment.append(createGuideRow(visibleChannels[rendered++]));
+    grid.append(fragment);
+    if (rendered < visibleChannels.length) {
+      liveTvChannelSearchStatus.textContent = `Showing ${rendered.toLocaleString()} of ${visibleChannels.length.toLocaleString()} channels while the guide finishes loading…`;
+      requestAnimationFrame(renderBatch);
+      return;
+    }
+    liveTvChannelSearchStatus.textContent = `${visibleChannels.length.toLocaleString()} ${visibleChannels.length === 1 ? "channel" : "channels"}`;
+    focusPendingGuideTarget();
+  };
+  renderBatch();
 }
 
 function renderLiveTvRecordings(): void {
@@ -2834,7 +3028,346 @@ function renderLibraryLoading(): void {
   }
 }
 
-async function refreshLibrary(library: LibrarySummary, showLoading = false): Promise<void> {
+function currentAdvancedLibraryFilters(): LibraryFilterState {
+  const key = state.selectedLibraryId ?? "";
+  let filters = state.libraryFilterStates.get(key);
+  if (!filters) {
+    filters = createLibraryFilterState();
+    state.libraryFilterStates.set(key, filters);
+  }
+  return filters;
+}
+
+function currentLibraryItems(): MediaItem[] {
+  return state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) ?? [] : [];
+}
+
+function currentLibraryFilterOptions(): LibraryFilterOptions {
+  const key = state.selectedLibraryId ?? "";
+  const items = currentLibraryItems();
+  const cached = state.libraryFilterOptionCache.get(key);
+  if (cached?.items === items) return cached.options;
+  const options = deriveLibraryFilterOptions(items);
+  state.libraryFilterOptionCache.set(key, { items, options });
+  return options;
+}
+
+function updateLibraryFilterPresentation(): void {
+  const local = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+  libraryFiltersButton.classList.toggle("is-hidden", local);
+  downloadedFilterControl.classList.toggle("is-hidden", !local);
+  libraryResultsSummary.classList.toggle("is-hidden", local);
+  libraryFilterChips.classList.toggle("is-hidden", local);
+  if (local) return;
+  const filters = currentAdvancedLibraryFilters();
+  const count = activeLibraryFilterCount(filters);
+  libraryFilterCount.textContent = String(count);
+  libraryFilterCount.classList.toggle("is-hidden", count === 0);
+  libraryFiltersButton.setAttribute("aria-label", count ? `Filters, ${count} active` : "Filters");
+  clearLibraryFiltersButton.disabled = count === 0;
+}
+
+function closeLibraryFilterDrawer(restoreFocus = true): void {
+  if (libraryFilterDrawer.classList.contains("is-hidden")) return;
+  state.libraryFilterDrawerScrollTop = libraryFilterSections.scrollTop;
+  libraryFilterDrawer.classList.add("is-hidden");
+  libraryFilterScrim.classList.add("is-hidden");
+  libraryFiltersButton.setAttribute("aria-expanded", "false");
+  if (restoreFocus) libraryFiltersButton.focus();
+}
+
+function openLibraryFilterDrawer(): void {
+  if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) return;
+  renderLibraryFilterDrawer();
+  libraryFilterDrawer.classList.remove("is-hidden");
+  libraryFilterScrim.classList.remove("is-hidden");
+  libraryFiltersButton.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => {
+    libraryFilterSections.scrollTop = state.libraryFilterDrawerScrollTop;
+    (libraryFilterDrawer.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled)"))?.focus();
+  });
+}
+
+function applyAdvancedLibraryFilters(): void {
+  const scrollTop = libraryFilterSections.scrollTop;
+  updateLibraryFilterPresentation();
+  renderLibraryFilterChips();
+  state.libraryPage = 1;
+  state.libraryLoadedPage = 0;
+  state.libraryTotalRecordCount = null;
+  state.libraryHasMore = false;
+  const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
+  if (library) void refreshLibrary(library, true);
+  requestAnimationFrame(() => { libraryFilterSections.scrollTop = scrollTop; });
+}
+
+function toggleFilterValue(filter: MultiValueFilter, value: string, checked: boolean, exclusive = false): void {
+  filter.match = "any";
+  filter.included = checked
+    ? (exclusive ? [value] : [...new Set([...filter.included, value])])
+    : filter.included.filter((entry) => entry !== value);
+  applyAdvancedLibraryFilters();
+}
+
+function createOptionList(filter: MultiValueFilter, options: LibraryFilterOption[], searchable = false, exclusive = false): HTMLElement {
+  const wrapper = document.createElement("div");
+  const list = document.createElement("div");
+  list.className = "filter-option-list";
+  const render = (query = "") => {
+    const needle = query.trim().toLocaleLowerCase();
+    const visible = options.filter((option) => !needle || `${option.label} ${option.detail ?? ""}`.toLocaleLowerCase().includes(needle)).slice(0, searchable ? 100 : 500);
+    list.replaceChildren(...visible.map((option) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      const copy = document.createElement("span");
+      const count = document.createElement("span");
+      label.className = "filter-option";
+      checkbox.type = "checkbox";
+      checkbox.checked = filter.included.includes(option.value);
+      checkbox.addEventListener("change", () => {
+        if (exclusive && checkbox.checked) {
+          for (const other of list.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+            if (other !== checkbox) other.checked = false;
+          }
+        }
+        toggleFilterValue(filter, option.value, checkbox.checked, exclusive);
+      });
+      copy.textContent = option.label;
+      if (option.detail) {
+        const detail = document.createElement("small");
+        copy.textContent = "";
+        copy.append(document.createTextNode(option.label), detail);
+        detail.textContent = option.detail;
+      }
+      count.className = "filter-option-count";
+      count.textContent = String(option.count);
+      label.append(checkbox, copy, count);
+      return label;
+    }));
+    if (!visible.length) {
+      const empty = document.createElement("p");
+      empty.className = "filter-empty";
+      empty.textContent = options.length ? "No matching values." : "No values available in this library.";
+      list.append(empty);
+    }
+  };
+  if (searchable) {
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "filter-search";
+    search.placeholder = "Search values";
+    search.setAttribute("aria-label", "Search filter values");
+    search.addEventListener("input", () => render(search.value));
+    wrapper.append(search);
+  }
+  render();
+  wrapper.append(list);
+  return wrapper;
+}
+
+function createRangeControl(
+  range: { min: number | null; max: number | null },
+  labels: [string, string],
+  bounds: { min?: number; max?: number; step?: number } = {},
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "filter-range";
+  const inputs = labels.map((placeholder, index) => {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.placeholder = placeholder;
+    input.setAttribute("aria-label", placeholder);
+    if (bounds.min !== undefined) input.min = String(bounds.min);
+    if (bounds.max !== undefined) input.max = String(bounds.max);
+    if (bounds.step !== undefined) input.step = String(bounds.step);
+    input.value = String(index === 0 ? range.min ?? "" : range.max ?? "");
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    input.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const value = input.value === "" ? null : Number(input.value);
+        if (index === 0) range.min = Number.isFinite(value) ? value : null;
+        else range.max = Number.isFinite(value) ? value : null;
+        applyAdvancedLibraryFilters();
+      }, 180);
+    });
+    return input;
+  });
+  row.append(inputs[0], "to", inputs[1]);
+  return row;
+}
+
+function appendFilterSection(id: string, title: string, content: HTMLElement): void {
+  const section = document.createElement("section");
+  const toggle = document.createElement("button");
+  const chevron = document.createElement("span");
+  const expanded = state.expandedLibraryFilterSections.has(id);
+  section.className = "filter-section";
+  toggle.type = "button";
+  toggle.className = "filter-section-toggle";
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", `filter-section-${id}`);
+  chevron.className = "chevron";
+  chevron.textContent = "›";
+  toggle.append(title, chevron);
+  content.id = `filter-section-${id}`;
+  content.classList.add("filter-section-body");
+  content.hidden = !expanded;
+  const setExpanded = (next: boolean) => {
+    if (next) state.expandedLibraryFilterSections.add(id);
+    else state.expandedLibraryFilterSections.delete(id);
+    toggle.setAttribute("aria-expanded", String(next));
+    content.hidden = !next;
+  };
+  toggle.addEventListener("click", () => setExpanded(toggle.getAttribute("aria-expanded") !== "true"));
+  toggle.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowRight") { event.preventDefault(); setExpanded(true); }
+    if (event.key === "ArrowLeft") { event.preventDefault(); setExpanded(false); }
+  });
+  section.append(toggle, content);
+  libraryFilterSections.append(section);
+}
+
+function renderLibraryFilterDrawer(): void {
+  const scrollTop = libraryFilterSections.scrollTop || state.libraryFilterDrawerScrollTop;
+  const filters = currentAdvancedLibraryFilters();
+  const sourceItems = currentLibraryItems();
+  const options = currentLibraryFilterOptions();
+  libraryFilterSections.replaceChildren();
+
+  const recentCutoff = Date.now() - 30 * 86_400_000;
+  const quickOptions: LibraryFilterOption[] = [
+    { value: "unplayed", label: "Unplayed", count: sourceItems.filter((item) => !item.userData.played).length },
+    { value: "in-progress", label: "In progress", count: sourceItems.filter((item) => !item.userData.played && item.userData.playbackPositionTicks > 0).length },
+    { value: "played", label: "Played", count: sourceItems.filter((item) => item.userData.played).length },
+    { value: "favorite", label: "Favorites", count: sourceItems.filter((item) => item.userData.favorite).length },
+    { value: "recently-added", label: "Added in the last 30 days", count: sourceItems.filter((item) => item.dateCreated && Date.parse(item.dateCreated) >= recentCutoff).length },
+  ];
+  appendFilterSection("quick", "Quick Filters", createOptionList(filters.quick,
+    quickOptions.filter((option) => option.count > 0 || filters.quick.included.some((value) => value === option.value)), false, true));
+  appendFilterSection("genres", "Genres", createOptionList(filters.genres, options.genres));
+  appendFilterSection("release", "Release / Premiere Date", createRangeControl(filters.premiereYear, ["Year from", "Year to"], { min: 1870, max: 2200 }));
+
+  const ratings = document.createElement("div");
+  const ratingLabel = document.createElement("span");
+  ratingLabel.className = "filter-empty";
+  ratingLabel.textContent = "Community rating";
+  ratings.append(ratingLabel, createRangeControl(filters.communityRating, ["Minimum", "Maximum"], { min: 0, max: 10, step: .1 }));
+  if (options.officialRatings.length) ratings.append(createOptionList(filters.officialRatings, options.officialRatings, options.officialRatings.length > 12));
+  appendFilterSection("ratings", "Ratings", ratings);
+  appendFilterSection("people", "People", createOptionList(filters.people, options.people, true));
+  appendFilterSection("runtime", "Runtime", createRangeControl(filters.runtimeMinutes, ["Minutes from", "Minutes to"], { min: 0, max: 1000 }));
+  if (options.technical.length) appendFilterSection("technical", "Video / Technical", createOptionList(filters.technical, options.technical));
+  requestAnimationFrame(() => { libraryFilterSections.scrollTop = scrollTop; });
+}
+
+function renderLibraryFilterChips(): void {
+  libraryFilterChips.replaceChildren();
+  if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) return;
+  const filters = currentAdvancedLibraryFilters();
+  const options = currentLibraryFilterOptions();
+  const labels = new Map<string, string>([
+    ["unplayed", "Unplayed"], ["in-progress", "In progress"], ["played", "Played"],
+    ["favorite", "Favorites"], ["recently-added", "Recently added"],
+    ...options.genres.map((option) => [option.value, option.label] as const),
+    ...options.people.map((option) => [option.value, option.label] as const),
+    ...options.officialRatings.map((option) => [option.value, option.label] as const),
+    ...options.technical.map((option) => [option.value, option.label] as const),
+  ]);
+  const add = (text: string, remove: () => void) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "library-filter-chip";
+    chip.setAttribute("aria-label", `Remove ${text} filter`);
+    chip.append(document.createTextNode(text), Object.assign(document.createElement("span"), { textContent: "×" }));
+    chip.addEventListener("click", () => { remove(); applyAdvancedLibraryFilters(); renderLibraryFilterDrawer(); });
+    libraryFilterChips.append(chip);
+  };
+  const addValues = (group: string, filter: MultiValueFilter) => filter.included.forEach((value) => add(`${group}: ${labels.get(value) ?? value}`, () => {
+    filter.included = filter.included.filter((entry) => entry !== value);
+  }));
+  addValues("Quick", filters.quick);
+  addValues("Genre", filters.genres);
+  addValues("Person", filters.people);
+  addValues("Rating", filters.officialRatings);
+  addValues("Video", filters.technical);
+  const addRange = (name: string, range: { min: number | null; max: number | null }, suffix = "") => {
+    if (range.min !== null) add(`${name} ≥ ${range.min}${suffix}`, () => { range.min = null; });
+    if (range.max !== null) add(`${name} ≤ ${range.max}${suffix}`, () => { range.max = null; });
+  };
+  addRange("Year", filters.premiereYear);
+  addRange("Rating", filters.communityRating);
+  addRange("Runtime", filters.runtimeMinutes, " min");
+}
+
+function renderLibraryPagination(): void {
+  const local = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
+  libraryPagination.classList.toggle("is-hidden", local || !state.selectedLibraryId);
+  if (local || !state.selectedLibraryId) return;
+  const total = state.libraryTotalRecordCount;
+  const totalPages = total === null ? null : libraryPageCount(total);
+  const currentPage = totalPages === null
+    ? Math.max(1, state.libraryPage)
+    : Math.min(totalPages, Math.max(1, state.libraryPage));
+  const library = navigationLibraries().find((entry) => entry.id === state.selectedLibraryId);
+  const noun = library?.collectionType === "tvshows" ? "Shows" : "Movies";
+  libraryPaginationContext.textContent = state.libraryPageError
+    ? state.libraryPageError
+    : totalPages === null
+      ? `${noun} · Page ${currentPage.toLocaleString()} · Exact total unavailable`
+      : `${total!.toLocaleString()} ${noun} · Page ${currentPage.toLocaleString()} of ${totalPages.toLocaleString()}`;
+  libraryPreviousPageButton.disabled = state.libraryLoading || currentPage <= 1;
+  libraryNextPageButton.disabled = state.libraryLoading || (totalPages === null
+    ? !state.libraryHasMore
+    : currentPage >= totalPages || total === 0);
+  libraryJumpForm.classList.toggle("is-hidden", totalPages === null);
+  libraryJumpInput.max = totalPages === null ? "" : String(totalPages);
+  libraryJumpInput.disabled = state.libraryLoading || totalPages === null || totalPages <= 1;
+  const pageEntries = totalPages === null ? [currentPage] : compactPageEntries(currentPage, totalPages);
+  libraryPageNumbers.replaceChildren(...pageEntries.map((entry) => {
+    if (entry === "ellipsis") {
+      const ellipsis = document.createElement("span");
+      ellipsis.className = "library-page-ellipsis";
+      ellipsis.textContent = "…";
+      ellipsis.setAttribute("aria-hidden", "true");
+      return ellipsis;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = String(entry);
+    button.disabled = state.libraryLoading || totalPages === null;
+    if (entry === currentPage) button.setAttribute("aria-current", "page");
+    button.setAttribute("aria-label", `Page ${entry}`);
+    button.addEventListener("click", () => { void goToLibraryPage(entry); });
+    return button;
+  }));
+  libraryRetryButton.classList.toggle("is-hidden", !state.libraryPageRetryable);
+  libraryRetryButton.disabled = state.libraryLoading;
+}
+
+async function goToLibraryPage(page: number): Promise<void> {
+  const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
+  if (!library || library.id === DOWNLOADED_LIBRARY_ID) return;
+  const totalPages = state.libraryTotalRecordCount === null
+    ? null
+    : libraryPageCount(state.libraryTotalRecordCount);
+  const requestedPage = Math.max(1, Math.floor(page));
+  const nextPage = totalPages === null
+    ? Math.min(state.libraryPage + 1, requestedPage)
+    : Math.min(totalPages, requestedPage);
+  if (nextPage === state.libraryPage && !state.libraryPageError) return;
+  state.libraryPage = nextPage;
+  state.libraryPageError = null;
+  state.libraryPageRetryable = false;
+  contentScroller.scrollTop = 0;
+  await refreshLibrary(library, false);
+}
+
+async function refreshLibrary(
+  library: LibrarySummary,
+  showLoading = false,
+  options: { requestExactTotal?: boolean } = {},
+): Promise<void> {
   const type = libraryItemType(library);
   if (!type) return;
   const cachedItems = state.libraryCache.get(library.id);
@@ -2848,32 +3381,115 @@ async function refreshLibrary(library: LibrarySummary, showLoading = false): Pro
     }
     return;
   }
-  if (showLoading && !cachedItems) renderLibraryLoading();
-  const requestId = (state.libraryRequestIds.get(library.id) || 0) + 1;
-  state.libraryRequestIds.set(library.id, requestId);
+  const requestToken = state.libraryRequestGate.begin();
+  state.libraryLoading = true;
+  state.libraryPageError = null;
+  state.libraryPageRetryable = false;
+  if (showLoading || !cachedItems) renderLibraryLoading();
+  else libraryGrid.classList.add("library-grid-stale");
+  renderLibraryPagination();
   try {
-    const query = {
-      libraryId: library.id, type,
-      watched: state.libraryFilter === "all" || state.libraryFilter === "downloaded" ? undefined : state.libraryFilter === "watched",
-      sort: state.librarySort === "year-descending" ? "release-date-descending" : state.librarySort === "year-ascending" ? "release-date-ascending" : state.librarySort,
-      startIndex: 0, limit: 100,
-    } as const;
-    const items = await loadAllBrowseItems(
-      query,
-      (pageQuery) => window.jellyfin.browse.get(pageQuery),
-      () => state.libraryRequestIds.get(library.id) === requestId,
+    const sort: BrowseSort = state.librarySort === "year-descending"
+      ? "release-date-descending"
+      : state.librarySort === "year-ascending" ? "release-date-ascending" : state.librarySort;
+    const translation = libraryFiltersToBrowseQuery(
+      library.id,
+      type,
+      sort,
+      currentAdvancedLibraryFilters(),
+      libraryPageStartIndex(state.libraryPage),
+      LIBRARY_PAGE_SIZE,
     );
-    if (!items) return;
-    if (state.libraryRequestIds.get(library.id) !== requestId) return;
+    // Recursive movie counts can be dramatically more expensive than a bounded
+    // page in very large VOD libraries. Series libraries are much smaller in
+    // practice and need an exact count so all server-side pages are discoverable.
+    // Main still retries the bounded page without a count if Jellyfin times out.
+    translation.query.enableTotalRecordCount = options.requestExactTotal === true || type === "Series";
+    if (translation.unsupported.length) {
+      state.libraryLoading = false;
+      state.libraryPageError = `${translation.unsupported.join(", ")} cannot be represented accurately by Jellyfin's paginated query. Remove or change those filters.`;
+      state.libraryPageRetryable = false;
+      state.libraryTotalRecordCount = 0;
+      state.libraryHasMore = false;
+      state.libraryCache.set(library.id, []);
+      renderMessage(libraryGrid, state.libraryPageError);
+      renderLibraryPagination();
+      return;
+    }
+    const page = translation.alwaysEmpty
+      ? { items: [], totalRecordCount: 0 }
+      : await window.jellyfin.browse.get(translation.query);
+    if (!state.libraryRequestGate.isCurrent(requestToken)) return;
+    if (page.totalRecordCount >= 0) {
+      state.libraryTotalRecordCount = page.totalRecordCount;
+    }
+    const items = page.items;
+    if (page.totalRecordCount < 0 && items.length < LIBRARY_PAGE_SIZE) {
+      state.libraryTotalRecordCount = libraryPageStartIndex(state.libraryPage) + items.length;
+    }
+    state.libraryHasMore = items.length === LIBRARY_PAGE_SIZE
+      && (state.libraryTotalRecordCount === null
+        || libraryPageStartIndex(state.libraryPage) + items.length < state.libraryTotalRecordCount);
+    const totalPages = state.libraryTotalRecordCount === null
+      ? null
+      : libraryPageCount(state.libraryTotalRecordCount);
+    if (totalPages !== null && state.libraryPage > totalPages) {
+      state.libraryPage = totalPages;
+      state.libraryLoading = false;
+      await refreshLibrary(library, true, options);
+      return;
+    }
+    const pageChanged = state.libraryLoadedPage !== state.libraryPage;
     const itemsChanged = !cachedItems || !mediaItemsEqual(cachedItems, items);
     state.libraryCache.set(library.id, items);
-    if (itemsChanged && state.currentRoute === "library" && state.selectedLibraryId === library.id) {
-      renderLibraryGrid(items);
-    }
+    state.libraryLoadedPage = state.libraryPage;
+    state.libraryLoading = false;
+    libraryGrid.classList.remove("library-grid-stale");
+    if ((itemsChanged || pageChanged || showLoading) && state.currentRoute === "library" && state.selectedLibraryId === library.id) renderLibraryGrid(items);
+    else renderLibraryPagination();
   } catch (error) {
-    if (!cachedItems && state.currentRoute === "library" && state.selectedLibraryId === library.id) {
-      renderMessage(libraryGrid, errorMessage(error, "The library could not be loaded."));
+    if (!state.libraryRequestGate.isCurrent(requestToken)) return;
+    state.libraryLoading = false;
+    state.libraryPageRetryable = true;
+    state.libraryPageError = errorMessage(error, `Page ${state.libraryPage} could not be loaded.`);
+    libraryGrid.classList.remove("library-grid-stale");
+    if (!cachedItems && state.currentRoute === "library" && state.selectedLibraryId === library.id) renderMessage(libraryGrid, state.libraryPageError);
+    renderLibraryPagination();
+  }
+}
+
+async function refreshMediaLibraries(): Promise<void> {
+  if (refreshLibrariesButton.disabled) return;
+  refreshLibrariesButton.disabled = true;
+  profileMenu.classList.add("is-hidden");
+  profileButton.setAttribute("aria-expanded", "false");
+  const selectedLibraryId = state.selectedLibraryId;
+  const wasViewingLibrary = state.currentRoute === "library";
+  state.libraryRequestGate.cancel();
+  state.libraryCache.clear();
+  state.libraryFilterOptionCache.clear();
+  state.libraryPage = 1;
+  state.libraryLoadedPage = 0;
+  state.libraryTotalRecordCount = null;
+  state.libraryHasMore = false;
+  state.libraryPageError = null;
+  state.libraryPageRetryable = false;
+  try {
+    const homeRequestId = ++state.homeRequestId;
+    await loadHome(homeRequestId, false);
+    const library = selectedLibraryId
+      ? supportedLibraries().find((candidate) => candidate.id === selectedLibraryId)
+      : null;
+    if (wasViewingLibrary && library) {
+      state.selectedLibraryId = library.id;
+      libraryTitle.textContent = library.name;
+      await refreshLibrary(library, true, { requestExactTotal: true });
     }
+    showToast(library ? `${library.name} refreshed from Jellyfin.` : "Media libraries refreshed from Jellyfin.");
+  } catch (error) {
+    showToast(errorMessage(error, "Media libraries could not be refreshed."));
+  } finally {
+    refreshLibrariesButton.disabled = false;
   }
 }
 
@@ -2888,12 +3504,27 @@ async function openLibrary(libraryId: string): Promise<void> {
     state.downloadedSelectionMode = false;
     state.selectedDownloadIds.clear();
   }
+  const libraryChanged = state.selectedLibraryId !== library.id;
+  if (libraryChanged) {
+    closeLibraryFilterDrawer(false);
+    state.libraryRequestGate.cancel();
+    state.libraryPage = 1;
+    state.libraryLoadedPage = 0;
+    state.libraryTotalRecordCount = null;
+    state.libraryHasMore = false;
+    state.libraryPageError = null;
+    state.libraryPageRetryable = false;
+    state.libraryCache.delete(library.id);
+    state.libraryFilterOptionCache.delete(library.id);
+  }
   state.selectedLibraryId = library.id;
   libraryTitle.textContent = library.name;
+  updateLibraryFilterPresentation();
+  renderLibraryFilterChips();
   setRoute("library");
 
   const cachedItems = state.libraryCache.get(library.id);
-  if (cachedItems) renderLibraryGrid(cachedItems);
+  if (!libraryChanged && cachedItems) renderLibraryGrid(cachedItems);
   await refreshLibrary(library, true);
 }
 
@@ -3090,28 +3721,23 @@ function renderLibraryGrid(items: MediaItem[]): void {
   libraryGrid.innerHTML = "";
   renderDownloadedLibraryExtras();
   if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) { renderDownloadedGroups(); return; }
-  const filtered = items.filter((item) => {
-    if (state.libraryFilter === "watched") return item.userData.played;
-    if (state.libraryFilter === "unwatched") return !item.userData.played;
-    if (state.libraryFilter === "downloaded") return downloadForItem(item.id)?.state === "downloaded";
-    return true;
-  });
-  const titleCompare = (left: MediaItem, right: MediaItem): number => left.name.localeCompare(right.name, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-  if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) filtered.sort((left, right) => {
-    if (state.librarySort === "title-descending") return -titleCompare(left, right);
-    if (state.librarySort === "year-descending") return (itemYear(right) || 0) - (itemYear(left) || 0) || titleCompare(left, right);
-    if (state.librarySort === "year-ascending") return (itemYear(left) || Number.MAX_SAFE_INTEGER) - (itemYear(right) || Number.MAX_SAFE_INTEGER) || titleCompare(left, right);
-    if (state.librarySort === "rating-descending") return (right.communityRating || 0) - (left.communityRating || 0) || titleCompare(left, right);
-    return titleCompare(left, right);
-  });
+  const filtered = items;
+  const total = state.libraryTotalRecordCount;
+  const first = items.length === 0 ? 0 : libraryPageStartIndex(state.libraryLoadedPage || state.libraryPage) + 1;
+  const last = items.length === 0 ? 0 : first + items.length - 1;
+  libraryResultsSummary.textContent = items.length === 0
+    ? "No titles"
+    : total === null
+      ? `Showing ${first.toLocaleString()}–${last.toLocaleString()} titles`
+      : `Showing ${first.toLocaleString()}–${Math.min(total, last).toLocaleString()} of ${total.toLocaleString()} titles`;
+  updateLibraryFilterPresentation();
+  renderLibraryFilterChips();
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = items.length ? "No titles match this filter." : "No titles found.";
     libraryGrid.append(empty);
+    renderLibraryPagination();
     return;
   }
   const localOnly = state.selectedLibraryId === DOWNLOADED_LIBRARY_ID;
@@ -3145,6 +3771,7 @@ function renderLibraryGrid(items: MediaItem[]): void {
     }
     libraryGrid.append(card);
   }
+  renderLibraryPagination();
 }
 
 async function runSearch(query: string): Promise<void> {
@@ -3169,7 +3796,13 @@ async function runSearch(query: string): Promise<void> {
   renderLoadingRows(searchRows);
 
   try {
-    const items = await window.jellyfin.search.query({ query: trimmed });
+    const liveTvPromise = state.liveTvGuide?.status.availability === "available"
+      ? Promise.resolve(localLiveTvSearch(trimmed, state.liveTvGuide))
+      : window.jellyfin.liveTv.searchPrograms({ query: trimmed }).catch(() => null);
+    const [items, liveTvResults] = await Promise.all([
+      window.jellyfin.search.query({ query: trimmed }),
+      liveTvPromise,
+    ]);
     if (requestId !== state.searchRequestId) return;
     const allRows: MediaRow[] = [
       { title: "Movies", items: items.filter((item) => item.type === "Movie"), shape: "poster" },
@@ -3178,6 +3811,10 @@ async function runSearch(query: string): Promise<void> {
     ];
     const rows = allRows.filter((row) => row.items.length);
     renderMediaRows(searchRows, rows);
+    if (liveTvResults && (liveTvResults.channels.length || liveTvResults.programs.length)) {
+      if (!rows.length) searchRows.replaceChildren();
+      appendGlobalLiveTvSearchResults(liveTvResults);
+    }
   } catch (error) {
     if (requestId !== state.searchRequestId) return;
     renderMessage(searchRows, errorMessage(error, "Search could not be completed."));
@@ -3193,13 +3830,9 @@ async function openBrowse(title: string, input: Parameters<typeof window.jellyfi
   setRoute("search");
   renderLoadingRows(searchRows);
   try {
-    const items = await loadAllBrowseItems(
-      input,
-      (pageQuery) => window.jellyfin.browse.get(pageQuery),
-      () => requestId === state.searchRequestId,
-    );
-    if (!items) return;
-    renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items, shape: "poster" }]);
+    const page = await window.jellyfin.browse.get({ ...input, startIndex: 0, limit: Math.min(60, input.limit) });
+    if (requestId !== state.searchRequestId) return;
+    renderMediaRows(searchRows, [{ title: input.personId ? "Movies and shows featuring this person" : "Results", items: page.items, shape: "poster" }]);
   } catch (error) {
     if (requestId === state.searchRequestId) renderMessage(searchRows, errorMessage(error, "Browse results could not be loaded."));
   }
@@ -5511,8 +6144,19 @@ function resetSignedInState(): void {
   state.selectedLibraryId = null;
   state.libraryFilter = "all";
   state.librarySort = "title-ascending";
+  state.libraryFilterStates.clear();
+  state.libraryFilterOptionCache.clear();
+  state.expandedLibraryFilterSections = new Set(["quick", "genres"]);
+  state.libraryFilterDrawerScrollTop = 0;
   state.libraryCache.clear();
-  state.libraryRequestIds.clear();
+  state.libraryRequestGate.cancel();
+  state.libraryPage = 1;
+  state.libraryLoadedPage = 0;
+  state.libraryTotalRecordCount = null;
+  state.libraryHasMore = false;
+  state.libraryLoading = false;
+  state.libraryPageError = null;
+  state.libraryPageRetryable = false;
   state.downloadedSelectionMode = false;
   state.selectedDownloadIds.clear();
   state.expandedDownloadedSeriesIds.clear();
@@ -5693,15 +6337,37 @@ closeApplicationButton.addEventListener("click", () => {
 });
 libraryFilter.addEventListener("change", () => {
   state.libraryFilter = libraryFilter.value as LibraryFilter;
+  renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
+});
+libraryFiltersButton.addEventListener("click", openLibraryFilterDrawer);
+closeLibraryFiltersButton.addEventListener("click", () => closeLibraryFilterDrawer());
+libraryFilterScrim.addEventListener("click", () => closeLibraryFilterDrawer());
+clearLibraryFiltersButton.addEventListener("click", () => {
+  if (!state.selectedLibraryId) return;
+  state.libraryFilterStates.set(state.selectedLibraryId, createLibraryFilterState());
+  applyAdvancedLibraryFilters();
+  renderLibraryFilterDrawer();
+});
+librarySort.addEventListener("change", () => {
+  state.librarySort = librarySort.value as LibrarySort;
+  state.libraryPage = 1;
+  state.libraryLoadedPage = 0;
+  state.libraryTotalRecordCount = null;
+  state.libraryHasMore = false;
   const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
   if (library && library.id !== DOWNLOADED_LIBRARY_ID) void refreshLibrary(library, true);
   else renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
 });
-librarySort.addEventListener("change", () => {
-  state.librarySort = librarySort.value as LibrarySort;
+libraryPreviousPageButton.addEventListener("click", () => { void goToLibraryPage(state.libraryPage - 1); });
+libraryNextPageButton.addEventListener("click", () => { void goToLibraryPage(state.libraryPage + 1); });
+libraryJumpForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const page = Number(libraryJumpInput.value);
+  if (Number.isFinite(page)) void goToLibraryPage(page);
+});
+libraryRetryButton.addEventListener("click", () => {
   const library = state.selectedLibraryId ? supportedLibraries().find((entry) => entry.id === state.selectedLibraryId) : null;
-  if (library && library.id !== DOWNLOADED_LIBRARY_ID) void refreshLibrary(library, true);
-  else renderLibraryGrid(state.selectedLibraryId ? state.libraryCache.get(state.selectedLibraryId) || [] : []);
+  if (library) void refreshLibrary(library, !state.libraryCache.has(library.id));
 });
 selectDownloadedButton.addEventListener("click", () => {
   state.downloadedSelectionMode = true;
@@ -5830,6 +6496,7 @@ document.addEventListener("click", () => {
 });
 
 refreshButton.addEventListener("click", () => { void retryConnection(refreshButton); });
+refreshLibrariesButton.addEventListener("click", () => { void refreshMediaLibraries(); });
 
 window.setInterval(() => { void refreshVisibleCatalog(); }, CATALOG_REFRESH_INTERVAL_MS);
 window.setInterval(updateCompanionPairingCountdown, 1000);
@@ -6200,6 +6867,34 @@ for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-playe
 
 document.addEventListener("keydown", (event) => {
   if (smartDownloadDialog.open || smartUnfollowDialog.open) return;
+  if (!libraryFilterDrawer.classList.contains("is-hidden")) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeLibraryFilterDrawer();
+      return;
+    }
+    const focusable = Array.from(libraryFilterDrawer.querySelectorAll<HTMLElement>(
+      "button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])",
+    )).filter((element) => element.offsetParent !== null);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.key === "Tab" && first && last) {
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp")
+      && target
+      && !target.matches("select, input[type='number']")) {
+      const index = focusable.indexOf(target);
+      if (index >= 0) {
+        event.preventDefault();
+        focusable[(index + (event.key === "ArrowDown" ? 1 : -1) + focusable.length) % focusable.length]?.focus();
+      }
+      return;
+    }
+  }
   if (!trailerPanel.classList.contains("is-hidden") && event.key === "Escape") {
     event.preventDefault();
     closeTrailer();

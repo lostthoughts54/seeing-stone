@@ -6,13 +6,16 @@
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -32,6 +35,40 @@ using MpvInitialize = int(__cdecl*)(mpv_handle*);
 using MpvTerminateDestroy = void(__cdecl*)(mpv_handle*);
 using MpvSetOptionString = int(__cdecl*)(mpv_handle*, const char*, const char*);
 using MpvCommand = int(__cdecl*)(mpv_handle*, const char* const*);
+
+struct mpv_event {
+  int event_id;
+  int error;
+  uint64_t reply_userdata;
+  void* data;
+};
+struct mpv_event_log_message {
+  const char* prefix;
+  const char* level;
+  const char* text;
+  int log_level;
+};
+
+using MpvRequestLogMessages = int(__cdecl*)(mpv_handle*, const char*);
+using MpvWaitEvent = mpv_event*(__cdecl*)(mpv_handle*, double);
+
+constexpr int kMpvEventNone = 0;
+constexpr int kMpvEventLogMessage = 2;
+constexpr int kMpvEventStartFile = 6;
+constexpr int kMpvEventEndFile = 7;
+constexpr int kMpvEventFileLoaded = 8;
+constexpr int kMpvEventTracksChanged = 9;
+constexpr int kMpvEventVideoReconfig = 17;
+constexpr int kMpvEventPlaybackRestart = 21;
+constexpr int kMpvEventQueueOverflow = 24;
+
+struct MpvDiagnosticEvent {
+  std::string kind;
+  std::string prefix;
+  std::string level;
+  std::string text;
+  int error = 0;
+};
 
 struct mpv_node;
 struct mpv_node_list {
@@ -112,6 +149,14 @@ constexpr EGLint EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE_VALUE = 0x3208;
 constexpr EGLint EGL_DEVICE_EXT_VALUE = 0x322C;
 constexpr EGLint EGL_D3D11_DEVICE_ANGLE_VALUE = 0x33A1;
 constexpr EGLenum EGL_D3D_TEXTURE_ANGLE_VALUE = 0x33A3;
+
+using GLenum = unsigned int;
+using GLint = int;
+using GLsizei = int;
+using GLvoid = void;
+
+constexpr GLenum GL_RGBA_VALUE = 0x1908;
+constexpr GLenum GL_UNSIGNED_BYTE_VALUE = 0x1401;
 
 using EglGetProcAddress = void*(WINAPI*)(const char*);
 using EglGetPlatformDisplayExt = EGLDisplay(WINAPI*)(EGLenum, void*, const EGLint*);
@@ -205,6 +250,8 @@ struct LibMpvFunctions {
   MpvTerminateDestroy terminate_destroy = nullptr;
   MpvSetOptionString set_option_string = nullptr;
   MpvCommand command = nullptr;
+  MpvRequestLogMessages request_log_messages = nullptr;
+  MpvWaitEvent wait_event = nullptr;
   MpvGetProperty get_property = nullptr;
   MpvFreeNodeContents free_node_contents = nullptr;
   MpvRenderContextCreate render_context_create = nullptr;
@@ -220,6 +267,8 @@ struct LibMpvFunctions {
     terminate_destroy = module.Resolve<MpvTerminateDestroy>("mpv_terminate_destroy");
     set_option_string = module.Resolve<MpvSetOptionString>("mpv_set_option_string");
     command = module.Resolve<MpvCommand>("mpv_command");
+    request_log_messages = module.Resolve<MpvRequestLogMessages>("mpv_request_log_messages");
+    wait_event = module.Resolve<MpvWaitEvent>("mpv_wait_event");
     get_property = module.Resolve<MpvGetProperty>("mpv_get_property");
     free_node_contents = module.Resolve<MpvFreeNodeContents>("mpv_free_node_contents");
     render_context_create = module.Resolve<MpvRenderContextCreate>("mpv_render_context_create");
@@ -262,6 +311,39 @@ class MpvRenderContext final {
   mpv_render_context* context_ = nullptr;
 };
 
+std::string Lowercase(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+    return static_cast<char>(std::tolower(character));
+  });
+  return value;
+}
+
+bool RelevantDiagnosticLog(const std::string& prefix, const std::string& level, const std::string& text) {
+  const std::string normalized_level = Lowercase(level);
+  if (normalized_level == "fatal" || normalized_level == "error" || normalized_level == "warn") return true;
+  const std::string searchable = Lowercase(prefix + " " + text);
+  for (const char* token : {
+         "decoder", "decode", "hwdec", "hardware", "d3d11", "dxva", "nvdec", "cuda",
+         "corrupt", "invalid", "interlac", "reconfig", "pixel format", "frame drop", "dropped frame",
+       }) {
+    if (searchable.find(token) != std::string::npos) return true;
+  }
+  return false;
+}
+
+std::string DiagnosticEventName(int event_id) {
+  switch (event_id) {
+    case kMpvEventStartFile: return "start-file";
+    case kMpvEventEndFile: return "end-file";
+    case kMpvEventFileLoaded: return "file-loaded";
+    case kMpvEventTracksChanged: return "tracks-changed";
+    case kMpvEventVideoReconfig: return "video-reconfig";
+    case kMpvEventPlaybackRestart: return "playback-restart";
+    case kMpvEventQueueOverflow: return "event-queue-overflow";
+    default: return {};
+  }
+}
+
 class MpvInstance final {
  public:
   explicit MpvInstance(const LibMpvFunctions& functions)
@@ -281,6 +363,32 @@ class MpvInstance final {
     return functions_.set_option_string(handle_, name, value);
   }
   int Command(const char* const* arguments) const { return functions_.command(handle_, arguments); }
+  bool EnableDiagnosticLogs() const {
+    return functions_.request_log_messages != nullptr && functions_.wait_event != nullptr &&
+           functions_.request_log_messages(handle_, "v") >= 0;
+  }
+  std::vector<MpvDiagnosticEvent> DrainDiagnosticEvents() const {
+    std::vector<MpvDiagnosticEvent> result;
+    if (functions_.wait_event == nullptr) return result;
+    for (uint32_t index = 0; index < 512; ++index) {
+      mpv_event* event = functions_.wait_event(handle_, 0);
+      if (event == nullptr || event->event_id == kMpvEventNone) break;
+      if (event->event_id == kMpvEventLogMessage && event->data != nullptr) {
+        const auto* message = static_cast<const mpv_event_log_message*>(event->data);
+        const std::string prefix = message->prefix == nullptr ? "" : message->prefix;
+        const std::string level = message->level == nullptr ? "" : message->level;
+        std::string text = message->text == nullptr ? "" : message->text;
+        while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.pop_back();
+        if (RelevantDiagnosticLog(prefix, level, text)) {
+          result.push_back({"mpv-log", prefix, level, text, event->error});
+        }
+        continue;
+      }
+      const std::string kind = DiagnosticEventName(event->event_id);
+      if (!kind.empty()) result.push_back({kind, "", "", "", event->error});
+    }
+    return result;
+  }
   int GetProperty(const char* name, mpv_node* value) const {
     constexpr int kMpvFormatNode = 6;
     return functions_.get_property(handle_, name, kMpvFormatNode, value);
@@ -447,6 +555,18 @@ class AngleSharedTextureContext final {
     return true;
   }
 
+  bool ReadPixelsRgba(uint32_t width, uint32_t height, std::vector<uint8_t>* output) const {
+    using GlReadPixels = void(WINAPI*)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, GLvoid*);
+    const auto read_pixels = reinterpret_cast<GlReadPixels>(GetGlProcAddress("glReadPixels"));
+    if (read_pixels == nullptr || output == nullptr) return false;
+    const uint64_t byte_count = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 4;
+    if (byte_count > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) return false;
+    output->assign(static_cast<size_t>(byte_count), 0);
+    read_pixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+                GL_RGBA_VALUE, GL_UNSIGNED_BYTE_VALUE, output->data());
+    return true;
+  }
+
   void* GetGlProcAddress(const char* name) const {
     void* result = get_proc_address_ != nullptr ? get_proc_address_(name) : nullptr;
     return result != nullptr ? result : reinterpret_cast<void*>(gles_module_->Resolve<FARPROC>(name));
@@ -515,8 +635,10 @@ class AngleSharedTextureContext final {
 struct VideoFrameSlot {
   uint64_t sequence = 0;
   int64_t timestamp_microseconds = 0;
+  double readback_milliseconds = 0;
   bool ready = false;
   bool electron_owned = false;
+  std::vector<uint8_t> cpu_pixels_rgba;
 };
 
 struct LibMpvVideoState {
@@ -537,8 +659,11 @@ struct LibMpvVideoState {
   uint64_t next_sequence = 1;
   uint64_t rendered_frames = 0;
   uint64_t dropped_frames = 0;
+  uint64_t readback_frames = 0;
+  uint64_t readback_failures = 0;
   bool waiting_for_slot = false;
   bool rendering = false;
+  bool cpu_readback = false;
   std::atomic<bool> unusable{false};
 
   ~LibMpvVideoState() {
@@ -637,15 +762,36 @@ struct LibMpvVideoState {
         wake.notify_all();
         break;
       }
+      std::vector<uint8_t> readback_pixels;
+      double readback_milliseconds = 0;
+      bool readback_succeeded = true;
+      if (cpu_readback) {
+        const auto readback_started = std::chrono::steady_clock::now();
+        readback_succeeded = angle->ReadPixelsRgba(width, height, &readback_pixels);
+        const auto readback_finished = std::chrono::steady_clock::now();
+        readback_milliseconds = std::chrono::duration<double, std::milli>(
+          readback_finished - readback_started).count();
+        angle->Finish();
+      }
       const int64_t timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
       {
         std::lock_guard<std::mutex> lock(mutex);
         VideoFrameSlot& slot = slots[slot_index];
+        if (cpu_readback && !readback_succeeded) {
+          ++readback_failures;
+          ++dropped_frames;
+          rendering = false;
+          wake.notify_all();
+          continue;
+        }
         slot.sequence = next_sequence++;
         slot.timestamp_microseconds = timestamp;
+        slot.readback_milliseconds = readback_milliseconds;
+        slot.cpu_pixels_rgba = std::move(readback_pixels);
         slot.ready = true;
         ++rendered_frames;
+        if (cpu_readback) ++readback_frames;
         rendering = false;
       }
       wake.notify_all();
@@ -676,6 +822,7 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
       InstanceMethod("releaseFrame", &LibMpvVideoProducer::ReleaseFrame),
       InstanceMethod("command", &LibMpvVideoProducer::Command),
       InstanceMethod("getProperty", &LibMpvVideoProducer::GetProperty),
+      InstanceMethod("drainDiagnostics", &LibMpvVideoProducer::DrainDiagnostics),
       InstanceMethod("setSuspended", &LibMpvVideoProducer::SetSuspended),
       InstanceMethod("getStats", &LibMpvVideoProducer::GetStats),
       InstanceMethod("destroy", &LibMpvVideoProducer::Destroy),
@@ -714,7 +861,31 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     const std::wstring source_path = Utf8ToWide(source_utf8);
     const bool loop = !options.Has("loop") || options.Get("loop").ToBoolean().Value();
     const bool audio_enabled = options.Has("audioEnabled") && options.Get("audioEnabled").ToBoolean().Value();
-    const bool hardware_decoding = options.Has("hardwareDecoding") && options.Get("hardwareDecoding").ToBoolean().Value();
+    if (options.Has("cpuReadback") && !options.Get("cpuReadback").IsBoolean()) {
+      Fail(env, "cpuReadback must be a boolean.");
+      return;
+    }
+    state_->cpu_readback = options.Has("cpuReadback") && options.Get("cpuReadback").ToBoolean().Value();
+    std::string hardware_decoding_mode = options.Has("hardwareDecoding") && options.Get("hardwareDecoding").ToBoolean().Value()
+      ? "auto-safe"
+      : "no";
+    if (options.Has("hardwareDecodingMode")) {
+      const Napi::Value mode_value = options.Get("hardwareDecodingMode");
+      if (!mode_value.IsString()) {
+        Fail(env, "hardwareDecodingMode must be current, software, or auto-copy.");
+        return;
+      }
+      const std::string requested_mode = mode_value.As<Napi::String>().Utf8Value();
+      hardware_decoding_mode = requested_mode == "current" ? "auto-safe"
+        : requested_mode == "software" ? "no"
+        : requested_mode == "auto-copy" ? "auto-copy"
+        : "";
+      if (hardware_decoding_mode.empty()) {
+        Fail(env, "hardwareDecodingMode must be current, software, or auto-copy.");
+        return;
+      }
+    }
+    const bool diagnostic_logging = options.Has("diagnosticLogging") && options.Get("diagnosticLogging").ToBoolean().Value();
     double start_position_seconds = 0;
     if (options.Has("startPositionSeconds")) {
       const Napi::Value start_value = options.Get("startPositionSeconds");
@@ -757,7 +928,7 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
         state_->instance->SetOption("vo", "libmpv") < 0 ||
         state_->instance->SetOption("terminal", "no") < 0 ||
         (!audio_enabled && state_->instance->SetOption("ao", "null") < 0) ||
-        state_->instance->SetOption("hwdec", hardware_decoding ? "auto-safe" : "no") < 0 ||
+        state_->instance->SetOption("hwdec", hardware_decoding_mode.c_str()) < 0 ||
         state_->instance->SetOption("loop-file", loop ? "inf" : "no") < 0 ||
         state_->instance->SetOption("keep-open", "yes") < 0 ||
         (start_position_seconds > 0 && state_->instance->SetOption("start", start_option.c_str()) < 0) ||
@@ -765,6 +936,7 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
       Fail(env, "LIBMPV_VIDEO_INITIALIZE_FAILED");
       return;
     }
+    if (diagnostic_logging) state_->instance->EnableDiagnosticLogs();
     mpv_opengl_init_params init_parameters{
       AngleSharedTextureContext::GetGlProcAddressCallback,
       state_->angle.get(),
@@ -816,6 +988,8 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     size_t slot_index = state_->slots.size();
     uint64_t sequence = 0;
     int64_t timestamp = 0;
+    double readback_milliseconds = 0;
+    std::vector<uint8_t> cpu_pixels_rgba;
     {
       std::lock_guard<std::mutex> lock(state_->mutex);
       for (size_t index = 0; index < state_->slots.size(); ++index) {
@@ -831,6 +1005,8 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
       slot.electron_owned = true;
       sequence = slot.sequence;
       timestamp = slot.timestamp_microseconds;
+      readback_milliseconds = slot.readback_milliseconds;
+      if (state_->cpu_readback) cpu_pixels_rgba = slot.cpu_pixels_rgba;
     }
     HANDLE handle = state_->angle->shared_handle(slot_index);
     Napi::Object frame = Napi::Object::New(env);
@@ -839,8 +1015,14 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     frame.Set("width", Napi::Number::New(env, state_->width));
     frame.Set("height", Napi::Number::New(env, state_->height));
     frame.Set("timestampMicroseconds", Napi::Number::New(env, static_cast<double>(timestamp)));
-    frame.Set("ntHandle", Napi::Buffer<uint8_t>::Copy(env,
-      reinterpret_cast<const uint8_t*>(&handle), sizeof(handle)));
+    if (state_->cpu_readback) {
+      frame.Set("pixelFormat", "rgba");
+      frame.Set("readbackMilliseconds", Napi::Number::New(env, readback_milliseconds));
+      frame.Set("pixels", Napi::Buffer<uint8_t>::Copy(env, cpu_pixels_rgba.data(), cpu_pixels_rgba.size()));
+    } else {
+      frame.Set("ntHandle", Napi::Buffer<uint8_t>::Copy(env,
+        reinterpret_cast<const uint8_t*>(&handle), sizeof(handle)));
+    }
     return frame;
   }
 
@@ -856,6 +1038,7 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     VideoFrameSlot& slot = state_->slots[index];
     if (!slot.electron_owned || slot.sequence != sequence) return Napi::Boolean::New(env, false);
     slot.electron_owned = false;
+    slot.cpu_pixels_rgba.clear();
     if (state_->waiting_for_slot) state_->render_requested.store(true);
     state_->wake.notify_one();
     return Napi::Boolean::New(env, true);
@@ -938,6 +1121,24 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     return result;
   }
 
+  Napi::Value DrainDiagnostics(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    Napi::Array result = Napi::Array::New(env);
+    if (!state_ || state_->unusable) return result;
+    const std::vector<MpvDiagnosticEvent> events = state_->instance->DrainDiagnosticEvents();
+    for (uint32_t index = 0; index < events.size(); ++index) {
+      const MpvDiagnosticEvent& event = events[index];
+      Napi::Object value = Napi::Object::New(env);
+      value.Set("kind", event.kind);
+      if (!event.prefix.empty()) value.Set("prefix", event.prefix);
+      if (!event.level.empty()) value.Set("level", event.level);
+      if (!event.text.empty()) value.Set("text", event.text);
+      if (event.error != 0) value.Set("error", event.error);
+      result.Set(index, value);
+    }
+    return result;
+  }
+
   Napi::Value SetSuspended(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     if (!state_ || info.Length() != 1 || !info[0].IsBoolean()) {
@@ -961,6 +1162,8 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     Napi::Object stats = Napi::Object::New(env);
     uint64_t rendered = 0;
     uint64_t dropped = 0;
+    uint64_t readback = 0;
+    uint64_t readback_failures = 0;
     size_t outstanding = 0;
     size_t pool_size = 0;
     bool unusable = true;
@@ -968,12 +1171,16 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
       std::lock_guard<std::mutex> lock(state_->mutex);
       rendered = state_->rendered_frames;
       dropped = state_->dropped_frames;
+      readback = state_->readback_frames;
+      readback_failures = state_->readback_failures;
       pool_size = state_->slots.size();
       for (const auto& slot : state_->slots) if (slot.electron_owned) ++outstanding;
       unusable = state_->unusable.load();
     }
     stats.Set("renderedFrames", Napi::Number::New(env, static_cast<double>(rendered)));
     stats.Set("droppedFrames", Napi::Number::New(env, static_cast<double>(dropped)));
+    stats.Set("readbackFrames", Napi::Number::New(env, static_cast<double>(readback)));
+    stats.Set("readbackFailures", Napi::Number::New(env, static_cast<double>(readback_failures)));
     stats.Set("outstandingFrames", Napi::Number::New(env, static_cast<double>(outstanding)));
     stats.Set("poolSize", Napi::Number::New(env, static_cast<double>(pool_size)));
     stats.Set("unusable", Napi::Boolean::New(env, unusable));
