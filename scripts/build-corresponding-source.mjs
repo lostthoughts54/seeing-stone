@@ -30,7 +30,7 @@ async function download(url, destination) {
 }
 
 async function verifyArchive(source) {
-  const path = resolve(cacheRoot, source.filename);
+  const path = source.localPath ? resolve(root, source.localPath) : resolve(cacheRoot, source.filename);
   try {
     await access(path);
   } catch {

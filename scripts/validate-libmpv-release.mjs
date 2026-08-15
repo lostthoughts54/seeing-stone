@@ -40,8 +40,10 @@ function hasPendingValue(value) {
 }
 
 const manifest = await json("libmpv-runtime.json", "runtime manifest");
+const packageData = await json("package.json", "application package manifest");
 const build = await json("native/libmpv-runtime/build-result.json", "native build inventory");
 const legal = await json("legal-components.json", "legal component manifest");
+const redistribution = await json("redistribution-compliance.json", "redistribution compliance manifest");
 const dependencyProvenance = await json(
   "native/libmpv-runtime/dependency-provenance.json",
   "companion dependency provenance",
@@ -135,8 +137,20 @@ for (const owner of buildOwners) {
   for (const field of ["binaryHashes", "buildFlags", "toolchainVersions", "requiredRuntimeDlls", "patches", "buildScripts"]) {
     if (!Array.isArray(record[field])) reject(`${owner} provenance is missing ${field}`);
   }
-  if (typeof record.sourceArchive === "string" && !await exists(`release-sources/libmpv/${record.sourceArchive}`)) {
-    reject(`${owner} corresponding source bundle is not archived under release-sources/libmpv`);
+  if (typeof record.sourceArchive === "string") {
+    const source = redistribution?.sourceArchives?.find((candidate) => candidate.filename === record.sourceArchive);
+    if (!source || source.sha256 !== record.sourceArchiveSha256) {
+      reject(`${owner} corresponding source archive is not hash-pinned by redistribution-compliance.json`);
+    } else {
+      const sourcePath = source.localPath
+        ? resolve(root, source.localPath)
+        : resolve(root, ".runtime/corresponding-source-cache", source.filename);
+      try {
+        if (await sha256(sourcePath) !== source.sha256) reject(`${owner} corresponding source archive hash mismatch`);
+      } catch {
+        reject(`${owner} corresponding source archive is missing locally: ${source.filename}`);
+      }
+    }
   }
 }
 
@@ -154,12 +168,36 @@ for (const document of ["LIBMPV_EXPERIMENTAL.md", "LIBMPV_MIGRATION_STATUS.md", 
   if (!await exists(document)) reject(`release documentation is missing: ${document}`);
 }
 
-if (releaseAcceptance?.result !== "passed") {
-  reject("clean-machine package/install/playback/uninstall acceptance has not passed");
+const acceptancePassed = releaseAcceptance?.result === "passed";
+const acceptanceWaived = releaseAcceptance?.result === "waived";
+if (!acceptancePassed && !acceptanceWaived) {
+  reject("clean-machine package/install/playback/uninstall acceptance has neither passed nor been explicitly waived");
 }
-for (const field of ["release", "packagedArtifactSha256", "inventorySha256", "correspondingSourceSha256", "testedAtUtc"]) {
+for (const field of ["release", "packagedArtifactSha256", "inventorySha256", "correspondingSourceSha256"]) {
   if (typeof releaseAcceptance?.[field] !== "string" || !releaseAcceptance[field].trim()) {
     reject(`public-release acceptance is missing ${field}`);
+  }
+}
+if (releaseAcceptance?.release !== packageData?.version) reject("public-release acceptance does not match package.json version");
+if (acceptancePassed && (typeof releaseAcceptance?.testedAtUtc !== "string" || !releaseAcceptance.testedAtUtc.trim())) {
+  reject("passed public-release acceptance is missing testedAtUtc");
+}
+if (acceptanceWaived) {
+  for (const field of ["waiverReason", "authorizedBy", "authorization", "waivedAtUtc"]) {
+    if (typeof releaseAcceptance?.[field] !== "string" || !releaseAcceptance[field].trim()) {
+      reject(`waived public-release acceptance is missing ${field}`);
+    }
+  }
+}
+for (const [field, path] of [
+  ["packagedArtifactSha256", `.runtime/release/Seeing-Stone-Setup-${packageData?.version}-x64.exe`],
+  ["inventorySha256", "native/redistribution-inventory.json"],
+  ["correspondingSourceSha256", `artifacts/Seeing-Stone-${packageData?.version}-corresponding-source.zip`],
+]) {
+  try {
+    if (await sha256(resolve(root, path)) !== releaseAcceptance?.[field]) reject(`public-release acceptance ${field} does not match ${path}`);
+  } catch {
+    reject(`public-release acceptance artifact is missing: ${path}`);
   }
 }
 

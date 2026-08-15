@@ -114,6 +114,6 @@
     ]
   },
   "patches": [],
-  "correspondingSource": ".runtime/libmpv-build/archives until the public-release source archive is produced",
-  "applicationRelease": "0.4.3"
+  "correspondingSource": "Seeing-Stone-0.7.1-corresponding-source.zip",
+  "applicationRelease": "0.7.1"
 }

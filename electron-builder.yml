@@ -47,7 +47,7 @@ extraResources:
     to: libmpv
     filter:
       - "*.dll"
-      - "*.node"
+      - "seeing_stone_libmpv_bridge.node"
       - "mpv.exe"
 
 afterPack: ./scripts/after-pack.cjs

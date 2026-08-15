@@ -23,7 +23,11 @@ if (manifest.libmpv?.status !== "ready" || manifest.libmpv.realVideoGatePassed !
 if (!config.includes("  - from: .runtime/libmpv\n    to: libmpv")) {
   reject("production build does not package the staged libmpv runtime at resources/libmpv");
 }
-if (!config.includes('      - "*.dll"') || !config.includes('      - "*.node"') || !config.includes('      - "mpv.exe"')) {
+if (
+  !config.includes('      - "*.dll"')
+  || !config.includes('      - "seeing_stone_libmpv_bridge.node"')
+  || !config.includes('      - "mpv.exe"')
+) {
   reject("production build does not restrict libmpv resources to the reviewed native closure");
 }
 if (config.includes("from: .runtime/mpv") || config.includes("to: mpv")) {

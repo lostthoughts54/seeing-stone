@@ -2555,7 +2555,7 @@ export const OPEN_SOURCE_LICENSES = {
       "name": "Seeing Stone libmpv bridge",
       "version": "0.7.1",
       "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
+      "projectUrl": "https://github.com/lostthoughts54/seeing-stone",
       "redistributionStatus": "source-and-binary"
     },
     {

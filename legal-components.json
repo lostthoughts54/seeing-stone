@@ -34,10 +34,10 @@
           "path": "native/libmpv-bridge/synthetic-gate-result.json",
           "sha256": "4146f1c0e6644e88da0dd5efd87c731229f9182dc2b24847203f63867d018757"
         },
-        {
-          "path": "native/libmpv-runtime/source-lock.json",
-          "sha256": "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f"
-        },
+          {
+            "path": "native/libmpv-runtime/source-lock.json",
+            "sha256": "c320b20b3c3240096b7958ad10316f6fd160329055f9954b43af4e6781006a1b"
+          },
         {
           "path": "native/libmpv-runtime/build-result.json",
           "sha256": "8b0f1d8ee6df66d4a066b9a8b2b6827e18d15763cf677e49a4d47547eb5111c6"
@@ -140,7 +140,7 @@
         "patches": [],
         "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1"],
         "correspondingSource": "pnpm-lock.yaml plus the immutable source URL",
-        "applicationRelease": "0.5.0"
+        "applicationRelease": "0.7.1"
       }
     },
     {
@@ -176,8 +176,8 @@
         "requiredRuntimeDlls": [],
         "patches": [],
         "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
-        "correspondingSource": ".runtime/libmpv-build/archives until the release source archive is produced",
-        "applicationRelease": "0.5.0"
+        "correspondingSource": "source-archives/mpv-v0.41.0.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
+        "applicationRelease": "0.7.1"
       }
     },
     {
@@ -185,8 +185,8 @@
       "name": "Seeing Stone libmpv bridge",
       "version": "0.7.1",
       "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
-      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+      "projectUrl": "https://github.com/lostthoughts54/seeing-stone",
+      "sourceRevision": "84d796fbd9a8c0aac55f896b4f5d648818cd03f4",
       "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
@@ -194,9 +194,9 @@
         "sha256": "4c0805104a3a59979eaddbc59c9b0b1aa4d20531dac7d4fec9589180f55b1f07"
       },
       "provenance": {
-        "immutableSourceUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
-        "sourceArchive": "Seeing-Stone-0.4.3 corresponding source (release gate pending)",
-        "sourceArchiveSha512": "sha512-pending-public-release-source-archive",
+        "immutableSourceUrl": "https://github.com/lostthoughts54/seeing-stone/archive/84d796fbd9a8c0aac55f896b4f5d648818cd03f4.zip",
+        "sourceArchive": "Seeing-Stone-0.7.1-source-84d796f.zip",
+        "sourceArchiveSha512": "sha512-e53449c132eca53751a4c77aae844295310246d20e957025e3dcd450a7d11e21022db798825f9062298c2e604502f303a20b471cf8a93c5804182a285c53cec3",
         "binaryHashes": [
           "seeing_stone_libmpv_bridge.node sha256:085357c4ff13995debda404276a5ee2ab8dc158facc36f4aa45870d911f0292f"
         ],
@@ -205,8 +205,8 @@
         "requiredRuntimeDlls": ["Windows D3D11/DXGI system libraries", "Manifest-controlled libmpv runtime closure for the lifecycle probe"],
         "patches": [],
         "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1", "scripts/stage-libmpv-runtime.ps1"],
-        "correspondingSource": "native/libmpv-bridge and the checked-in build scripts",
-        "applicationRelease": "0.5.0"
+        "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-84d796f.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.1-corresponding-source.zip",
+        "applicationRelease": "0.7.1"
       }
     },
     {
@@ -238,8 +238,8 @@
         "requiredRuntimeDlls": ["libEGL.dll", "libGLESv2.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll"],
         "patches": [],
         "buildScripts": ["package.json", "pnpm-lock.yaml", "scripts/libmpv-render-context-smoke.cjs"],
-        "correspondingSource": ".runtime/libmpv-build/archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz until the release source archive is produced",
-        "applicationRelease": "0.5.0"
+        "correspondingSource": "source-archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
+        "applicationRelease": "0.7.1"
       }
     },
     {
@@ -273,8 +273,8 @@
         "requiredRuntimeDlls": [],
         "patches": [],
         "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
-        "correspondingSource": ".runtime/libmpv-build/archives until the release source archive is produced",
-        "applicationRelease": "0.5.0"
+        "correspondingSource": "source-archives/ffmpeg-8.1.2.tar.xz inside Seeing-Stone-0.7.1-corresponding-source.zip",
+        "applicationRelease": "0.7.1"
       }
     },
     {

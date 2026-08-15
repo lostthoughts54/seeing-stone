@@ -6,7 +6,7 @@
   "artifacts": [
     {
       "packagePath": "Seeing Stone.exe",
-      "sha256": "6b1b2c47d4cf89c018f84c82473672d4d86a5d6de43c939079bc66e33a66c704",
+      "sha256": "f796f75dbd95e88b039a92c45b3d3889b7c496c002ac434ef5cc4768f3e9b2df",
       "bytes": 225526272,
       "componentIds": [
         "seeing-stone",
@@ -322,8 +322,8 @@
     },
     {
       "packagePath": "resources/libmpv/seeing_stone_libmpv_bridge.node",
-      "sha256": "cd22126b5a06afa816dacc13c8e8362a0efcc0a2b2a9d1771dc6e66cff28ec8c",
-      "bytes": 337408,
+      "sha256": "1ee151106e510876e0dbe30f3df106fa6819ea15a748d626c72d723da1ab5931",
+      "bytes": 351232,
       "componentIds": [
         "seeing-stone"
       ]

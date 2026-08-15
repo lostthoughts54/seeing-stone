@@ -67,6 +67,7 @@
     "licenses:write": "node scripts/license-audit.mjs --write",
     "source:corresponding": "node scripts/build-corresponding-source.mjs",
     "generate:redistribution-inventory": "node scripts/generate-redistribution-inventory.mjs",
+    "generate:libmpv-provenance": "node scripts/generate-libmpv-dependency-provenance.mjs",
     "validate:redistribution-compliance": "node scripts/validate-redistribution-compliance.mjs",
     "validate:package-provenance": "node scripts/validate-package-provenance.mjs",
     "validate:libmpv-package": "node scripts/validate-libmpv-package.mjs",

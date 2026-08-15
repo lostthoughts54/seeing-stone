@@ -7,6 +7,7 @@ dist/
 /artifacts/*.exe.sha256.txt
 /artifacts/*-corresponding-source.zip
 /artifacts/*-corresponding-source.zip.sha256.txt
+/artifacts/Seeing-Stone-*-source-*.zip
 coverage/
 *.log
 *.tsbuildinfo

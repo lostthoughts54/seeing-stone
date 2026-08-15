@@ -41,7 +41,7 @@
         },
         {
           "path": "native/libmpv-runtime/source-lock.json",
-          "sha256": "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f"
+          "sha256": "c320b20b3c3240096b7958ad10316f6fd160329055f9954b43af4e6781006a1b"
         },
         {
           "path": "native/libmpv-runtime/build-result.json",
@@ -152,8 +152,8 @@
       "name": "Seeing Stone libmpv bridge",
       "version": "0.7.1",
       "license": "GPL-2.0-or-later",
-      "projectUrl": "https://github.com/Seeing-Stone/Seeing-Stone",
-      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+      "projectUrl": "https://github.com/lostthoughts54/seeing-stone",
+      "sourceRevision": "84d796fbd9a8c0aac55f896b4f5d648818cd03f4",
       "redistributionStatus": "source-and-binary",
       "artifacts": [],
       "licenseFile": {
@@ -290,12 +290,13 @@
   "redistributionComponents": [
     {
       "id": "seeing-stone",
-      "owner": "Seeing Stone 0.7.0",
+      "owner": "Seeing Stone 0.7.1",
       "name": "Seeing Stone application and libmpv bridge",
-      "version": "0.7.0",
+      "version": "0.7.1",
+      "revision": "84d796fbd9a8c0aac55f896b4f5d648818cd03f4",
       "license": "GPL-2.0-or-later",
       "obligation": "source-required",
-      "source": "Release tag plus native/libmpv-bridge and checked-in build scripts",
+      "sourceArchive": "Seeing-Stone-0.7.1-source-84d796f.zip",
       "noticeFiles": [
         "LICENSE"
       ],

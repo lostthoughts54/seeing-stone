@@ -105,7 +105,9 @@ if (await exists("resources/mpv")) reject("historical resources/mpv directory ex
 
 for (const source of manifest?.sourceArchives ?? []) {
   if (!shaPattern.test(source.sha256 ?? "")) { reject(`source archive has invalid hash: ${source.filename}`); continue; }
-  const cachePath = resolve(root, ".runtime/corresponding-source-cache", source.filename);
+  const cachePath = source.localPath
+    ? resolve(root, source.localPath)
+    : resolve(root, ".runtime/corresponding-source-cache", source.filename);
   try { if (await sha256(cachePath) !== source.sha256) reject(`source archive hash mismatch: ${source.filename}`); }
   catch { reject(`source archive is missing: ${source.filename}`); }
 }
@@ -143,7 +145,7 @@ try {
   for (const source of manifest?.sourceArchives ?? []) {
     if (!entries.has(`${bundleName}/source-archives/${source.filename}`)) reject(`corresponding-source archive lacks ${source.filename}`);
   }
-  for (const required of ["README.md", "build-materials/redistribution-compliance.json", "build-materials/native/libmpv-runtime/source-lock.json", "build-materials/native/libmpv-bridge/src/libmpv_runtime_probe.cc"]) {
+  for (const required of ["README.md", "build-materials/redistribution-compliance.json", "build-materials/native/libmpv-runtime/source-lock.json", "build-materials/native/libmpv-runtime/dependency-provenance.json", "build-materials/native/libmpv-bridge/src/libmpv_runtime_probe.cc"]) {
     if (!entries.has(`${bundleName}/${required}`)) reject(`corresponding-source archive lacks ${required}`);
   }
 } catch { reject(`corresponding-source archive is missing or unreadable: ${basename(bundlePath)}`); }

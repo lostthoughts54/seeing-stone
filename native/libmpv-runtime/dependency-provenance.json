@@ -1,0 +1,1247 @@
+{
+  "schemaVersion": 1,
+  "application": "Seeing Stone 0.7.1",
+  "binaryInventory": "native/libmpv-runtime/build-result.json",
+  "sourceManifest": "redistribution-compliance.json",
+  "dependencies": [
+    {
+      "owner": "FFmpeg 8.1.2",
+      "upstreamProject": "FFmpeg controlled runtime",
+      "immutableSourceUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "version": "8.1.2",
+      "exactCommit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "sourceArchive": "ffmpeg-8.1.2.tar.xz",
+      "sourceArchiveSha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/ffmpeg-8.1.2.tar.xz inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "avcodec-62.dll sha256:bdc0abb8de26982f61f678748b3d00a3eaa0ce79c509c680f78bb2236431f25b",
+        "avdevice-62.dll sha256:374f4f34884bc51896f123ba5ffba6567f3f95e9de28c4157442a0536659eaa5",
+        "avfilter-11.dll sha256:0ae13588a723df2a9322d22ec1090bcdf2c5dacff723ffabede0a928942eb218",
+        "avformat-62.dll sha256:ac1c3c5c5d94bee86f924b81aa86956197b8cbb9656662983c59136165e09ddf",
+        "avutil-60.dll sha256:c31af31be6d9d513db5f4858e00863a41772b02c6a9a1ba835e89541447371a6",
+        "swresample-6.dll sha256:47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
+        "swscale-9.dll sha256:8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96"
+      ],
+      "buildFlags": [
+        "--arch=x86_64",
+        "--target-os=mingw32",
+        "--enable-shared",
+        "--disable-static",
+        "--disable-programs",
+        "--disable-doc",
+        "--disable-debug",
+        "--disable-autodetect",
+        "--enable-network",
+        "--enable-schannel",
+        "--enable-zlib",
+        "--enable-d3d11va",
+        "--enable-dxva2",
+        "--enable-hwaccels",
+        "--extra-cflags=-O2",
+        "--extra-ldflags=-Wl,--dynamicbase,--nxcompat"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "avcodec-62.dll",
+        "avdevice-62.dll",
+        "avfilter-11.dll",
+        "avformat-62.dll",
+        "avutil-60.dll",
+        "swresample-6.dll",
+        "swscale-9.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-brotli 1.2.0-1",
+      "upstreamProject": "Brotli",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-brotli-1.2.0-1.src.tar.zst",
+      "version": "1.2.0-1",
+      "exactCommit": "MSYS2 source package 1.2.0-1, archive pinned by SHA-256 2f0f93875aac21990d20f1eaf0ad8b970eb6f186c663c77ae47aaaf9e5711fcf",
+      "sourceArchive": "mingw-w64-brotli-1.2.0-1.src.tar.zst",
+      "sourceArchiveSha256": "2f0f93875aac21990d20f1eaf0ad8b970eb6f186c663c77ae47aaaf9e5711fcf",
+      "license": "MIT",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-brotli-1.2.0-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libbrotlicommon.dll sha256:c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c",
+        "libbrotlidec.dll sha256:e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-brotli-1.2.0-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libbrotlicommon.dll",
+        "libbrotlidec.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-bzip2 1.0.8-3",
+      "upstreamProject": "bzip2",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-bzip2-1.0.8-3.src.tar.zst",
+      "version": "1.0.8-3",
+      "exactCommit": "MSYS2 source package 1.0.8-3, archive pinned by SHA-256 b818b3d164cd409b1fd883e3ecc056c5bc4d6cad408e871f2781bc11faf5a413",
+      "sourceArchive": "mingw-w64-bzip2-1.0.8-3.src.tar.zst",
+      "sourceArchiveSha256": "b818b3d164cd409b1fd883e3ecc056c5bc4d6cad408e871f2781bc11faf5a413",
+      "license": "bzip2-1.0.6",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-bzip2-1.0.8-3.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libbz2-1.dll sha256:669a4bf9266d5f020e843aa5fd75b93ce8ebde27014d5ac466a8b3cf39d8aba7"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-bzip2-1.0.8-3.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libbz2-1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-expat 2.8.2-1",
+      "upstreamProject": "Expat",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-expat-2.8.2-1.src.tar.zst",
+      "version": "2.8.2-1",
+      "exactCommit": "MSYS2 source package 2.8.2-1, archive pinned by SHA-256 e81ebe8069473b2ca011a01bdb95ab01a58b46395d37f9af3e74d9bd1b2648ea",
+      "sourceArchive": "mingw-w64-expat-2.8.2-1.src.tar.zst",
+      "sourceArchiveSha256": "e81ebe8069473b2ca011a01bdb95ab01a58b46395d37f9af3e74d9bd1b2648ea",
+      "license": "MIT",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-expat-2.8.2-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libexpat-1.dll sha256:f13a04c298b0290e722f2c1936ea076de769f8f32fa235bb17c02984e6e45fc1"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-expat-2.8.2-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libexpat-1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-fontconfig 2.18.2-1",
+      "upstreamProject": "fontconfig",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-fontconfig-2.18.2-1.src.tar.zst",
+      "version": "2.18.2-1",
+      "exactCommit": "MSYS2 source package 2.18.2-1, archive pinned by SHA-256 f093ba20c007bc5cb80c7ea0678af5cfa8647ac968fd1e5a192ffa76288020c6",
+      "sourceArchive": "mingw-w64-fontconfig-2.18.2-1.src.tar.zst",
+      "sourceArchiveSha256": "f093ba20c007bc5cb80c7ea0678af5cfa8647ac968fd1e5a192ffa76288020c6",
+      "license": "MIT-style fontconfig license",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-fontconfig-2.18.2-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libfontconfig-1.dll sha256:292fe24f957d961d6d9ac11dc79cfc0922f2925b1107e5d37a0ab17bea2adee5"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-fontconfig-2.18.2-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libfontconfig-1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-freetype 2.14.3-1",
+      "upstreamProject": "FreeType",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-freetype-2.14.3-1.src.tar.zst",
+      "version": "2.14.3-1",
+      "exactCommit": "MSYS2 source package 2.14.3-1, archive pinned by SHA-256 ee8071d0a6e82a274e959902898115f4c9c376a2a8e209d83dfe746c18004ec0",
+      "sourceArchive": "mingw-w64-freetype-2.14.3-1.src.tar.zst",
+      "sourceArchiveSha256": "ee8071d0a6e82a274e959902898115f4c9c376a2a8e209d83dfe746c18004ec0",
+      "license": "FTL",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-freetype-2.14.3-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libfreetype-6.dll sha256:a3271784f8366b3c6412e0c35474884fa12899c392bacb08bc8eac00f4be7e64"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-freetype-2.14.3-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libfreetype-6.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-fribidi 1.0.16-1",
+      "upstreamProject": "FriBidi",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-fribidi-1.0.16-1.src.tar.zst",
+      "version": "1.0.16-1",
+      "exactCommit": "MSYS2 source package 1.0.16-1, archive pinned by SHA-256 a496fd3c7973d443e741626e1be7af58d8adcbc1d4a1c056d07a011f0edc6d0b",
+      "sourceArchive": "mingw-w64-fribidi-1.0.16-1.src.tar.zst",
+      "sourceArchiveSha256": "a496fd3c7973d443e741626e1be7af58d8adcbc1d4a1c056d07a011f0edc6d0b",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-fribidi-1.0.16-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libfribidi-0.dll sha256:73a712fd51fa0085e8660084743a821ae7388de138069cd6cd8c171d4487da84"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-fribidi-1.0.16-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libfribidi-0.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-gcc-libs 16.1.0-5",
+      "upstreamProject": "GCC runtime libraries",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-gcc-16.1.0-5.src.tar.zst",
+      "version": "16.1.0-5",
+      "exactCommit": "MSYS2 source package 16.1.0-5, archive pinned by SHA-256 947166ed372d28ab8ffa25a66bc5e37a60a42e96a686424ce58cad304fcaea15",
+      "sourceArchive": "mingw-w64-gcc-16.1.0-5.src.tar.zst",
+      "sourceArchiveSha256": "947166ed372d28ab8ffa25a66bc5e37a60a42e96a686424ce58cad304fcaea15",
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 AND LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-gcc-16.1.0-5.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libgcc_s_seh-1.dll sha256:ff139cfe956709283f7b70a06af8bc8bb9d1c3bef60ec1bc8d363c91351cfeb2",
+        "libstdc++-6.dll sha256:d9a58184f6bb27936ef03c3a3286950e4aa61c66a9f74dfa94a532b1433b368d"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-gcc-16.1.0-5.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libgcc_s_seh-1.dll",
+        "libstdc++-6.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-gettext-runtime 1.0-1",
+      "upstreamProject": "GNU libintl/gettext runtime",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-gettext-1.0-1.src.tar.zst",
+      "version": "1.0-1",
+      "exactCommit": "MSYS2 source package 1.0-1, archive pinned by SHA-256 cca0d0c8f60353faccc5ad40405240014e4a7ccc8b1c6ca9f4626aef3097d26e",
+      "sourceArchive": "mingw-w64-gettext-1.0-1.src.tar.zst",
+      "sourceArchiveSha256": "cca0d0c8f60353faccc5ad40405240014e4a7ccc8b1c6ca9f4626aef3097d26e",
+      "license": "LGPL-2.1-or-later for distributed libintl",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-gettext-1.0-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libintl-8.dll sha256:0e5a178731e6be6d115442a6ade3df7f03265cd1fc4338f8b6f86a8001cbf582"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-gettext-1.0-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libintl-8.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-glib2 2.88.2-1",
+      "upstreamProject": "GLib",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-glib2-2.88.2-1.src.tar.zst",
+      "version": "2.88.2-1",
+      "exactCommit": "MSYS2 source package 2.88.2-1, archive pinned by SHA-256 6952af7120b5d44a21623e7e3ae10ef27202ecb53ce6b119a0a8bf5e7dcf4dd7",
+      "sourceArchive": "mingw-w64-glib2-2.88.2-1.src.tar.zst",
+      "sourceArchiveSha256": "6952af7120b5d44a21623e7e3ae10ef27202ecb53ce6b119a0a8bf5e7dcf4dd7",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-glib2-2.88.2-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libglib-2.0-0.dll sha256:f606ad14f15d822a21a2e15f9f22a37318a269afab5d4c6020677acfae720b7f"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-glib2-2.88.2-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libglib-2.0-0.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-graphite2 1.3.15-1",
+      "upstreamProject": "Graphite2",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-graphite2-1.3.15-1.src.tar.zst",
+      "version": "1.3.15-1",
+      "exactCommit": "MSYS2 source package 1.3.15-1, archive pinned by SHA-256 eb76ce274c68ea6bad0883144c21e44a803ec94fed9dc0f6584feb0a8415a1d6",
+      "sourceArchive": "mingw-w64-graphite2-1.3.15-1.src.tar.zst",
+      "sourceArchiveSha256": "eb76ce274c68ea6bad0883144c21e44a803ec94fed9dc0f6584feb0a8415a1d6",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-graphite2-1.3.15-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libgraphite2.dll sha256:93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-graphite2-1.3.15-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libgraphite2.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-harfbuzz 14.2.1-1",
+      "upstreamProject": "HarfBuzz",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-harfbuzz-14.2.1-1.src.tar.zst",
+      "version": "14.2.1-1",
+      "exactCommit": "MSYS2 source package 14.2.1-1, archive pinned by SHA-256 1776f26fcb0a81b0fda74f4782df6f4c4632e167af9506e4adbf37d14dbbeead",
+      "sourceArchive": "mingw-w64-harfbuzz-14.2.1-1.src.tar.zst",
+      "sourceArchiveSha256": "1776f26fcb0a81b0fda74f4782df6f4c4632e167af9506e4adbf37d14dbbeead",
+      "license": "MIT",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-harfbuzz-14.2.1-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libharfbuzz-0.dll sha256:2e1523eddd3a7c5be5fb8ad9a8e8eee819664356752d18c56f7c8f5896126ddb"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-harfbuzz-14.2.1-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libharfbuzz-0.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-lcms2 2.19.1-1",
+      "upstreamProject": "Little CMS 2 library",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-lcms2-2.19.1-1.src.tar.zst",
+      "version": "2.19.1-1",
+      "exactCommit": "MSYS2 source package 2.19.1-1, archive pinned by SHA-256 83414d0d95c5cb2548d3050670694e9efc64304a52190f42bcad951efa038b41",
+      "sourceArchive": "mingw-w64-lcms2-2.19.1-1.src.tar.zst",
+      "sourceArchiveSha256": "83414d0d95c5cb2548d3050670694e9efc64304a52190f42bcad951efa038b41",
+      "license": "MIT",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-lcms2-2.19.1-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "liblcms2-2.dll sha256:03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-lcms2-2.19.1-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "liblcms2-2.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+      "upstreamProject": "libass",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libass-0.17.5-1.src.tar.zst",
+      "version": "0.17.5-1",
+      "exactCommit": "MSYS2 source package 0.17.5-1, archive pinned by SHA-256 4a68edae2c1454ffcf7cf0a6fccf6930c876caa5fe2422cdb0b34d1fc0f5fb03",
+      "sourceArchive": "mingw-w64-libass-0.17.5-1.src.tar.zst",
+      "sourceArchiveSha256": "4a68edae2c1454ffcf7cf0a6fccf6930c876caa5fe2422cdb0b34d1fc0f5fb03",
+      "license": "ISC",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-libass-0.17.5-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libass-9.dll sha256:cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libass-0.17.5-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libass-9.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libdovi 3.4.0-1",
+      "upstreamProject": "libdovi",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libdovi-3.4.0-1.src.tar.zst",
+      "version": "3.4.0-1",
+      "exactCommit": "MSYS2 source package 3.4.0-1, archive pinned by SHA-256 50e7303249bd57b9bb543e87e5de4b6331d744b22d2d26861bc8968ee60a70a3",
+      "sourceArchive": "mingw-w64-libdovi-3.4.0-1.src.tar.zst",
+      "sourceArchiveSha256": "50e7303249bd57b9bb543e87e5de4b6331d744b22d2d26861bc8968ee60a70a3",
+      "license": "MIT",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-libdovi-3.4.0-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libdovi.dll sha256:75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libdovi-3.4.0-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libdovi.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libiconv 1.19-1",
+      "upstreamProject": "GNU libiconv",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libiconv-1.19-1.src.tar.zst",
+      "version": "1.19-1",
+      "exactCommit": "MSYS2 source package 1.19-1, archive pinned by SHA-256 74428280c17094da5b702c29b2e1a0abae59556ea5dfdd65705cc8ccc1e000fb",
+      "sourceArchive": "mingw-w64-libiconv-1.19-1.src.tar.zst",
+      "sourceArchiveSha256": "74428280c17094da5b702c29b2e1a0abae59556ea5dfdd65705cc8ccc1e000fb",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-libiconv-1.19-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libiconv-2.dll sha256:94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libiconv-1.19-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libiconv-2.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+      "upstreamProject": "libplacebo",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libplacebo-7.360.1-2.src.tar.zst",
+      "version": "7.360.1-2",
+      "exactCommit": "MSYS2 source package 7.360.1-2, archive pinned by SHA-256 2abe10f1d16981407e8108c5ccb2e13cbeb28ce62f702a4caf1165b732e85bf0",
+      "sourceArchive": "mingw-w64-libplacebo-7.360.1-2.src.tar.zst",
+      "sourceArchiveSha256": "2abe10f1d16981407e8108c5ccb2e13cbeb28ce62f702a4caf1165b732e85bf0",
+      "license": "LGPL-2.1-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mingw-w64-libplacebo-7.360.1-2.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libplacebo-360.dll sha256:8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libplacebo-7.360.1-2.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libplacebo-360.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libpng 1.6.58-1",
+      "upstreamProject": "libpng",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libpng-1.6.58-1.src.tar.zst",
+      "version": "1.6.58-1",
+      "exactCommit": "MSYS2 source package 1.6.58-1, archive pinned by SHA-256 9e985fc4cef509ec689f982dc6a948e9a8ee5184db25d65e9dd4c21872092348",
+      "sourceArchive": "mingw-w64-libpng-1.6.58-1.src.tar.zst",
+      "sourceArchiveSha256": "9e985fc4cef509ec689f982dc6a948e9a8ee5184db25d65e9dd4c21872092348",
+      "license": "Libpng",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-libpng-1.6.58-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libpng16-16.dll sha256:5c1dd5410af563f4a3c4aee10d1f749aa71e0d7fb3b4fac240eb9e96cadebd26"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libpng-1.6.58-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libpng16-16.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libunibreak 7.0-1",
+      "upstreamProject": "libunibreak",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-libunibreak-7.0-1.src.tar.zst",
+      "version": "7.0-1",
+      "exactCommit": "MSYS2 source package 7.0-1, archive pinned by SHA-256 3d51ed18b20deb475c6947ea8fdabb7d6107962e2e6e690de90e5227537728ad",
+      "sourceArchive": "mingw-w64-libunibreak-7.0-1.src.tar.zst",
+      "sourceArchiveSha256": "3d51ed18b20deb475c6947ea8fdabb7d6107962e2e6e690de90e5227537728ad",
+      "license": "Zlib",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-libunibreak-7.0-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libunibreak-7.dll sha256:f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-libunibreak-7.0-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libunibreak-7.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-libwinpthread 14.0.0.r190.g96fb1bff7-1",
+      "upstreamProject": "MinGW-w64 winpthreads",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-winpthreads-14.0.0.r190.g96fb1bff7-1.src.tar.zst",
+      "version": "14.0.0.r190.g96fb1bff7-1",
+      "exactCommit": "MSYS2 source package 14.0.0.r190.g96fb1bff7-1, archive pinned by SHA-256 19bef623c999566b4439321c7d378190b423ca8c289113ba4dceaf1c5fa6d515",
+      "sourceArchive": "mingw-w64-winpthreads-14.0.0.r190.g96fb1bff7-1.src.tar.zst",
+      "sourceArchiveSha256": "19bef623c999566b4439321c7d378190b423ca8c289113ba4dceaf1c5fa6d515",
+      "license": "MIT AND BSD-3-Clause-Clear",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-winpthreads-14.0.0.r190.g96fb1bff7-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libwinpthread-1.dll sha256:c7844629395e7813508fc9bb58c068ca9240a04d6d8529db0a75b6efc53590e7"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-winpthreads-14.0.0.r190.g96fb1bff7-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libwinpthread-1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-pcre2 10.47-1",
+      "upstreamProject": "PCRE2",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-pcre2-10.47-1.src.tar.zst",
+      "version": "10.47-1",
+      "exactCommit": "MSYS2 source package 10.47-1, archive pinned by SHA-256 d1af57f4346ec9542f1d191c94c470340f6268bfa732718f6db1b89d75fd6502",
+      "sourceArchive": "mingw-w64-pcre2-10.47-1.src.tar.zst",
+      "sourceArchiveSha256": "d1af57f4346ec9542f1d191c94c470340f6268bfa732718f6db1b89d75fd6502",
+      "license": "BSD-3-Clause",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-pcre2-10.47-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libpcre2-8-0.dll sha256:52ccc7e4ec5ad0aecf307c0328826340f5d504aa59f7c4143b9a1b9fff16ccda"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-pcre2-10.47-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libpcre2-8-0.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-shaderc 2026.2-1",
+      "upstreamProject": "shaderc",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-shaderc-2026.2-1.src.tar.zst",
+      "version": "2026.2-1",
+      "exactCommit": "MSYS2 source package 2026.2-1, archive pinned by SHA-256 63f8080f99815cdab0ef3d77d724afbf21f8957ce5bd3d287a21527dc0a211b5",
+      "sourceArchive": "mingw-w64-shaderc-2026.2-1.src.tar.zst",
+      "sourceArchiveSha256": "63f8080f99815cdab0ef3d77d724afbf21f8957ce5bd3d287a21527dc0a211b5",
+      "license": "Apache-2.0",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-shaderc-2026.2-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libshaderc_shared.dll sha256:887d422382f18be097c447ed3922db04397d50ddf7e34f3cc18d2e2abde740b0"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-shaderc-2026.2-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libshaderc_shared.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-spirv-cross 1~1.4.350.1-1",
+      "upstreamProject": "SPIRV-Cross",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-spirv-cross-1~1.4.350.1-1.src.tar.zst",
+      "version": "1~1.4.350.1-1",
+      "exactCommit": "MSYS2 source package 1~1.4.350.1-1, archive pinned by SHA-256 78068f0c207a478a13bb7efdadc5dc4d60f719ec573d90f775606afc7b6bea93",
+      "sourceArchive": "mingw-w64-spirv-cross-1~1.4.350.1-1.src.tar.zst",
+      "sourceArchiveSha256": "78068f0c207a478a13bb7efdadc5dc4d60f719ec573d90f775606afc7b6bea93",
+      "license": "Apache-2.0",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-spirv-cross-1~1.4.350.1-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libspirv-cross-c-shared.dll sha256:99cb3de4832bbafe8a353e55dfe399e038ec9e3f6eed3e4723ab9796f824bf1f"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-spirv-cross-1~1.4.350.1-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libspirv-cross-c-shared.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-vulkan-loader 1~1.4.350.1-1",
+      "upstreamProject": "Vulkan loader",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-vulkan-loader-1~1.4.350.1-1.src.tar.zst",
+      "version": "1~1.4.350.1-1",
+      "exactCommit": "MSYS2 source package 1~1.4.350.1-1, archive pinned by SHA-256 a9e17c3df7e645c8bdae202df8ed3792476210a771877191ee08abf1f4baa742",
+      "sourceArchive": "mingw-w64-vulkan-loader-1~1.4.350.1-1.src.tar.zst",
+      "sourceArchiveSha256": "a9e17c3df7e645c8bdae202df8ed3792476210a771877191ee08abf1f4baa742",
+      "license": "Apache-2.0",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-vulkan-loader-1~1.4.350.1-1.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "vulkan-1.dll sha256:ff17ce3db007aed762838de913e0a52a4bbce6eb43cc8a5e706650a5ad3d949f"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-vulkan-loader-1~1.4.350.1-1.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "vulkan-1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mingw-w64-ucrt-x86_64-zlib 1.3.2-2",
+      "upstreamProject": "zlib",
+      "immutableSourceUrl": "https://mirror.msys2.org/mingw/sources/mingw-w64-zlib-1.3.2-2.src.tar.zst",
+      "version": "1.3.2-2",
+      "exactCommit": "MSYS2 source package 1.3.2-2, archive pinned by SHA-256 eef69dea52357e01b272d6fd6dc4d7c0773f71260cb7bcde6047c8c383518db3",
+      "sourceArchive": "mingw-w64-zlib-1.3.2-2.src.tar.zst",
+      "sourceArchiveSha256": "eef69dea52357e01b272d6fd6dc4d7c0773f71260cb7bcde6047c8c383518db3",
+      "license": "Zlib",
+      "redistributionStatus": "binary notices plus voluntarily included source",
+      "correspondingSource": "source-archives/mingw-w64-zlib-1.3.2-2.src.tar.zst inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "zlib1.dll sha256:11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d"
+      ],
+      "buildFlags": [
+        "MSYS2 UCRT64 PKGBUILD and patches included in mingw-w64-zlib-1.3.2-2.src.tar.zst"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "zlib1.dll"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "mpv 0.41.0",
+      "upstreamProject": "mpv/libmpv",
+      "immutableSourceUrl": "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz",
+      "version": "0.41.0",
+      "exactCommit": "41f6a645068483470267271e1d09966ca3b9f413",
+      "sourceArchive": "mpv-v0.41.0.tar.gz",
+      "sourceArchiveSha256": "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209",
+      "license": "GPL-2.0-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/mpv-v0.41.0.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "libmpv-2.dll sha256:54daa7517e01c3fdf1a2a13c0f0e2d2ceb28c7a507fa941b7a4159978b781dcf",
+        "mpv.com sha256:62aad672063580cf4ef9da668be4d0f7204774be4e6ee309595129541849c66c",
+        "mpv.exe sha256:3b9ebe4afde274a5551b51e0eeb3d77e10bcfcbf08b9e8723f7ac9f7be855930"
+      ],
+      "buildFlags": [
+        "--buildtype=release",
+        "--default-library=shared",
+        "-Db_lto=true",
+        "-Db_ndebug=true",
+        "-Dbuild-date=false",
+        "-Dtests=true",
+        "-Dlibmpv=true",
+        "-Dcplayer=true",
+        "-Djavascript=disabled",
+        "-Dlua=disabled",
+        "-Dlibavdevice=enabled",
+        "-Dplain-gl=enabled",
+        "-Dgl=enabled",
+        "-Dgl-win32=enabled",
+        "-Degl=disabled",
+        "-Degl-angle=enabled",
+        "-Degl-angle-lib=disabled",
+        "-Degl-angle-win32=disabled",
+        "-Dd3d11=enabled",
+        "-Dd3d-hwaccel=enabled",
+        "-Dd3d9-hwaccel=enabled",
+        "-Dvulkan=disabled",
+        "-Dc_args=-O2"
+      ],
+      "toolchainVersions": [
+        "UCRT64",
+        "mingw-w64-ucrt-x86_64-binutils 2.46.1-2",
+        "mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-gcc 16.1.0-5",
+        "mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1",
+        "mingw-w64-ucrt-x86_64-cmake 4.4.0-1",
+        "mingw-w64-ucrt-x86_64-meson 1.11.2-1",
+        "mingw-w64-ucrt-x86_64-ninja 1.13.2-1",
+        "mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1",
+        "mingw-w64-ucrt-x86_64-libass 0.17.5-1",
+        "mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2",
+        "mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3",
+        "mingw-w64-ucrt-x86_64-zlib 1.3.2-2"
+      ],
+      "requiredRuntimeDlls": [
+        "libmpv-2.dll",
+        "mpv.com",
+        "mpv.exe"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "scripts/check-libmpv-runtime-toolchain.ps1",
+        "scripts/setup-libmpv-sources.ps1",
+        "scripts/build-libmpv-runtime.ps1",
+        "scripts/build-libmpv-runtime.sh"
+      ]
+    },
+    {
+      "owner": "Seeing Stone 0.7.1",
+      "upstreamProject": "Seeing Stone application and libmpv bridge",
+      "immutableSourceUrl": "https://github.com/lostthoughts54/seeing-stone/archive/84d796fbd9a8c0aac55f896b4f5d648818cd03f4.zip",
+      "version": "0.7.1",
+      "exactCommit": "84d796fbd9a8c0aac55f896b4f5d648818cd03f4",
+      "sourceArchive": "Seeing-Stone-0.7.1-source-84d796f.zip",
+      "sourceArchiveSha256": "9b97eabb532220b94652679ae21045147ee93bce54210535a9e9ba10a24616bd",
+      "license": "GPL-2.0-or-later",
+      "redistributionStatus": "source-and-binary; corresponding source included",
+      "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-84d796f.zip inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "applicationRelease": "0.7.1",
+      "binaryHashes": [
+        "seeing_stone_libmpv_bridge.node sha256:1ee151106e510876e0dbe30f3df106fa6819ea15a748d626c72d723da1ab5931"
+      ],
+      "buildFlags": [
+        "NAPI_DISABLE_CPP_EXCEPTIONS",
+        "C++20",
+        "x64",
+        "Release"
+      ],
+      "toolchainVersions": [
+        "Visual Studio Community 18.8.0 MSVC x64",
+        "Windows SDK 10.0.28000.0",
+        "node-gyp 12.4.0",
+        "node-addon-api 8.5.0"
+      ],
+      "requiredRuntimeDlls": [
+        "seeing_stone_libmpv_bridge.node"
+      ],
+      "patches": [],
+      "buildScripts": [
+        "native/libmpv-bridge/binding.gyp",
+        "scripts/check-libmpv-native-toolchain.ps1",
+        "scripts/build-libmpv-native-bridge.ps1",
+        "scripts/stage-libmpv-runtime.ps1"
+      ]
+    }
+  ]
+}
