@@ -1208,14 +1208,14 @@
     {
       "owner": "Seeing Stone 0.7.1",
       "upstreamProject": "Seeing Stone application and libmpv bridge",
-      "immutableSourceUrl": "https://github.com/lostthoughts54/seeing-stone/archive/84d796fbd9a8c0aac55f896b4f5d648818cd03f4.zip",
+      "immutableSourceUrl": "https://github.com/lostthoughts54/seeing-stone/archive/72a3f07a027e8ecc80a3862a27cb1166db237c80.zip",
       "version": "0.7.1",
-      "exactCommit": "84d796fbd9a8c0aac55f896b4f5d648818cd03f4",
-      "sourceArchive": "Seeing-Stone-0.7.1-source-84d796f.zip",
-      "sourceArchiveSha256": "9b97eabb532220b94652679ae21045147ee93bce54210535a9e9ba10a24616bd",
+      "exactCommit": "72a3f07a027e8ecc80a3862a27cb1166db237c80",
+      "sourceArchive": "Seeing-Stone-0.7.1-source-72a3f07.zip",
+      "sourceArchiveSha256": "d0ccb64e02cb360998de6e1da811dfe0b04bded82f1566391fedbb5923e28be4",
       "license": "GPL-2.0-or-later",
       "redistributionStatus": "source-and-binary; corresponding source included",
-      "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-84d796f.zip inside Seeing-Stone-0.7.1-corresponding-source.zip",
+      "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-72a3f07.zip inside Seeing-Stone-0.7.1-corresponding-source.zip",
       "applicationRelease": "0.7.1",
       "binaryHashes": [
         "seeing_stone_libmpv_bridge.node sha256:1ee151106e510876e0dbe30f3df106fa6819ea15a748d626c72d723da1ab5931"

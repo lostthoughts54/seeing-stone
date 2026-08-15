@@ -6,7 +6,7 @@
   "artifacts": [
     {
       "packagePath": "Seeing Stone.exe",
-      "sha256": "f796f75dbd95e88b039a92c45b3d3889b7c496c002ac434ef5cc4768f3e9b2df",
+      "sha256": "45fc16bb0386a689c5c3b0de10424630cd2ab86181eef0e3f9fd9077dc1cb1f1",
       "bytes": 225526272,
       "componentIds": [
         "seeing-stone",
