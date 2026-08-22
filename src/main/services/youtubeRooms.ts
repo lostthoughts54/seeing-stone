@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
   YouTubeRoomActionInput,
+  YouTubeRoomHandoffInput,
   YouTubeRoomPlaybackStatus,
+  YouTubeRoomQueueActionInput,
+  YouTubeRoomQueueAddInput,
   YouTubeRoomViewState,
 } from "../../shared/contracts";
 import { AppError } from "./errors";
@@ -10,6 +13,8 @@ import type { JellyfinApi } from "./jellyfinApi";
 import { youtubeVideoId } from "./trailerWindow";
 
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const queueItemIdSchema = z.string().regex(/^[0-9a-f]{32}$/i);
+const groupIdSchema = z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
 const healthSchema = z.object({
   protocolVersion: z.number().int().min(1),
   roomLifetimeMinutes: z.number().int().positive(),
@@ -37,6 +42,19 @@ const roomSchema = z.object({
     version: z.number().int().nonnegative(),
     changedBy: z.string().max(256).nullable(),
   }).strict(),
+  queue: z.array(z.object({
+    queueItemId: queueItemIdSchema,
+    videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+    addedBy: z.string().min(1).max(256),
+    addedAtUnixMs: z.number().int().nonnegative(),
+  }).strict()).max(100),
+  transition: z.object({
+    kind: z.literal("jellyfin-syncplay"),
+    groupId: groupIdSchema,
+    groupName: z.string().min(1).max(200),
+    announcedBy: z.string().min(1).max(256),
+    announcedAtUnixMs: z.number().int().nonnegative(),
+  }).strict().nullable(),
   members: z.array(z.object({
     memberId: z.string().min(1).max(256),
     displayName: z.string().min(1).max(256),
@@ -54,6 +72,8 @@ function normalizeRoomClock(value: z.infer<typeof roomSchema>, receivedAtUnixMs:
     createdAtUnixMs: value.createdAtUnixMs + offset,
     expiresAtUnixMs: value.expiresAtUnixMs + offset,
     timeline: { ...value.timeline, anchoredAtUnixMs: value.timeline.anchoredAtUnixMs + offset },
+    queue: value.queue.map((item) => ({ ...item, addedAtUnixMs: item.addedAtUnixMs + offset })),
+    transition: value.transition ? { ...value.transition, announcedAtUnixMs: value.transition.announcedAtUnixMs + offset } : null,
     members: value.members.map((member) => ({ ...member, lastSeenAtUnixMs: member.lastSeenAtUnixMs + offset })),
   };
 }
@@ -104,7 +124,7 @@ export class YouTubeRoomService {
     this.setState({ ...this.state, connection: "checking", error: null });
     try {
       const health = healthSchema.parse(await this.api.youtubeRoomRequest("/SeeingStone/YouTubeRooms"));
-      if (health.protocolVersion < 2) throw new AppError("YOUTUBE_ROOMS_PLUGIN_OUTDATED", "Update the Seeing Stone YouTube Rooms plugin on this Jellyfin server.", 409);
+      if (health.protocolVersion < 3) throw new AppError("YOUTUBE_ROOMS_PLUGIN_OUTDATED", "Update the Seeing Stone YouTube Rooms plugin on this Jellyfin server.", 409);
       await this.refreshOpenRooms();
       if (this.state.room) await this.poll();
       else this.setState({ ...this.state, connection: "connected", error: null });
@@ -154,6 +174,30 @@ export class YouTubeRoomService {
   async setVideo(youtubeUrl: string): Promise<YouTubeRoomViewState> {
     const token = this.requireToken();
     return this.mutate(`/SeeingStone/YouTubeRooms/${token}/video`, { clientId: this.clientId, videoId: this.requireVideoId(youtubeUrl) });
+  }
+
+  async addToQueue(input: YouTubeRoomQueueAddInput): Promise<YouTubeRoomViewState> {
+    const token = this.requireToken();
+    return this.mutate(`/SeeingStone/YouTubeRooms/${token}/queue/add`, {
+      clientId: this.clientId,
+      videoIds: this.requireVideoIds(input.youtubeUrls),
+      playNow: input.playNow,
+    });
+  }
+
+  async queueAction(input: YouTubeRoomQueueActionInput): Promise<YouTubeRoomViewState> {
+    const token = this.requireToken();
+    return this.mutate(`/SeeingStone/YouTubeRooms/${token}/queue/action`, { clientId: this.clientId, ...input });
+  }
+
+  async advance(expectedVideoId: string): Promise<YouTubeRoomViewState> {
+    const token = this.requireToken();
+    return this.mutate(`/SeeingStone/YouTubeRooms/${token}/advance`, { clientId: this.clientId, expectedVideoId }, false);
+  }
+
+  async handoff(input: YouTubeRoomHandoffInput): Promise<YouTubeRoomViewState> {
+    const token = this.requireToken();
+    return this.mutate(`/SeeingStone/YouTubeRooms/${token}/handoff`, { clientId: this.clientId, ...input });
   }
 
   async action(input: YouTubeRoomActionInput): Promise<YouTubeRoomViewState> {
@@ -226,6 +270,14 @@ export class YouTubeRoomService {
     const videoId = youtubeVideoId(url);
     if (!videoId) throw new AppError("INVALID_YOUTUBE_URL", "Paste a supported YouTube video URL.", 400);
     return videoId;
+  }
+
+  private requireVideoIds(value: string): string[] {
+    const entries = value.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
+    if (entries.length === 0 || entries.length > 25) throw new AppError("INVALID_YOUTUBE_QUEUE", "Add between 1 and 25 YouTube video links at a time.", 400);
+    const videoIds = entries.map((entry) => youtubeVideoId(entry));
+    if (videoIds.some((videoId) => !videoId)) throw new AppError("INVALID_YOUTUBE_URL", "Each line must contain a supported YouTube video URL.", 400);
+    return videoIds as string[];
   }
 
   private requireToken(): string {

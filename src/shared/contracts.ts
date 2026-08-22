@@ -760,6 +760,21 @@ export interface YouTubeRoomTimeline {
   changedBy: string | null;
 }
 
+export interface YouTubeRoomQueueItem {
+  queueItemId: string;
+  videoId: string;
+  addedBy: string;
+  addedAtUnixMs: number;
+}
+
+export interface YouTubeRoomTransition {
+  kind: "jellyfin-syncplay";
+  groupId: string;
+  groupName: string;
+  announcedBy: string;
+  announcedAtUnixMs: number;
+}
+
 export interface YouTubeRoom {
   inviteToken: string;
   name: string;
@@ -767,6 +782,8 @@ export interface YouTubeRoom {
   createdAtUnixMs: number;
   expiresAtUnixMs: number;
   timeline: YouTubeRoomTimeline;
+  queue: YouTubeRoomQueueItem[];
+  transition: YouTubeRoomTransition | null;
   members: YouTubeRoomMember[];
 }
 
@@ -799,6 +816,16 @@ export interface YouTubeRoomActionInput {
 export interface YouTubeRoomPresenceInput {
   status: YouTubeRoomPlaybackStatus;
 }
+export interface YouTubeRoomQueueAddInput {
+  youtubeUrls: string;
+  playNow: boolean;
+}
+export interface YouTubeRoomQueueActionInput {
+  queueItemId: string;
+  action: "play" | "remove" | "move-up" | "move-down";
+}
+export interface YouTubeRoomAdvanceInput { expectedVideoId: string }
+export interface YouTubeRoomHandoffInput { groupId: string; groupName: string }
 
 export interface JellyfinBridge {
   application: {
@@ -943,6 +970,10 @@ export interface JellyfinBridge {
     join(input: YouTubeRoomJoinInput): Promise<YouTubeRoomViewState>;
     leave(): Promise<YouTubeRoomViewState>;
     setVideo(input: YouTubeRoomVideoInput): Promise<YouTubeRoomViewState>;
+    addToQueue(input: YouTubeRoomQueueAddInput): Promise<YouTubeRoomViewState>;
+    queueAction(input: YouTubeRoomQueueActionInput): Promise<YouTubeRoomViewState>;
+    advance(input: YouTubeRoomAdvanceInput): Promise<YouTubeRoomViewState>;
+    handoff(input: YouTubeRoomHandoffInput): Promise<YouTubeRoomViewState>;
     action(input: YouTubeRoomActionInput): Promise<YouTubeRoomViewState>;
     presence(input: YouTubeRoomPresenceInput): Promise<YouTubeRoomViewState>;
     setVisible(input: WatchPartyVisibilityInput): Promise<YouTubeRoomViewState>;
@@ -1064,6 +1095,10 @@ export const IPC = {
   youtubeRoomsJoin: "youtube-rooms:join",
   youtubeRoomsLeave: "youtube-rooms:leave",
   youtubeRoomsSetVideo: "youtube-rooms:set-video",
+  youtubeRoomsAddToQueue: "youtube-rooms:add-to-queue",
+  youtubeRoomsQueueAction: "youtube-rooms:queue-action",
+  youtubeRoomsAdvance: "youtube-rooms:advance",
+  youtubeRoomsHandoff: "youtube-rooms:handoff",
   youtubeRoomsAction: "youtube-rooms:action",
   youtubeRoomsPresence: "youtube-rooms:presence",
   youtubeRoomsSetVisible: "youtube-rooms:set-visible",

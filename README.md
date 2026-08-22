@@ -51,7 +51,7 @@ contains the Electron client built from the accepted `0.3.0` interface baseline.
 - Lists, creates, joins, and leaves authenticated same-Jellyfin-server watch parties through Jellyfin SyncPlay.
 - Keeps watch-party synchronization in Electron main while every participant independently resolves the exact item ID to a verified local file or Jellyfin stream.
 - Uses shared play, pause, seek, and item selection with bounded drift correction and feedback-loop prevention.
-- Creates named, temporary YouTube rooms visible to authenticated users of the same Jellyfin server, with an official YouTube embed, last-action-wins controls, late-join convergence, member status, and reconnect polling.
+- Creates named, temporary YouTube rooms visible to authenticated users of the same Jellyfin server, with an official YouTube embed, a shared Up Next queue, synchronized automatic advancement, last-action-wins controls, late-join convergence, member status, reconnect polling, and a confirmed handoff to standard Jellyfin SyncPlay.
 - Holds a newly selected watch-party item until at least two participants are present, then lets Jellyfin begin both players together automatically.
 - Adds a saved per-computer timing adjustment from 2 seconds earlier to 2 seconds later; changes converge with brief playback-rate correction instead of an immediate jump.
 - Exposes the same watch-party timing controls on a paired Companion Remote.

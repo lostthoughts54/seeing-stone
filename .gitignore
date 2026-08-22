@@ -1,5 +1,7 @@
 node_modules/
 .pnpm-store/
+.dotnet-install.ps1
+.dotnet9-portable/
 dist/
 .runtime/
 /native/libmpv-bridge/build/
@@ -9,6 +11,8 @@ dist/
 /artifacts/*-corresponding-source.zip.sha256.txt
 /artifacts/Seeing-Stone-*-source-*.zip
 coverage/
+plugins/*/bin/
+plugins/*/obj/
 *.log
 *.tsbuildinfo
 /scripts/recent-jellyfin-live-tv-error.cjs

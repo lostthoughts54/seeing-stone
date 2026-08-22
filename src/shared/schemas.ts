@@ -180,6 +180,21 @@ const youtubeUrl = z.string().trim().min(1).max(2048);
 export const youtubeRoomCreateSchema = z.object({ name: z.string().trim().min(1).max(80), youtubeUrl });
 export const youtubeRoomJoinSchema = z.object({ roomId: youtubeInviteToken });
 export const youtubeRoomVideoSchema = z.object({ youtubeUrl });
+export const youtubeRoomQueueAddSchema = z.object({
+  youtubeUrls: z.string().trim().min(1).max(16384),
+  playNow: z.boolean(),
+});
+export const youtubeRoomQueueActionSchema = z.object({
+  queueItemId: z.string().regex(/^[0-9a-f]{32}$/i),
+  action: z.enum(["play", "remove", "move-up", "move-down"]),
+});
+export const youtubeRoomAdvanceSchema = z.object({
+  expectedVideoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+});
+export const youtubeRoomHandoffSchema = z.object({
+  groupId: watchPartyGroupSchema.shape.groupId,
+  groupName: z.string().trim().min(1).max(200),
+});
 export const youtubeRoomActionSchema = z.object({
   action: z.enum(["play", "pause", "seek"]),
   positionSeconds: z.number().finite().min(0).max(86400),
