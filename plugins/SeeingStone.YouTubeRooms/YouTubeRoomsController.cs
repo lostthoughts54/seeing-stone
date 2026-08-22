@@ -5,11 +5,21 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace SeeingStone.YouTubeRooms;
 
-public sealed record CreateRoomRequest(Guid ClientId, string VideoId);
-public sealed record JoinRoomRequest(Guid ClientId);
-public sealed record PresenceRequest(Guid ClientId, string Status);
-public sealed record VideoRequest(Guid ClientId, string VideoId);
-public sealed record ActionRequest(Guid ClientId, string Action, double PositionSeconds);
+public sealed record CreateRoomRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
+    [property: System.Text.Json.Serialization.JsonPropertyName("videoId")] string VideoId);
+public sealed record JoinRoomRequest([property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId);
+public sealed record PresenceRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("status")] string Status);
+public sealed record VideoRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("videoId")] string VideoId);
+public sealed record ActionRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("action")] string Action,
+    [property: System.Text.Json.Serialization.JsonPropertyName("positionSeconds")] double PositionSeconds);
 
 [ApiController]
 [Authorize]
@@ -28,8 +38,11 @@ public sealed class YouTubeRoomsController : ControllerBase
     [HttpGet]
     public ActionResult<object> Health() => Ok(new { protocolVersion = YouTubeRoomStore.ProtocolVersion, roomLifetimeMinutes = (int)YouTubeRoomStore.RoomLifetime.TotalMinutes });
 
+    [HttpGet("open")]
+    public ActionResult<IReadOnlyList<YouTubeRoomSummaryDto>> OpenRooms() => Ok(_rooms.ListOpenRooms());
+
     [HttpPost]
-    public Task<ActionResult<YouTubeRoomDto>> Create([FromBody] CreateRoomRequest request) => ExecuteAsync(authorization => _rooms.Create(authorization.UserId, DisplayName(authorization), request.ClientId, request.VideoId));
+    public Task<ActionResult<YouTubeRoomDto>> Create([FromBody] CreateRoomRequest request) => ExecuteAsync(authorization => _rooms.Create(authorization.UserId, DisplayName(authorization), request.ClientId, request.Name, request.VideoId));
 
     [HttpPost("{token}/join")]
     public Task<ActionResult<YouTubeRoomDto>> Join([FromRoute] string token, [FromBody] JoinRoomRequest request) => ExecuteAsync(authorization => _rooms.Join(token, authorization.UserId, DisplayName(authorization), request.ClientId));

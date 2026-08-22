@@ -1,8 +1,9 @@
 # YouTube Watch Together MVP
 
-Seeing Stone can create a private YouTube room on the same remotely accessible
-Jellyfin server that both viewers already use. There is no separately hosted
-room service and no second account system.
+Seeing Stone can create an open YouTube room on the same remotely accessible
+Jellyfin server that both viewers already use. Open rooms are discoverable only
+to authenticated users of that server. There is no separately hosted room
+service and no second account system.
 
 ## Why this is a plugin plus client feature
 
@@ -32,9 +33,10 @@ Jellyfin + SeeingStone.YouTubeRooms plugin
 
 ## MVP behavior
 
-- Creating a room produces an unlisted 43-character base64url invite containing
-  256 random bits. The server has no room-list endpoint.
-- A viewer needs both a valid Jellyfin user session and the invite token.
+- Creating a room gives it a name and publishes it in the plugin's authenticated
+  open-room list, like Jellyfin SyncPlay parties. A viewer can join from that list.
+- Every viewer still needs a valid Jellyfin user session. The 43-character room
+  id is an opaque identifier, not an anonymous access credential.
 - Rooms live in memory for six hours and disappear on Jellyfin restart. This is
   intentional for temporary-by-default rooms.
 - The plugin serializes actions under one lock and assigns a monotonically

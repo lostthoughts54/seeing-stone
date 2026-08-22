@@ -177,8 +177,8 @@ export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });
 
 const youtubeInviteToken = z.string().trim().regex(/^[A-Za-z0-9_-]{43}$/);
 const youtubeUrl = z.string().trim().min(1).max(2048);
-export const youtubeRoomCreateSchema = z.object({ youtubeUrl });
-export const youtubeRoomJoinSchema = z.object({ inviteToken: youtubeInviteToken });
+export const youtubeRoomCreateSchema = z.object({ name: z.string().trim().min(1).max(80), youtubeUrl });
+export const youtubeRoomJoinSchema = z.object({ roomId: youtubeInviteToken });
 export const youtubeRoomVideoSchema = z.object({ youtubeUrl });
 export const youtubeRoomActionSchema = z.object({
   action: z.enum(["play", "pause", "seek"]),

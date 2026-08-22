@@ -11,12 +11,16 @@ describe("YouTube Rooms plugin security boundary", () => {
     expect(controller).toContain("IAuthorizationContext");
     expect(controller).toContain("authorization.UserId");
     expect(controller).not.toMatch(/UserId\s*\)/);
+    expect(controller).toContain("JsonPropertyName(\"clientId\")");
   });
 
-  it("uses random 32-byte tokens, temporary rooms, and direct membership checks", () => {
+  it("lists named open rooms only through the authenticated plugin and keeps direct membership checks", () => {
     const store = readFileSync(resolve(pluginRoot, "YouTubeRoomStore.cs"), "utf8");
+    const controller = readFileSync(resolve(pluginRoot, "YouTubeRoomsController.cs"), "utf8");
     expect(store).toContain("RandomNumberGenerator.GetBytes(32)");
     expect(store).toContain("TimeSpan.FromHours(6)");
+    expect(store).toContain("ListOpenRooms");
+    expect(controller).toContain("[HttpGet(\"open\")]");
     expect(store).toContain("Join this room before changing it.");
     expect(store).not.toContain("HttpClient");
   });
