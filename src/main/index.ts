@@ -71,6 +71,7 @@ import {
 } from "./services/cleanMachineDiagnostics";
 import { UnavailablePlayerController } from "./services/unavailablePlayerController";
 import { UpdateChecker } from "./services/updateChecker";
+import { YouTubeRoomService } from "./services/youtubeRooms";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -91,6 +92,7 @@ let activePlayback: PlayerController | null = null;
 let activeVideoHost: EmbeddedVideoHost | null = null;
 let activeCompanion: CompanionRemoteManager | null = null;
 let activeSmartDownloads: SmartDownloadService | null = null;
+let activeYouTubeRooms: YouTubeRoomService | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -107,6 +109,7 @@ app.on("before-quit", (event) => {
   const videoHost = activeVideoHost;
   const companion = activeCompanion;
   const smartDownloads = activeSmartDownloads;
+  const youtubeRooms = activeYouTubeRooms;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
@@ -115,6 +118,8 @@ app.on("before-quit", (event) => {
   activeVideoHost = null;
   activeCompanion = null;
   activeSmartDownloads = null;
+  activeYouTubeRooms = null;
+  youtubeRooms?.deactivate();
   const stopDownloads = (smartDownloads ? smartDownloads.shutdown().catch(() => undefined) : Promise.resolve())
     .then(() => activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : undefined);
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
@@ -435,6 +440,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.sessionPanelSoloChanged, snapshot);
   });
   activeSyncPlay = new SyncPlayService(api, playback, logger, 5000, applicationPreferences);
+  activeYouTubeRooms = new YouTubeRoomService(api);
   playbackCommands.setSyncPlay(activeSyncPlay);
   const companionState = new CompanionStateService(
     playback,
@@ -467,6 +473,9 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   activeSyncPlay.onState((state) => {
     companionState.notifyWatchPartyChange();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
+  });
+  activeYouTubeRooms.onState((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.youtubeRoomsChanged, state);
   });
   const downloadLocationController = {
     getSummary: () => downloadLocation.getSummary(),
@@ -522,6 +531,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     trickplay,
     !packagedProduction,
     updateController,
+    activeYouTubeRooms,
   );
   await mainWindow.loadURL(APP_URL);
   // Packaged Windows builds can occasionally miss ready-to-show while the

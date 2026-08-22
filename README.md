@@ -51,6 +51,7 @@ contains the Electron client built from the accepted `0.3.0` interface baseline.
 - Lists, creates, joins, and leaves authenticated same-Jellyfin-server watch parties through Jellyfin SyncPlay.
 - Keeps watch-party synchronization in Electron main while every participant independently resolves the exact item ID to a verified local file or Jellyfin stream.
 - Uses shared play, pause, seek, and item selection with bounded drift correction and feedback-loop prevention.
+- Creates private, temporary YouTube rooms through an authenticated Jellyfin plugin, with random invite tokens, an official YouTube embed, last-action-wins controls, late-join convergence, member status, and reconnect polling.
 - Holds a newly selected watch-party item until at least two participants are present, then lets Jellyfin begin both players together automatically.
 - Adds a saved per-computer timing adjustment from 2 seconds earlier to 2 seconds later; changes converge with brief playback-rate correction instead of an immediate jump.
 - Exposes the same watch-party timing controls on a paired Companion Remote.
@@ -101,10 +102,11 @@ pnpm test:mpv-completion
 pnpm test:authenticated
 pnpm test:syncplay-spike
 pnpm test:syncplay-service
+pnpm test:youtube-rooms
 pnpm test:package
 ```
 
-The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The main-owned playback backend contract is documented in [PLAYER_CONTROLLER.md](PLAYER_CONTROLLER.md). The SyncPlay protocol pin and live proof are documented in [SYNCPLAY_W1.md](SYNCPLAY_W1.md), and the functional integration plus its verified boundary are documented in [SYNCPLAY_W3.md](SYNCPLAY_W3.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). Windows release construction and its current redistribution limitation are documented in [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The YouTube room architecture and installation path are documented in [WATCH_TOGETHER_YOUTUBE.md](WATCH_TOGETHER_YOUTUBE.md). The download lifecycle is documented in [DOWNLOADS.md](DOWNLOADS.md), unified source selection is documented in [LOCAL_PLAYBACK.md](LOCAL_PLAYBACK.md), and durable progress behavior is documented in [OFFLINE_SYNCHRONIZATION.md](OFFLINE_SYNCHRONIZATION.md). The main-owned playback backend contract is documented in [PLAYER_CONTROLLER.md](PLAYER_CONTROLLER.md). The SyncPlay protocol pin and live proof are documented in [SYNCPLAY_W1.md](SYNCPLAY_W1.md), and the functional integration plus its verified boundary are documented in [SYNCPLAY_W3.md](SYNCPLAY_W3.md). The SQLite schema and invariants are documented in [DATABASE.md](DATABASE.md). Windows release construction and its current redistribution limitation are documented in [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md). The broader process and security model is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Milestone boundary
 

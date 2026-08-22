@@ -60,6 +60,8 @@
     "test:authenticated": "pnpm run build && node scripts/authenticated-parity.cjs",
     "test:syncplay-spike": "pnpm run build:main && node scripts/syncplay-protocol-spike.cjs",
     "test:syncplay-service": "pnpm run build:main && node scripts/syncplay-service-acceptance.cjs",
+    "test:youtube-rooms": "vitest run tests/youtubeRoomSync.test.ts tests/youtubeRooms.test.ts tests/youtubeRoomsPluginBoundary.test.ts",
+    "build:youtube-rooms-plugin": "dotnet publish plugins/SeeingStone.YouTubeRooms/SeeingStone.YouTubeRooms.csproj -c Release -o artifacts/SeeingStone.YouTubeRooms",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.companion.json --noEmit",
     "check:companion-encoding": "node scripts/check-companion-encoding.mjs",
