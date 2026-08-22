@@ -383,6 +383,23 @@ describe("IPC authorization and allowlist", () => {
     expect(trailerWindow.open).toHaveBeenCalledTimes(2);
   });
 
+  it("opens a solo YouTube test through the controlled embed path without a room", async () => {
+    const { handlers, validEvent, trailerWindow } = createHarness();
+    await expect(handlers.get(IPC.youtubeRoomsTestAlone)?.(validEvent, {
+      youtubeUrl: "https://youtu.be/dQw4w9WgXcQ?t=12",
+    })).resolves.toEqual({
+      ok: true,
+      data: { opened: true, mode: "embedded", embedUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ" },
+    });
+    expect(trailerWindow.open).toHaveBeenCalledWith("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+
+    const rejected = await handlers.get(IPC.youtubeRoomsTestAlone)?.(validEvent, {
+      youtubeUrl: "https://youtube.com.attacker.invalid/watch?v=dQw4w9WgXcQ",
+    }) as { ok: boolean };
+    expect(rejected.ok).toBe(false);
+    expect(trailerWindow.open).toHaveBeenCalledTimes(1);
+  });
+
   it("allows only a boolean explicit watched action without renderer-authored playback data", async () => {
     const { handlers, validEvent, synchronization } = createHarness();
     await expect(handlers.get(IPC.itemsSetWatched)?.(validEvent, {

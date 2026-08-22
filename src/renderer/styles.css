@@ -3687,6 +3687,7 @@ button.danger:hover:not(:disabled) {
 .youtube-room-entry input, .youtube-video-form input, .youtube-room-toolbar input {
   background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); border-radius: 7px; color: var(--text); flex: 1; min-height: 42px; padding: 0 13px;
 }
+.youtube-solo-note { color: var(--muted); font-size: 0.78rem; }
 .youtube-room-status, .youtube-room-panel { margin-left: clamp(18px, 4vw, 54px); margin-right: clamp(18px, 4vw, 54px); }
 .youtube-room-status { color: var(--muted); margin-bottom: 16px; }
 .youtube-room-list { display: grid; gap: 10px; margin: 0 clamp(18px, 4vw, 54px) 16px; }

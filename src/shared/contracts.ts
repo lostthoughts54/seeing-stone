@@ -791,6 +791,7 @@ export interface YouTubeRoomViewState {
 export interface YouTubeRoomCreateInput { name: string; youtubeUrl: string }
 export interface YouTubeRoomJoinInput { roomId: string }
 export interface YouTubeRoomVideoInput { youtubeUrl: string }
+export interface YouTubeRoomTestInput { youtubeUrl: string }
 export interface YouTubeRoomActionInput {
   action: "play" | "pause" | "seek";
   positionSeconds: number;
@@ -937,6 +938,7 @@ export interface JellyfinBridge {
   };
   youtubeRooms: {
     getState(): Promise<YouTubeRoomViewState>;
+    testAlone(input: YouTubeRoomTestInput): Promise<TrailerOpenResult>;
     create(input: YouTubeRoomCreateInput): Promise<YouTubeRoomViewState>;
     join(input: YouTubeRoomJoinInput): Promise<YouTubeRoomViewState>;
     leave(): Promise<YouTubeRoomViewState>;
@@ -1057,6 +1059,7 @@ export const IPC = {
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",
   youtubeRoomsGetState: "youtube-rooms:get-state",
+  youtubeRoomsTestAlone: "youtube-rooms:test-alone",
   youtubeRoomsCreate: "youtube-rooms:create",
   youtubeRoomsJoin: "youtube-rooms:join",
   youtubeRoomsLeave: "youtube-rooms:leave",

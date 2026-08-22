@@ -83,6 +83,7 @@ import {
   type YouTubeRoomCreateInput,
   type YouTubeRoomJoinInput,
   type YouTubeRoomPresenceInput,
+  type YouTubeRoomTestInput,
   type YouTubeRoomVideoInput,
   type YouTubeRoomViewState,
 } from "../shared/contracts";
@@ -277,6 +278,7 @@ const bridge: JellyfinBridge = {
   },
   youtubeRooms: {
     getState: () => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsGetState),
+    testAlone: (input: YouTubeRoomTestInput) => invoke<TrailerOpenResult>(IPC.youtubeRoomsTestAlone, input),
     create: (input: YouTubeRoomCreateInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsCreate, input),
     join: (input: YouTubeRoomJoinInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsJoin, input),
     leave: () => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsLeave),
