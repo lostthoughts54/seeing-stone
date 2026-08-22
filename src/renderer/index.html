@@ -299,6 +299,43 @@
           </section>
 
           <section id="watchPartiesView" class="view watch-parties-view is-hidden">
+            <section class="youtube-together" aria-labelledby="youtubeTogetherHeading">
+              <header class="page-heading youtube-together-heading">
+                <p class="eyebrow">YouTube · private room</p>
+                <h1 id="youtubeTogetherHeading">Watch YouTube Together</h1>
+                <p>Use your Jellyfin server to keep the content timeline together. YouTube plays in its official embedded player; ads remain untouched and may finish at different times.</p>
+                <div class="youtube-room-entry">
+                  <label for="youtubeCreateUrlInput">Start with a YouTube link</label>
+                  <div><input id="youtubeCreateUrlInput" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" /><button id="youtubeCreateButton" class="primary" type="button">Create private room</button></div>
+                  <label for="youtubeInviteInput">Or join with an invite token</label>
+                  <div><input id="youtubeInviteInput" type="text" maxlength="43" placeholder="Paste the 43-character invite token" autocomplete="off" spellcheck="false" /><button id="youtubeJoinButton" type="button">Join room</button></div>
+                </div>
+              </header>
+              <p id="youtubeRoomStatus" class="youtube-room-status" role="status" aria-live="polite"></p>
+              <section id="youtubeRoomPanel" class="youtube-room-panel is-hidden" aria-live="polite">
+                <div class="youtube-room-toolbar">
+                  <label>Private invite token<input id="youtubeInviteToken" type="text" readonly /></label>
+                  <button id="youtubeCopyInviteButton" type="button">Copy invite</button>
+                  <button id="youtubeLeaveButton" type="button">Leave room</button>
+                </div>
+                <div id="youtubeMembers" class="youtube-members"></div>
+                <form id="youtubeVideoForm" class="youtube-video-form">
+                  <label for="youtubeVideoUrlInput">Change video</label>
+                  <div><input id="youtubeVideoUrlInput" type="url" maxlength="2048" placeholder="Paste another YouTube link" autocomplete="off" /><button type="submit">Load for everyone</button></div>
+                </form>
+                <div id="youtubePlayerShell" class="youtube-player-shell is-hidden">
+                  <iframe id="youtubeRoomFrame" title="YouTube Watch Together player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allowfullscreen></iframe>
+                </div>
+                <div id="youtubeControls" class="youtube-controls is-hidden">
+                  <button id="youtubePlayPauseButton" class="primary" type="button">Play</button>
+                  <input id="youtubeTimeline" type="range" min="0" max="1000" value="0" aria-label="YouTube timeline" />
+                  <span id="youtubeTimeLabel">0:00 / 0:00</span>
+                </div>
+                <p class="youtube-ad-note">Shared controls use last action wins. If one viewer gets an ad, their player catches up to the shared content timeline after the ad.</p>
+              </section>
+            </section>
+
+            <div class="watch-party-divider" role="separator"></div>
             <header class="page-heading watch-parties-heading">
               <p class="eyebrow">Jellyfin SyncPlay</p>
               <h1>Active Watch Parties</h1>

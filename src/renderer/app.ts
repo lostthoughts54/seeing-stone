@@ -30,6 +30,8 @@ import type {
   SmartSeriesSummary,
   SoloSessionDiagnostics,
   WatchPartyViewState,
+  YouTubeRoomPlaybackStatus,
+  YouTubeRoomViewState,
   TrickplayManifest,
   UpdateCheckStatus,
 } from "../shared/contracts";
@@ -53,6 +55,7 @@ import { LIVE_TV_GUIDE_WINDOW_MS, LIVE_TV_HALF_HOUR_MS, LIVE_TV_HALF_HOUR_PX, cu
 import { presentPeople } from "../shared/personPresentation";
 import { groupMovieVersions } from "../shared/mediaVersions";
 import { searchLiveTvGuide } from "../shared/liveTvSearch";
+import { authoritativeYouTubePosition, shouldCorrectYouTubePosition } from "./youtubeRoomSync";
 import { groupDownloadedRecords, type DownloadedGroup } from "./downloadedPresentation";
 import {
   activeLibraryFilterCount,
@@ -165,6 +168,24 @@ const refreshWatchPartiesButton = byId<HTMLButtonElement>("refreshWatchPartiesBu
 const watchPartyStatus = byId<HTMLElement>("watchPartyStatus");
 const joinedWatchParty = byId<HTMLElement>("joinedWatchParty");
 const watchPartyList = byId<HTMLElement>("watchPartyList");
+const youtubeCreateUrlInput = byId<HTMLInputElement>("youtubeCreateUrlInput");
+const youtubeCreateButton = byId<HTMLButtonElement>("youtubeCreateButton");
+const youtubeInviteInput = byId<HTMLInputElement>("youtubeInviteInput");
+const youtubeJoinButton = byId<HTMLButtonElement>("youtubeJoinButton");
+const youtubeRoomStatus = byId<HTMLElement>("youtubeRoomStatus");
+const youtubeRoomPanel = byId<HTMLElement>("youtubeRoomPanel");
+const youtubeInviteToken = byId<HTMLInputElement>("youtubeInviteToken");
+const youtubeCopyInviteButton = byId<HTMLButtonElement>("youtubeCopyInviteButton");
+const youtubeLeaveButton = byId<HTMLButtonElement>("youtubeLeaveButton");
+const youtubeMembers = byId<HTMLElement>("youtubeMembers");
+const youtubeVideoForm = byId<HTMLFormElement>("youtubeVideoForm");
+const youtubeVideoUrlInput = byId<HTMLInputElement>("youtubeVideoUrlInput");
+const youtubePlayerShell = byId<HTMLElement>("youtubePlayerShell");
+const youtubeRoomFrame = byId<HTMLIFrameElement>("youtubeRoomFrame");
+const youtubeControls = byId<HTMLElement>("youtubeControls");
+const youtubePlayPauseButton = byId<HTMLButtonElement>("youtubePlayPauseButton");
+const youtubeTimeline = byId<HTMLInputElement>("youtubeTimeline");
+const youtubeTimeLabel = byId<HTMLElement>("youtubeTimeLabel");
 
 const featureHero = byId<HTMLElement>("featureHero");
 const featureImage = byId<HTMLImageElement>("featureImage");
@@ -460,6 +481,7 @@ interface RendererState {
   searchRequestId: number;
   toastTimer: ReturnType<typeof setTimeout> | null;
   watchParties: WatchPartyViewState | null;
+  youtubeRooms: YouTubeRoomViewState | null;
   liveTvGuide: LiveTvGuide | null;
   liveTvRecordings: LiveTvRecording[];
   liveTvTimers: LiveTvTimer[];
@@ -540,6 +562,7 @@ const state: RendererState = {
   searchRequestId: 0,
   toastTimer: null,
   watchParties: null,
+  youtubeRooms: null,
   liveTvGuide: null,
   liveTvRecordings: [],
   liveTvTimers: [],
@@ -554,6 +577,17 @@ const state: RendererState = {
 let connectionRetryInFlight = false;
 let companionPairingExpiresAt = 0;
 let watchPartiesVisible = false;
+let youtubeFrameVideoId: string | null = null;
+let youtubePlayerReady = false;
+let youtubePlayerState = -1;
+let youtubeLocalPosition = 0;
+let youtubeDuration = 0;
+let youtubeReportedVideoId = "";
+let youtubeDurationStableSamples = 0;
+let youtubeLastDuration = 0;
+let youtubeLastAppliedVersion = -1;
+let youtubePresence: YouTubeRoomPlaybackStatus = "idle";
+let youtubeTimelineDragging = false;
 let playerControlsTimer: ReturnType<typeof setTimeout> | null = null;
 let playerViewportClickTimer: ReturnType<typeof setTimeout> | null = null;
 let playbackFeatureRequestId = 0;
@@ -914,6 +948,7 @@ function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?:
   if (nextWatchPartiesVisible !== watchPartiesVisible) {
     watchPartiesVisible = nextWatchPartiesVisible;
     void window.jellyfin.watchParties.setVisible({ visible: nextWatchPartiesVisible }).catch(() => undefined);
+    void window.jellyfin.youtubeRooms.setVisible({ visible: nextWatchPartiesVisible }).catch(() => undefined);
   }
 
   const desktopRoute = route === "details" ? state.returnRoute : route;
@@ -1060,6 +1095,136 @@ function renderWatchParties(): void {
   }
 }
 
+function youtubeCommand(func: "playVideo" | "pauseVideo" | "seekTo", args: unknown[] = []): void {
+  youtubeRoomFrame.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "https://www.youtube.com");
+}
+
+function youtubeEmbedUrl(videoId: string): string {
+  return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&autoplay=1&controls=0&playsinline=1&rel=0`;
+}
+
+function resetYouTubeFrame(videoId: string | null): void {
+  youtubeFrameVideoId = videoId;
+  youtubePlayerReady = false;
+  youtubePlayerState = -1;
+  youtubeLocalPosition = 0;
+  youtubeDuration = 0;
+  youtubeReportedVideoId = "";
+  youtubeDurationStableSamples = 0;
+  youtubeLastDuration = 0;
+  youtubeLastAppliedVersion = -1;
+  if (videoId) youtubeRoomFrame.src = youtubeEmbedUrl(videoId);
+  else youtubeRoomFrame.removeAttribute("src");
+}
+
+function youtubeClock(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "0:00";
+  const total = Math.floor(value);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
+}
+
+function renderYouTubeRoom(): void {
+  const value = state.youtubeRooms;
+  const room = value?.room ?? null;
+  youtubeCreateButton.disabled = value?.connection === "checking";
+  youtubeJoinButton.disabled = value?.connection === "checking";
+  youtubeRoomPanel.classList.toggle("is-hidden", !room);
+
+  if (!value || value.connection === "checking") youtubeRoomStatus.textContent = "Checking the YouTube Rooms plugin on this Jellyfin server…";
+  else if (value.connection === "plugin-missing") youtubeRoomStatus.textContent = value.error?.message || "Install the YouTube Rooms plugin on this Jellyfin server.";
+  else if (value.connection === "reconnecting") youtubeRoomStatus.textContent = "Reconnecting through Jellyfin… playback will catch up automatically.";
+  else if (room) youtubeRoomStatus.textContent = "Private room connected through your Jellyfin server.";
+  else youtubeRoomStatus.textContent = "Create a temporary private room or paste an invite from the other viewer.";
+
+  if (!room) {
+    if (youtubeFrameVideoId) resetYouTubeFrame(null);
+    return;
+  }
+
+  youtubeInviteToken.value = room.inviteToken;
+  youtubeMembers.replaceChildren(...room.members.map((member) => {
+    const entry = document.createElement("span");
+    entry.className = `youtube-member${member.connected ? "" : " is-away"}`;
+    entry.textContent = `${member.displayName} · ${member.connected ? member.status : "disconnected"}`;
+    return entry;
+  }));
+  const videoId = room.timeline.videoId;
+  if (videoId !== youtubeFrameVideoId) resetYouTubeFrame(videoId);
+  youtubePlayerShell.classList.toggle("is-hidden", !videoId);
+  youtubeControls.classList.toggle("is-hidden", !videoId);
+  youtubePlayPauseButton.textContent = room.timeline.playing ? "Pause" : "Play";
+}
+
+function reconcileYouTubePlayer(): void {
+  const timeline = state.youtubeRooms?.room?.timeline;
+  if (!timeline?.videoId || timeline.videoId !== youtubeFrameVideoId) return;
+  const contentIdentityMatches = youtubeReportedVideoId === timeline.videoId;
+  const durationStable = youtubeDurationStableSamples >= 2;
+  const safeToControl = youtubePlayerReady && contentIdentityMatches && durationStable;
+  if (safeToControl) {
+    if (shouldCorrectYouTubePosition({
+      timeline,
+      localPositionSeconds: youtubeLocalPosition,
+      playerReady: youtubePlayerReady,
+      contentIdentityMatches,
+      durationStable,
+    })) youtubeCommand("seekTo", [Math.min(youtubeDuration || 86400, authoritativeYouTubePosition(timeline)), true]);
+    if (timeline.playing && youtubePlayerState !== 1 && youtubePlayerState !== 3) youtubeCommand("playVideo");
+    if (!timeline.playing && youtubePlayerState !== 2) youtubeCommand("pauseVideo");
+    youtubeLastAppliedVersion = timeline.version;
+  }
+
+  if (!youtubeTimelineDragging) {
+    const position = safeToControl ? youtubeLocalPosition : authoritativeYouTubePosition(timeline);
+    const maximum = Math.max(1, youtubeDuration || position || 1);
+    youtubeTimeline.max = String(Math.round(maximum * 10));
+    youtubeTimeline.value = String(Math.round(Math.min(maximum, position) * 10));
+    youtubeTimeLabel.textContent = `${youtubeClock(position)} / ${youtubeClock(youtubeDuration)}`;
+  }
+
+  const nextPresence: YouTubeRoomPlaybackStatus = !safeToControl
+    ? "recovering"
+    : youtubePlayerState === 3 ? "buffering"
+      : timeline.playing ? "playing" : "paused";
+  if (nextPresence !== youtubePresence) {
+    youtubePresence = nextPresence;
+    void window.jellyfin.youtubeRooms.presence({ status: nextPresence }).catch(() => undefined);
+  }
+}
+
+async function createYouTubeRoom(): Promise<void> {
+  const youtubeUrl = youtubeCreateUrlInput.value.trim();
+  if (!youtubeUrl) { showToast("Paste a YouTube link first."); youtubeCreateUrlInput.focus(); return; }
+  youtubeCreateButton.disabled = true;
+  try {
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.create({ youtubeUrl });
+    youtubeCreateUrlInput.value = "";
+    renderYouTubeRoom();
+    showToast("Private YouTube room created. Share the invite token with Kayla.");
+  } catch (error) { showToast(errorMessage(error, "The YouTube room could not be created.")); }
+  finally { youtubeCreateButton.disabled = false; }
+}
+
+async function joinYouTubeRoom(): Promise<void> {
+  const inviteToken = youtubeInviteInput.value.trim();
+  youtubeJoinButton.disabled = true;
+  try {
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.join({ inviteToken });
+    youtubeInviteInput.value = "";
+    renderYouTubeRoom();
+    showToast("Joined the private YouTube room.");
+  } catch (error) { showToast(errorMessage(error, "That YouTube room could not be joined.")); }
+  finally { youtubeJoinButton.disabled = false; }
+}
+
+async function refreshYouTubeRoom(): Promise<void> {
+  try { state.youtubeRooms = await window.jellyfin.youtubeRooms.getState(); renderYouTubeRoom(); }
+  catch { /* The subscription or reconnect loop will provide the next state. */ }
+}
+
 async function refreshWatchParties(): Promise<void> {
   try {
     state.watchParties = await window.jellyfin.watchParties.list();
@@ -1073,7 +1238,7 @@ async function openWatchParties(): Promise<void> {
   profileMenu.classList.add("is-hidden");
   profileButton.setAttribute("aria-expanded", "false");
   setRoute("watch-parties");
-  await refreshWatchParties();
+  await Promise.all([refreshWatchParties(), refreshYouTubeRoom()]);
 }
 
 function liveTvTime(value: string): string {
@@ -6196,6 +6361,10 @@ function resetSignedInState(): void {
   state.sessionPanelCollapsed = false;
   state.lastFocusElement = null;
   state.watchParties = null;
+  state.youtubeRooms = null;
+  youtubePresence = "idle";
+  youtubeTimelineDragging = false;
+  resetYouTubeFrame(null);
   state.downloads = [];
   state.offlinePlayable = [];
   state.smartDownloads = { series: [], notice: null };
@@ -6278,6 +6447,9 @@ function resetSignedInState(): void {
   toast.classList.add("is-hidden");
   downloadsList.replaceChildren();
   watchPartyList.replaceChildren();
+  youtubeMembers.replaceChildren();
+  youtubeRoomPanel.classList.add("is-hidden");
+  youtubeRoomStatus.textContent = "";
   joinedWatchParty.replaceChildren();
   joinedWatchParty.classList.add("is-hidden");
   watchPartyStatus.textContent = "";
@@ -6431,6 +6603,94 @@ mobileLibraryButton.addEventListener("click", () => {
 });
 mobileLiveTvButton.addEventListener("click", () => { void openLiveTv(); });
 mobileWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
+
+youtubeCreateButton.addEventListener("click", () => { void createYouTubeRoom(); });
+youtubeJoinButton.addEventListener("click", () => { void joinYouTubeRoom(); });
+youtubeLeaveButton.addEventListener("click", () => {
+  youtubeLeaveButton.disabled = true;
+  void window.jellyfin.youtubeRooms.leave().then((value) => {
+    state.youtubeRooms = value;
+    youtubePresence = "idle";
+    renderYouTubeRoom();
+    showToast("Left the YouTube room.");
+  }).catch((error) => showToast(errorMessage(error, "The YouTube room could not be left.")))
+    .finally(() => { youtubeLeaveButton.disabled = false; });
+});
+youtubeCopyInviteButton.addEventListener("click", () => {
+  youtubeInviteToken.focus();
+  youtubeInviteToken.select();
+  const copied = document.execCommand("copy");
+  showToast(copied ? "Invite token copied." : "The invite token is selected—press Ctrl+C to copy it.");
+});
+youtubeVideoForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const youtubeUrl = youtubeVideoUrlInput.value.trim();
+  if (!youtubeUrl) return;
+  void window.jellyfin.youtubeRooms.setVideo({ youtubeUrl }).then((value) => {
+    state.youtubeRooms = value;
+    youtubeVideoUrlInput.value = "";
+    renderYouTubeRoom();
+    showToast("Changed the video for everyone.");
+  }).catch((error) => showToast(errorMessage(error, "The video could not be changed.")));
+});
+youtubePlayPauseButton.addEventListener("click", () => {
+  const timeline = state.youtubeRooms?.room?.timeline;
+  if (!timeline) return;
+  const positionSeconds = youtubePlayerReady ? youtubeLocalPosition : authoritativeYouTubePosition(timeline);
+  void window.jellyfin.youtubeRooms.action({
+    action: timeline.playing ? "pause" : "play",
+    positionSeconds,
+  }).then((value) => {
+    state.youtubeRooms = value;
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+  }).catch((error) => showToast(errorMessage(error, "The shared playback action failed.")));
+});
+youtubeTimeline.addEventListener("input", () => {
+  youtubeTimelineDragging = true;
+  youtubeTimeLabel.textContent = `${youtubeClock(Number(youtubeTimeline.value) / 10)} / ${youtubeClock(youtubeDuration)}`;
+});
+youtubeTimeline.addEventListener("change", () => {
+  youtubeTimelineDragging = false;
+  const positionSeconds = Number(youtubeTimeline.value) / 10;
+  void window.jellyfin.youtubeRooms.action({ action: "seek", positionSeconds }).then((value) => {
+    state.youtubeRooms = value;
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+  }).catch((error) => showToast(errorMessage(error, "The shared seek failed.")));
+});
+youtubeRoomFrame.addEventListener("load", () => {
+  const listening = JSON.stringify({ event: "listening", id: "youtubeRoomFrame" });
+  for (const delay of [0, 250, 750]) setTimeout(() => youtubeRoomFrame.contentWindow?.postMessage(listening, "https://www.youtube.com"), delay);
+});
+window.addEventListener("message", (event) => {
+  if (event.origin !== "https://www.youtube.com" || event.source !== youtubeRoomFrame.contentWindow) return;
+  let message: unknown = event.data;
+  if (typeof message === "string") {
+    try { message = JSON.parse(message); } catch { return; }
+  }
+  if (!message || typeof message !== "object") return;
+  const envelope = message as { event?: unknown; info?: unknown };
+  if (envelope.event === "onReady") youtubePlayerReady = true;
+  if ((envelope.event === "onStateChange" || envelope.event === "infoDelivery") && typeof envelope.info === "number") {
+    youtubePlayerState = envelope.info;
+  }
+  if (envelope.event === "infoDelivery" && envelope.info && typeof envelope.info === "object") {
+    const info = envelope.info as { currentTime?: unknown; duration?: unknown; playerState?: unknown; videoData?: { video_id?: unknown } };
+    if (typeof info.currentTime === "number" && Number.isFinite(info.currentTime)) youtubeLocalPosition = Math.max(0, info.currentTime);
+    if (typeof info.playerState === "number") youtubePlayerState = info.playerState;
+    if (typeof info.duration === "number" && Number.isFinite(info.duration) && info.duration > 0) {
+      if (Math.abs(info.duration - youtubeLastDuration) < 0.25) youtubeDurationStableSamples += 1;
+      else youtubeDurationStableSamples = 0;
+      youtubeLastDuration = info.duration;
+      youtubeDuration = info.duration;
+    }
+    if (typeof info.videoData?.video_id === "string") youtubeReportedVideoId = info.videoData.video_id;
+    youtubePlayerReady = true;
+  }
+  reconcileYouTubePlayer();
+});
+setInterval(reconcileYouTubePlayer, 500);
 
 liveTvGuideTab.addEventListener("click", () => setLiveTvTab("guide"));
 liveTvRecordingsTab.addEventListener("click", () => setLiveTvTab("recordings"));
@@ -7047,6 +7307,14 @@ window.jellyfin.watchParties.subscribe((watchParties) => {
   if (state.currentRoute === "watch-parties") renderWatchParties();
   if (state.currentRoute === "details") renderDetailVersionControl();
   if (!playerView.classList.contains("is-hidden")) renderPlayerState();
+});
+
+window.jellyfin.youtubeRooms.subscribe((youtubeRooms) => {
+  state.youtubeRooms = youtubeRooms;
+  if (state.currentRoute === "watch-parties") {
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+  }
 });
 
 window.jellyfin.companion.subscribe((status) => {

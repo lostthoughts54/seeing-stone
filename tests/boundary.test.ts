@@ -106,7 +106,7 @@ describe("renderer and preload security boundary", () => {
     const preload = await readFile("src/preload/index.ts", "utf8");
     const watchPartyContracts = contracts.slice(
       contracts.indexOf("export type WatchPartyPlaybackState"),
-      contracts.indexOf("export interface JellyfinBridge"),
+      contracts.indexOf("export type YouTubeRoomConnection"),
     );
     expect(watchPartyContracts).not.toMatch(/accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket(?:Url|Endpoint|Headers|Token)|mediaUrl|api[_-]?key/i);
     expect(watchPartyContracts).not.toMatch(/(?:url|path|headers|credential|token)\s*:/i);

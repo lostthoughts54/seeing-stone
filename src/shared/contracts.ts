@@ -740,6 +740,53 @@ export interface WatchPartyGroupInput { groupId: string }
 export interface WatchPartyVisibilityInput { visible: boolean }
 export interface WatchPartySyncOffsetInput { offsetMilliseconds: number }
 
+export type YouTubeRoomConnection = "signed-out" | "checking" | "connected" | "reconnecting" | "plugin-missing";
+export type YouTubeRoomPlaybackStatus = "idle" | "playing" | "paused" | "buffering" | "recovering";
+
+export interface YouTubeRoomMember {
+  memberId: string;
+  displayName: string;
+  status: YouTubeRoomPlaybackStatus;
+  connected: boolean;
+  lastSeenAtUnixMs: number;
+}
+
+export interface YouTubeRoomTimeline {
+  videoId: string | null;
+  positionSeconds: number;
+  playing: boolean;
+  anchoredAtUnixMs: number;
+  version: number;
+  changedBy: string | null;
+}
+
+export interface YouTubeRoom {
+  inviteToken: string;
+  serverNowUnixMs: number;
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  timeline: YouTubeRoomTimeline;
+  members: YouTubeRoomMember[];
+}
+
+export interface YouTubeRoomViewState {
+  connection: YouTubeRoomConnection;
+  room: YouTubeRoom | null;
+  clientId: string;
+  error: { code: string; message: string } | null;
+}
+
+export interface YouTubeRoomCreateInput { youtubeUrl: string }
+export interface YouTubeRoomJoinInput { inviteToken: string }
+export interface YouTubeRoomVideoInput { youtubeUrl: string }
+export interface YouTubeRoomActionInput {
+  action: "play" | "pause" | "seek";
+  positionSeconds: number;
+}
+export interface YouTubeRoomPresenceInput {
+  status: YouTubeRoomPlaybackStatus;
+}
+
 export interface JellyfinBridge {
   application: {
     close(): Promise<void>;
@@ -876,6 +923,17 @@ export interface JellyfinBridge {
     setVisible(input: WatchPartyVisibilityInput): Promise<WatchPartyViewState>;
     subscribe(listener: (state: WatchPartyViewState) => void): () => void;
   };
+  youtubeRooms: {
+    getState(): Promise<YouTubeRoomViewState>;
+    create(input: YouTubeRoomCreateInput): Promise<YouTubeRoomViewState>;
+    join(input: YouTubeRoomJoinInput): Promise<YouTubeRoomViewState>;
+    leave(): Promise<YouTubeRoomViewState>;
+    setVideo(input: YouTubeRoomVideoInput): Promise<YouTubeRoomViewState>;
+    action(input: YouTubeRoomActionInput): Promise<YouTubeRoomViewState>;
+    presence(input: YouTubeRoomPresenceInput): Promise<YouTubeRoomViewState>;
+    setVisible(input: WatchPartyVisibilityInput): Promise<YouTubeRoomViewState>;
+    subscribe(listener: (state: YouTubeRoomViewState) => void): () => void;
+  };
 }
 
 export const IPC = {
@@ -986,5 +1044,14 @@ export const IPC = {
   watchPartiesSetBufferingPolicy: "watch-parties:set-buffering-policy",
   watchPartiesSetVisible: "watch-parties:set-visible",
   watchPartiesChanged: "watch-parties:changed",
+  youtubeRoomsGetState: "youtube-rooms:get-state",
+  youtubeRoomsCreate: "youtube-rooms:create",
+  youtubeRoomsJoin: "youtube-rooms:join",
+  youtubeRoomsLeave: "youtube-rooms:leave",
+  youtubeRoomsSetVideo: "youtube-rooms:set-video",
+  youtubeRoomsAction: "youtube-rooms:action",
+  youtubeRoomsPresence: "youtube-rooms:presence",
+  youtubeRoomsSetVisible: "youtube-rooms:set-visible",
+  youtubeRoomsChanged: "youtube-rooms:changed",
 } as const;
 import type { CompanionSettingsBridge } from "./companionContracts";

@@ -794,6 +794,17 @@ export class JellyfinApi {
     });
   }
 
+  /** Authenticated main-process boundary for the bundled YouTube Rooms Jellyfin plugin. */
+  youtubeRoomRequest(path: string, body?: unknown, method: "GET" | "POST" | "DELETE" = body === undefined ? "GET" : "POST"): Promise<unknown> {
+    if (!/^\/SeeingStone\/YouTubeRooms(?:\/[A-Za-z0-9_-]{43})?(?:\/(?:join|leave|video|action|presence))?$/.test(path)) {
+      throw new AppError("INVALID_YOUTUBE_ROOM_ENDPOINT", "The YouTube room endpoint is invalid.", 400);
+    }
+    return this.request(path, {}, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+
   /** Authenticated NTP-style time sample used only by the main-process SyncPlay coordinator. */
   async getServerTime(): Promise<ServerTimeResponse> {
     const value = asRecord(await this.request("/GetUtcTime"));

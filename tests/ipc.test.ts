@@ -239,6 +239,7 @@ describe("IPC authorization and allowlist", () => {
       IPC.smartDownloadsChanged,
       IPC.sessionPanelSoloChanged,
       IPC.watchPartiesChanged,
+      IPC.youtubeRoomsChanged,
       IPC.companionChanged,
     ].includes(channel));
     expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());

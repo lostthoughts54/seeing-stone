@@ -52,6 +52,11 @@ import {
   watchPartyGroupSchema,
   watchPartySyncOffsetSchema,
   watchPartyVisibilitySchema,
+  youtubeRoomActionSchema,
+  youtubeRoomCreateSchema,
+  youtubeRoomJoinSchema,
+  youtubeRoomPresenceSchema,
+  youtubeRoomVideoSchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
 import type { DownloadManager } from "./services/downloadManager";
@@ -70,6 +75,7 @@ import type { TrailerWindowController } from "./services/trailerWindow";
 import type { SmartDownloadService } from "./services/smartDownloads";
 import type { PlaybackMetadataService } from "./services/playbackMetadata";
 import type { TrickplayService } from "./services/trickplay";
+import type { YouTubeRoomService } from "./services/youtubeRooms";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
 
@@ -160,6 +166,7 @@ export function registerIpcHandlers(
   trickplay?: TrickplayService,
   adapterSelectionAvailable = true,
   updates?: UpdateCheckerController,
+  youtubeRooms?: YouTubeRoomService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -185,6 +192,7 @@ export function registerIpcHandlers(
   register(IPC.sessionLogin, async (input) => {
     const value = loginSchema.strict().parse(input);
     await syncPlay?.deactivate();
+    youtubeRooms?.deactivate();
     artwork.clear();
     playbackMetadata?.clear();
     trickplay?.clear();
@@ -198,11 +206,13 @@ export function registerIpcHandlers(
     await smartDownloads?.activate();
     synchronization.activate();
     await syncPlay?.activate();
+    await youtubeRooms?.activate();
     await companion?.activateAfterLogin?.();
     return session;
   });
   register(IPC.sessionRestore, async () => {
     await syncPlay?.deactivate();
+    youtubeRooms?.deactivate();
     await smartDownloads?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
@@ -217,6 +227,7 @@ export function registerIpcHandlers(
       await smartDownloads?.activate();
       synchronization.activate();
       await syncPlay?.activate();
+      await youtubeRooms?.activate();
       await companion?.activateAfterLogin?.();
     }
     return session;
@@ -225,6 +236,7 @@ export function registerIpcHandlers(
   register(IPC.sessionLogout, async () => {
     await companion?.stopForSessionChange?.();
     await syncPlay?.deactivate();
+    youtubeRooms?.deactivate();
     artwork.clear();
     playbackMetadata?.clear();
     trickplay?.clear();
@@ -604,4 +616,17 @@ export function registerIpcHandlers(
     bufferingPolicyPreferenceSchema.strict().parse(input).mode,
   ));
   register(IPC.watchPartiesSetVisible, (input) => requireSyncPlay().setViewVisible(watchPartyVisibilitySchema.strict().parse(input).visible));
+
+  const requireYouTubeRooms = (): YouTubeRoomService => {
+    if (!youtubeRooms) throw new AppError("YOUTUBE_ROOMS_UNAVAILABLE", "YouTube Rooms are unavailable in this build.", 503);
+    return youtubeRooms;
+  };
+  register(IPC.youtubeRoomsGetState, () => requireYouTubeRooms().getState());
+  register(IPC.youtubeRoomsCreate, (input) => requireYouTubeRooms().create(youtubeRoomCreateSchema.strict().parse(input).youtubeUrl));
+  register(IPC.youtubeRoomsJoin, (input) => requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).inviteToken));
+  register(IPC.youtubeRoomsLeave, () => requireYouTubeRooms().leave());
+  register(IPC.youtubeRoomsSetVideo, (input) => requireYouTubeRooms().setVideo(youtubeRoomVideoSchema.strict().parse(input).youtubeUrl));
+  register(IPC.youtubeRoomsAction, (input) => requireYouTubeRooms().action(youtubeRoomActionSchema.strict().parse(input)));
+  register(IPC.youtubeRoomsPresence, (input) => requireYouTubeRooms().setPresence(youtubeRoomPresenceSchema.strict().parse(input).status));
+  register(IPC.youtubeRoomsSetVisible, (input) => requireYouTubeRooms().setVisible(watchPartyVisibilitySchema.strict().parse(input).visible));
 }

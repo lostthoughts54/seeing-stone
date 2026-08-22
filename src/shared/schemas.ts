@@ -175,6 +175,19 @@ export const watchPartyGroupSchema = z.object({
 
 export const watchPartyVisibilitySchema = z.object({ visible: z.boolean() });
 
+const youtubeInviteToken = z.string().trim().regex(/^[A-Za-z0-9_-]{43}$/);
+const youtubeUrl = z.string().trim().min(1).max(2048);
+export const youtubeRoomCreateSchema = z.object({ youtubeUrl });
+export const youtubeRoomJoinSchema = z.object({ inviteToken: youtubeInviteToken });
+export const youtubeRoomVideoSchema = z.object({ youtubeUrl });
+export const youtubeRoomActionSchema = z.object({
+  action: z.enum(["play", "pause", "seek"]),
+  positionSeconds: z.number().finite().min(0).max(86400),
+});
+export const youtubeRoomPresenceSchema = z.object({
+  status: z.enum(["idle", "playing", "paused", "buffering", "recovering"]),
+});
+
 export const watchPartySyncOffsetSchema = z.object({
   offsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
 });

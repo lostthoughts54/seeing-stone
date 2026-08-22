@@ -79,6 +79,12 @@ import {
   type WatchPartySyncOffsetInput,
   type WatchPartyVisibilityInput,
   type WatchPartyViewState,
+  type YouTubeRoomActionInput,
+  type YouTubeRoomCreateInput,
+  type YouTubeRoomJoinInput,
+  type YouTubeRoomPresenceInput,
+  type YouTubeRoomVideoInput,
+  type YouTubeRoomViewState,
 } from "../shared/contracts";
 import type { CompanionSettingsState } from "../shared/companionContracts";
 
@@ -267,6 +273,21 @@ const bridge: JellyfinBridge = {
       const receive = (_event: Electron.IpcRendererEvent, state: WatchPartyViewState) => listener(state);
       ipcRenderer.on(IPC.watchPartiesChanged, receive);
       return () => ipcRenderer.removeListener(IPC.watchPartiesChanged, receive);
+    },
+  },
+  youtubeRooms: {
+    getState: () => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsGetState),
+    create: (input: YouTubeRoomCreateInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsCreate, input),
+    join: (input: YouTubeRoomJoinInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsJoin, input),
+    leave: () => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsLeave),
+    setVideo: (input: YouTubeRoomVideoInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsSetVideo, input),
+    action: (input: YouTubeRoomActionInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsAction, input),
+    presence: (input: YouTubeRoomPresenceInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsPresence, input),
+    setVisible: (input: WatchPartyVisibilityInput) => invoke<YouTubeRoomViewState>(IPC.youtubeRoomsSetVisible, input),
+    subscribe: (listener: (state: YouTubeRoomViewState) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: YouTubeRoomViewState) => listener(state);
+      ipcRenderer.on(IPC.youtubeRoomsChanged, receive);
+      return () => ipcRenderer.removeListener(IPC.youtubeRoomsChanged, receive);
     },
   },
 };
