@@ -16,6 +16,21 @@ public sealed record PresenceRequest(
 public sealed record VideoRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
     [property: System.Text.Json.Serialization.JsonPropertyName("videoId")] string VideoId);
+public sealed record QueueAddRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("videoIds")] IReadOnlyList<string> VideoIds,
+    [property: System.Text.Json.Serialization.JsonPropertyName("playNow")] bool PlayNow);
+public sealed record QueueActionRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("queueItemId")] string QueueItemId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("action")] string Action);
+public sealed record AdvanceRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("expectedVideoId")] string ExpectedVideoId);
+public sealed record HandoffRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("groupId")] string GroupId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("groupName")] string GroupName);
 public sealed record ActionRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
     [property: System.Text.Json.Serialization.JsonPropertyName("action")] string Action,
@@ -52,6 +67,18 @@ public sealed class YouTubeRoomsController : ControllerBase
 
     [HttpPost("{token}/video")]
     public Task<ActionResult<YouTubeRoomDto>> SetVideo([FromRoute] string token, [FromBody] VideoRequest request) => ExecuteAsync(authorization => _rooms.SetVideo(token, authorization.UserId, request.ClientId, request.VideoId));
+
+    [HttpPost("{token}/queue/add")]
+    public Task<ActionResult<YouTubeRoomDto>> AddToQueue([FromRoute] string token, [FromBody] QueueAddRequest request) => ExecuteAsync(authorization => _rooms.AddToQueue(token, authorization.UserId, request.ClientId, request.VideoIds, request.PlayNow));
+
+    [HttpPost("{token}/queue/action")]
+    public Task<ActionResult<YouTubeRoomDto>> QueueAction([FromRoute] string token, [FromBody] QueueActionRequest request) => ExecuteAsync(authorization => _rooms.QueueAction(token, authorization.UserId, request.ClientId, request.QueueItemId, request.Action));
+
+    [HttpPost("{token}/advance")]
+    public Task<ActionResult<YouTubeRoomDto>> Advance([FromRoute] string token, [FromBody] AdvanceRequest request) => ExecuteAsync(authorization => _rooms.Advance(token, authorization.UserId, request.ClientId, request.ExpectedVideoId));
+
+    [HttpPost("{token}/handoff")]
+    public Task<ActionResult<YouTubeRoomDto>> Handoff([FromRoute] string token, [FromBody] HandoffRequest request) => ExecuteAsync(authorization => _rooms.Handoff(token, authorization.UserId, request.ClientId, request.GroupId, request.GroupName));
 
     [HttpPost("{token}/action")]
     public Task<ActionResult<YouTubeRoomDto>> Action([FromRoute] string token, [FromBody] ActionRequest request) => ExecuteAsync(authorization => _rooms.ApplyAction(token, authorization.UserId, request.ClientId, request.Action, request.PositionSeconds));

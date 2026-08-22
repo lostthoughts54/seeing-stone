@@ -179,10 +179,16 @@ const youtubeRoomPanel = byId<HTMLElement>("youtubeRoomPanel");
 const youtubeJoinedName = byId<HTMLElement>("youtubeJoinedName");
 const youtubeInviteToken = byId<HTMLInputElement>("youtubeInviteToken");
 const youtubeCopyInviteButton = byId<HTMLButtonElement>("youtubeCopyInviteButton");
+const youtubeHandoffButton = byId<HTMLButtonElement>("youtubeHandoffButton");
 const youtubeLeaveButton = byId<HTMLButtonElement>("youtubeLeaveButton");
 const youtubeMembers = byId<HTMLElement>("youtubeMembers");
+const youtubeHandoffPanel = byId<HTMLElement>("youtubeHandoffPanel");
 const youtubeVideoForm = byId<HTMLFormElement>("youtubeVideoForm");
-const youtubeVideoUrlInput = byId<HTMLInputElement>("youtubeVideoUrlInput");
+const youtubeVideoUrlInput = byId<HTMLTextAreaElement>("youtubeVideoUrlInput");
+const youtubeAddNextButton = byId<HTMLButtonElement>("youtubeAddNextButton");
+const youtubePlayNowButton = byId<HTMLButtonElement>("youtubePlayNowButton");
+const youtubeNextButton = byId<HTMLButtonElement>("youtubeNextButton");
+const youtubeQueue = byId<HTMLElement>("youtubeQueue");
 const youtubePlayerShell = byId<HTMLElement>("youtubePlayerShell");
 const youtubeRoomFrame = byId<HTMLIFrameElement>("youtubeRoomFrame");
 const youtubeControls = byId<HTMLElement>("youtubeControls");
@@ -591,6 +597,7 @@ let youtubeLastDuration = 0;
 let youtubeLastAppliedVersion = -1;
 let youtubePresence: YouTubeRoomPlaybackStatus = "idle";
 let youtubeTimelineDragging = false;
+let youtubeAdvanceRequestedFor = "";
 let playerControlsTimer: ReturnType<typeof setTimeout> | null = null;
 let playerViewportClickTimer: ReturnType<typeof setTimeout> | null = null;
 let playbackFeatureRequestId = 0;
@@ -1116,6 +1123,7 @@ function resetYouTubeFrame(videoId: string | null): void {
   youtubeDurationStableSamples = 0;
   youtubeLastDuration = 0;
   youtubeLastAppliedVersion = -1;
+  youtubeAdvanceRequestedFor = "";
   if (videoId) youtubeRoomFrame.src = youtubeEmbedUrl(videoId);
   else youtubeRoomFrame.removeAttribute("src");
 }
@@ -1170,6 +1178,9 @@ function renderYouTubeRoom(): void {
 
   if (!room) {
     if (youtubeFrameVideoId) resetYouTubeFrame(null);
+    youtubeQueue.replaceChildren();
+    youtubeHandoffPanel.replaceChildren();
+    youtubeHandoffPanel.classList.add("is-hidden");
     return;
   }
 
@@ -1181,7 +1192,58 @@ function renderYouTubeRoom(): void {
     entry.textContent = `${member.displayName} · ${member.connected ? member.status : "disconnected"}`;
     return entry;
   }));
-  const videoId = room.timeline.videoId;
+  const transition = room.transition;
+  const joinedTransition = Boolean(transition && state.watchParties?.joinedGroup?.groupId.toLowerCase() === transition.groupId.toLowerCase());
+  youtubeHandoffButton.classList.toggle("is-hidden", Boolean(transition));
+  youtubeHandoffPanel.classList.toggle("is-hidden", !transition);
+  if (transition) {
+    const message = document.createElement("p");
+    const action = document.createElement("button");
+    message.textContent = `${transition.announcedBy} moved this room to the Jellyfin party “${transition.groupName}”.`;
+    action.type = "button";
+    action.className = "primary";
+    action.textContent = joinedTransition ? "Browse Jellyfin library" : "Join Jellyfin party";
+    action.addEventListener("click", () => {
+      if (joinedTransition) openHome();
+      else void joinYouTubeHandoff(transition.groupId, action);
+    });
+    youtubeHandoffPanel.replaceChildren(message, action);
+  } else youtubeHandoffPanel.replaceChildren();
+
+  youtubeQueue.replaceChildren(...room.queue.map((item, index) => {
+    const entry = document.createElement("article");
+    const copy = document.createElement("div");
+    const title = document.createElement(index === 0 ? "strong" : "span");
+    const detail = document.createElement("small");
+    const actions = document.createElement("div");
+    entry.className = `youtube-queue-item${index === 0 ? " is-current" : ""}`;
+    title.textContent = index === 0 ? `Now playing · ${item.videoId}` : item.videoId;
+    detail.textContent = `Added by ${item.addedBy}`;
+    copy.append(title, detail);
+    const addAction = (label: string, actionName: "play" | "remove" | "move-up" | "move-down", disabled = false) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.disabled = disabled;
+      button.addEventListener("click", () => { void updateYouTubeQueue(item.queueItemId, actionName, button); });
+      actions.append(button);
+    };
+    if (index > 0) addAction("Play now", "play");
+    if (index > 0) addAction("↑", "move-up", index === 1);
+    if (index > 0) addAction("↓", "move-down", index === room.queue.length - 1);
+    addAction("Remove", "remove");
+    entry.append(copy, actions);
+    return entry;
+  }));
+  if (room.queue.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "youtube-room-list-empty";
+    empty.textContent = "The queue is empty. Add a YouTube video above.";
+    youtubeQueue.replaceChildren(empty);
+  }
+  youtubeNextButton.disabled = room.queue.length === 0;
+
+  const videoId = joinedTransition ? null : room.timeline.videoId;
   if (videoId !== youtubeFrameVideoId) resetYouTubeFrame(videoId);
   youtubePlayerShell.classList.toggle("is-hidden", !videoId);
   youtubeControls.classList.toggle("is-hidden", !videoId);
@@ -1274,6 +1336,85 @@ async function joinYouTubeRoom(roomId: string, button?: HTMLButtonElement): Prom
 async function refreshYouTubeRoom(): Promise<void> {
   try { state.youtubeRooms = await window.jellyfin.youtubeRooms.getState(); renderYouTubeRoom(); }
   catch { /* The subscription or reconnect loop will provide the next state. */ }
+}
+
+async function addYouTubeQueue(playNow: boolean): Promise<void> {
+  const youtubeUrls = youtubeVideoUrlInput.value.trim();
+  if (!youtubeUrls) { youtubeVideoUrlInput.focus(); return; }
+  youtubeAddNextButton.disabled = true;
+  youtubePlayNowButton.disabled = true;
+  try {
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.addToQueue({ youtubeUrls, playNow });
+    youtubeVideoUrlInput.value = "";
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+    showToast(playNow ? "Playing the selected video for everyone." : "Added to Up Next.");
+  } catch (error) { showToast(errorMessage(error, "The videos could not be added to the queue.")); }
+  finally {
+    youtubeAddNextButton.disabled = false;
+    youtubePlayNowButton.disabled = false;
+  }
+}
+
+async function updateYouTubeQueue(queueItemId: string, action: "play" | "remove" | "move-up" | "move-down", button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.queueAction({ queueItemId, action });
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+  } catch (error) { showToast(errorMessage(error, "The shared queue could not be changed.")); }
+  finally { button.disabled = false; }
+}
+
+async function advanceYouTubeQueue(expectedVideoId: string, automatic = false): Promise<void> {
+  const timeline = state.youtubeRooms?.room?.timeline;
+  if (!timeline || timeline.videoId !== expectedVideoId) return;
+  const requestKey = `${expectedVideoId}:${timeline.version}`;
+  if (automatic && youtubeAdvanceRequestedFor === requestKey) return;
+  if (automatic) youtubeAdvanceRequestedFor = requestKey;
+  try {
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.advance({ expectedVideoId });
+    renderYouTubeRoom();
+    reconcileYouTubePlayer();
+  } catch (error) {
+    if (!automatic) showToast(errorMessage(error, "The next video could not be started."));
+  }
+}
+
+async function startYouTubeHandoff(): Promise<void> {
+  const room = state.youtubeRooms?.room;
+  if (!room) return;
+  youtubeHandoffButton.disabled = true;
+  try {
+    let party = state.watchParties?.joinedGroup ?? null;
+    if (!party) {
+      state.watchParties = await window.jellyfin.watchParties.create({ name: `${room.name} · Jellyfin` });
+      party = state.watchParties.joinedGroup;
+    }
+    if (!party) throw new Error("Jellyfin did not return the new watch party.");
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.handoff({ groupId: party.groupId, groupName: party.name });
+    renderWatchParties();
+    renderYouTubeRoom();
+    showToast("The room is ready to continue as a Jellyfin watch party.");
+  } catch (error) { showToast(errorMessage(error, "The Jellyfin watch-party handoff could not be created.")); }
+  finally { youtubeHandoffButton.disabled = false; }
+}
+
+async function joinYouTubeHandoff(groupId: string, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    const joined = state.watchParties?.joinedGroup;
+    if (joined && joined.groupId.toLowerCase() !== groupId.toLowerCase()) {
+      state.watchParties = await window.jellyfin.watchParties.leave();
+    }
+    if (state.watchParties?.joinedGroup?.groupId.toLowerCase() !== groupId.toLowerCase()) {
+      state.watchParties = await window.jellyfin.watchParties.join({ groupId });
+    }
+    renderWatchParties();
+    renderYouTubeRoom();
+    showToast("Joined the Jellyfin watch party. Choose a show or episode from the library.");
+  } catch (error) { showToast(errorMessage(error, "The Jellyfin watch party could not be joined.")); }
+  finally { button.disabled = false; }
 }
 
 async function refreshWatchParties(): Promise<void> {
@@ -6679,16 +6820,15 @@ youtubeCopyInviteButton.addEventListener("click", () => {
   const copied = document.execCommand("copy");
   showToast(copied ? "Room ID copied." : "The room ID is selected—press Ctrl+C to copy it.");
 });
+youtubeHandoffButton.addEventListener("click", () => { void startYouTubeHandoff(); });
 youtubeVideoForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const youtubeUrl = youtubeVideoUrlInput.value.trim();
-  if (!youtubeUrl) return;
-  void window.jellyfin.youtubeRooms.setVideo({ youtubeUrl }).then((value) => {
-    state.youtubeRooms = value;
-    youtubeVideoUrlInput.value = "";
-    renderYouTubeRoom();
-    showToast("Changed the video for everyone.");
-  }).catch((error) => showToast(errorMessage(error, "The video could not be changed.")));
+  void addYouTubeQueue(false);
+});
+youtubePlayNowButton.addEventListener("click", () => { void addYouTubeQueue(true); });
+youtubeNextButton.addEventListener("click", () => {
+  const videoId = state.youtubeRooms?.room?.timeline.videoId;
+  if (videoId) void advanceYouTubeQueue(videoId);
 });
 youtubePlayPauseButton.addEventListener("click", () => {
   const timeline = state.youtubeRooms?.room?.timeline;
@@ -6746,6 +6886,10 @@ window.addEventListener("message", (event) => {
     youtubePlayerReady = true;
   }
   reconcileYouTubePlayer();
+  const timeline = state.youtubeRooms?.room?.timeline;
+  if (youtubePlayerState === 0 && timeline?.videoId && youtubeReportedVideoId === timeline.videoId) {
+    void advanceYouTubeQueue(timeline.videoId, true);
+  }
 });
 setInterval(reconcileYouTubePlayer, 500);
 

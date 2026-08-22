@@ -53,9 +53,13 @@ import {
   watchPartySyncOffsetSchema,
   watchPartyVisibilitySchema,
   youtubeRoomActionSchema,
+  youtubeRoomAdvanceSchema,
   youtubeRoomCreateSchema,
+  youtubeRoomHandoffSchema,
   youtubeRoomJoinSchema,
   youtubeRoomPresenceSchema,
+  youtubeRoomQueueActionSchema,
+  youtubeRoomQueueAddSchema,
   youtubeRoomVideoSchema,
 } from "../shared/schemas";
 import type { ArtworkService } from "./services/artwork";
@@ -637,6 +641,10 @@ export function registerIpcHandlers(
   register(IPC.youtubeRoomsJoin, (input) => requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).roomId));
   register(IPC.youtubeRoomsLeave, () => requireYouTubeRooms().leave());
   register(IPC.youtubeRoomsSetVideo, (input) => requireYouTubeRooms().setVideo(youtubeRoomVideoSchema.strict().parse(input).youtubeUrl));
+  register(IPC.youtubeRoomsAddToQueue, (input) => requireYouTubeRooms().addToQueue(youtubeRoomQueueAddSchema.strict().parse(input)));
+  register(IPC.youtubeRoomsQueueAction, (input) => requireYouTubeRooms().queueAction(youtubeRoomQueueActionSchema.strict().parse(input)));
+  register(IPC.youtubeRoomsAdvance, (input) => requireYouTubeRooms().advance(youtubeRoomAdvanceSchema.strict().parse(input).expectedVideoId));
+  register(IPC.youtubeRoomsHandoff, (input) => requireYouTubeRooms().handoff(youtubeRoomHandoffSchema.strict().parse(input)));
   register(IPC.youtubeRoomsAction, (input) => requireYouTubeRooms().action(youtubeRoomActionSchema.strict().parse(input)));
   register(IPC.youtubeRoomsPresence, (input) => requireYouTubeRooms().setPresence(youtubeRoomPresenceSchema.strict().parse(input).status));
   register(IPC.youtubeRoomsSetVisible, (input) => requireYouTubeRooms().setVisible(watchPartyVisibilitySchema.strict().parse(input).visible));

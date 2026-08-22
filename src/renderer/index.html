@@ -319,13 +319,20 @@
                 <div class="youtube-room-toolbar">
                   <label>Room ID<input id="youtubeInviteToken" type="text" readonly /></label>
                   <button id="youtubeCopyInviteButton" type="button">Copy room ID</button>
+                  <button id="youtubeHandoffButton" type="button">Move to Jellyfin party</button>
                   <button id="youtubeLeaveButton" type="button">Leave room</button>
                 </div>
                 <div id="youtubeMembers" class="youtube-members"></div>
+                <section id="youtubeHandoffPanel" class="youtube-handoff-panel is-hidden"></section>
                 <form id="youtubeVideoForm" class="youtube-video-form">
-                  <label for="youtubeVideoUrlInput">Change video</label>
-                  <div><input id="youtubeVideoUrlInput" type="url" maxlength="2048" placeholder="Paste another YouTube link" autocomplete="off" /><button type="submit">Load for everyone</button></div>
+                  <label for="youtubeVideoUrlInput">Add videos to Up Next</label>
+                  <textarea id="youtubeVideoUrlInput" maxlength="16384" rows="2" placeholder="Paste one YouTube video link per line" autocomplete="off"></textarea>
+                  <div><button id="youtubeAddNextButton" class="primary" type="submit">Add next</button><button id="youtubePlayNowButton" type="button">Play now</button></div>
                 </form>
+                <section class="youtube-queue-section" aria-labelledby="youtubeQueueHeading">
+                  <div class="youtube-queue-heading"><h3 id="youtubeQueueHeading">Up Next</h3><button id="youtubeNextButton" type="button">Next video</button></div>
+                  <div id="youtubeQueue" class="youtube-queue"></div>
+                </section>
                 <div id="youtubePlayerShell" class="youtube-player-shell is-hidden">
                   <iframe id="youtubeRoomFrame" title="YouTube Watch Together player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allowfullscreen></iframe>
                 </div>

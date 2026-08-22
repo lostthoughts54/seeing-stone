@@ -10,6 +10,11 @@ Jellyfin intentionally removes them. The server assigns every play, pause, seek,
 and video change a new monotonically increasing version while holding one lock;
 the last request received by the server wins.
 
+Protocol version 3 also stores the room's shared Up Next queue and an optional
+Jellyfin SyncPlay handoff destination. Queue advancement is idempotent against
+duplicate end-of-video reports, and a handoff never joins clients silently: each
+authenticated room member confirms the move in Seeing Stone.
+
 ## Build and install
 
 The plugin targets the repository's pinned Jellyfin server version, 10.11.11,

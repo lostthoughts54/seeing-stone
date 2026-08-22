@@ -22,6 +22,9 @@ describe("YouTube Rooms plugin security boundary", () => {
     expect(store).toContain("ListOpenRooms");
     expect(controller).toContain("[HttpGet(\"open\")]");
     expect(store).toContain("Join this room before changing it.");
+    expect(store).toContain("public const int ProtocolVersion = 3");
+    expect(store).toContain("expectedVideoId");
+    expect(controller).toContain("[HttpPost(\"{token}/handoff\")]");
     expect(store).not.toContain("HttpClient");
   });
 });

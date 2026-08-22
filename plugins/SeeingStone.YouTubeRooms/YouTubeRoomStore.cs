@@ -19,6 +19,19 @@ public sealed record RoomTimelineDto(
     [property: JsonPropertyName("version")] long Version,
     [property: JsonPropertyName("changedBy")] string? ChangedBy);
 
+public sealed record RoomQueueItemDto(
+    [property: JsonPropertyName("queueItemId")] string QueueItemId,
+    [property: JsonPropertyName("videoId")] string VideoId,
+    [property: JsonPropertyName("addedBy")] string AddedBy,
+    [property: JsonPropertyName("addedAtUnixMs")] long AddedAtUnixMs);
+
+public sealed record RoomTransitionDto(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("groupId")] string GroupId,
+    [property: JsonPropertyName("groupName")] string GroupName,
+    [property: JsonPropertyName("announcedBy")] string AnnouncedBy,
+    [property: JsonPropertyName("announcedAtUnixMs")] long AnnouncedAtUnixMs);
+
 public sealed record YouTubeRoomSummaryDto(
     [property: JsonPropertyName("roomId")] string RoomId,
     [property: JsonPropertyName("name")] string Name,
@@ -35,6 +48,8 @@ public sealed record YouTubeRoomDto(
     [property: JsonPropertyName("createdAtUnixMs")] long CreatedAtUnixMs,
     [property: JsonPropertyName("expiresAtUnixMs")] long ExpiresAtUnixMs,
     [property: JsonPropertyName("timeline")] RoomTimelineDto Timeline,
+    [property: JsonPropertyName("queue")] IReadOnlyList<RoomQueueItemDto> Queue,
+    [property: JsonPropertyName("transition")] RoomTransitionDto? Transition,
     [property: JsonPropertyName("members")] IReadOnlyList<RoomMemberDto> Members);
 
 public sealed class RoomAccessException : Exception
@@ -45,12 +60,14 @@ public sealed class RoomAccessException : Exception
 
 public sealed class YouTubeRoomStore
 {
-    public const int ProtocolVersion = 2;
+    public const int ProtocolVersion = 3;
     public static readonly TimeSpan RoomLifetime = TimeSpan.FromHours(6);
     private static readonly TimeSpan ConnectedWindow = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MemberRetention = TimeSpan.FromMinutes(1);
     private static readonly Regex VideoIdPattern = new("^[A-Za-z0-9_-]{11}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex TokenPattern = new("^[A-Za-z0-9_-]{43}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex QueueItemIdPattern = new("^[0-9a-f]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex GroupIdPattern = new("^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private readonly object _gate = new();
     private readonly Dictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
@@ -63,7 +80,7 @@ public sealed class YouTubeRoomStore
             var now = DateTimeOffset.UtcNow;
             string token;
             do { token = CreateToken(); } while (_rooms.ContainsKey(token));
-            var room = new Room(token, NormalizeRoomName(name, displayName), now, now.Add(RoomLifetime), videoId);
+            var room = new Room(token, NormalizeRoomName(name, displayName), now, now.Add(RoomLifetime), videoId, displayName);
             room.UpsertMember(userId, displayName, clientId, "paused", now);
             _rooms.Add(token, room);
             return Snapshot(room, now);
@@ -123,12 +140,100 @@ public sealed class YouTubeRoomStore
         {
             var now = DateTimeOffset.UtcNow;
             var room = RequireMember(token, userId, clientId, now);
-            room.VideoId = videoId;
-            room.PositionSeconds = 0;
+            var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
+            room.Queue.Clear();
+            room.Queue.Add(CreateQueueItem(videoId, actor, now));
+            SetCurrent(room, videoId, now, actor);
+            return Snapshot(room, now);
+        }
+    }
+
+    public YouTubeRoomDto AddToQueue(string token, Guid userId, Guid clientId, IReadOnlyList<string> videoIds, bool playNow)
+    {
+        if (videoIds.Count is < 1 or > 25) throw new RoomAccessException(400, "Add between 1 and 25 videos at a time.");
+        foreach (var videoId in videoIds) ValidateVideoId(videoId);
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var room = RequireMember(token, userId, clientId, now);
+            if (room.Queue.Count + videoIds.Count > 100) throw new RoomAccessException(400, "A YouTube room queue can contain up to 100 videos.");
+            var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
+            var additions = videoIds.Select(videoId => CreateQueueItem(videoId, actor, now)).ToArray();
+            if (playNow)
+            {
+                room.Queue.InsertRange(0, additions);
+                SetCurrent(room, additions[0].VideoId, now, actor);
+            }
+            else
+            {
+                var startQueue = room.Queue.Count == 0 || room.VideoId is null;
+                room.Queue.AddRange(additions);
+                if (startQueue) SetCurrent(room, room.Queue[0].VideoId, now, actor);
+            }
+            return Snapshot(room, now);
+        }
+    }
+
+    public YouTubeRoomDto QueueAction(string token, Guid userId, Guid clientId, string queueItemId, string action)
+    {
+        if (!QueueItemIdPattern.IsMatch(queueItemId) || action is not ("play" or "remove" or "move-up" or "move-down"))
+            throw new RoomAccessException(400, "Invalid queue action.");
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var room = RequireMember(token, userId, clientId, now);
+            var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
+            var index = room.Queue.FindIndex(item => string.Equals(item.QueueItemId, queueItemId, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) throw new RoomAccessException(404, "Queue item not found.");
+            if (action == "play" && index > 0)
+            {
+                var item = room.Queue[index];
+                room.Queue.RemoveAt(index);
+                room.Queue.Insert(0, item);
+                SetCurrent(room, item.VideoId, now, actor);
+            }
+            else if (action == "remove")
+            {
+                room.Queue.RemoveAt(index);
+                if (index == 0) SetCurrent(room, room.Queue.FirstOrDefault()?.VideoId, now, actor);
+            }
+            else if (action == "move-up" && index > 1)
+                (room.Queue[index - 1], room.Queue[index]) = (room.Queue[index], room.Queue[index - 1]);
+            else if (action == "move-down" && index > 0 && index < room.Queue.Count - 1)
+                (room.Queue[index + 1], room.Queue[index]) = (room.Queue[index], room.Queue[index + 1]);
+            return Snapshot(room, now);
+        }
+    }
+
+    public YouTubeRoomDto Advance(string token, Guid userId, Guid clientId, string expectedVideoId)
+    {
+        ValidateVideoId(expectedVideoId);
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var room = RequireMember(token, userId, clientId, now);
+            if (!string.Equals(room.VideoId, expectedVideoId, StringComparison.Ordinal)) return Snapshot(room, now);
+            var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
+            if (room.Queue.Count > 0) room.Queue.RemoveAt(0);
+            SetCurrent(room, room.Queue.FirstOrDefault()?.VideoId, now, actor);
+            return Snapshot(room, now);
+        }
+    }
+
+    public YouTubeRoomDto Handoff(string token, Guid userId, Guid clientId, string groupId, string groupName)
+    {
+        if (!GroupIdPattern.IsMatch(groupId) || string.IsNullOrWhiteSpace(groupName) || groupName.Length > 200 || groupName.Any(char.IsControl))
+            throw new RoomAccessException(400, "Invalid Jellyfin watch-party destination.");
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var room = RequireMember(token, userId, clientId, now);
+            var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
+            room.Transition = new RoomTransition("jellyfin-syncplay", groupId, groupName.Trim(), actor, now);
             room.Playing = false;
             room.AnchoredAt = now;
             room.Version++;
-            room.ChangedBy = room.Members[MemberKey(userId, clientId)].DisplayName;
+            room.ChangedBy = actor;
             return Snapshot(room, now);
         }
     }
@@ -195,6 +300,8 @@ public sealed class YouTubeRoomStore
             room.CreatedAt.ToUnixTimeMilliseconds(),
             room.ExpiresAt.ToUnixTimeMilliseconds(),
             new RoomTimelineDto(room.VideoId, room.PositionSeconds, room.Playing, room.AnchoredAt.ToUnixTimeMilliseconds(), room.Version, room.ChangedBy),
+            room.Queue.Select(item => new RoomQueueItemDto(item.QueueItemId, item.VideoId, item.AddedBy, item.AddedAt.ToUnixTimeMilliseconds())).ToArray(),
+            room.Transition is null ? null : new RoomTransitionDto(room.Transition.Kind, room.Transition.GroupId, room.Transition.GroupName, room.Transition.AnnouncedBy, room.Transition.AnnouncedAt.ToUnixTimeMilliseconds()),
             members);
     }
 
@@ -206,6 +313,18 @@ public sealed class YouTubeRoomStore
     private static void ValidateVideoId(string videoId)
     {
         if (!VideoIdPattern.IsMatch(videoId)) throw new RoomAccessException(400, "Invalid YouTube video id.");
+    }
+
+    private static QueueItem CreateQueueItem(string videoId, string addedBy, DateTimeOffset now) => new(Guid.NewGuid().ToString("N"), videoId, addedBy, now);
+
+    private static void SetCurrent(Room room, string? videoId, DateTimeOffset now, string changedBy)
+    {
+        room.VideoId = videoId;
+        room.PositionSeconds = 0;
+        room.Playing = false;
+        room.AnchoredAt = now;
+        room.Version++;
+        room.ChangedBy = changedBy;
     }
 
     private static void PruneMembers(Room room, DateTimeOffset now)
@@ -225,9 +344,10 @@ public sealed class YouTubeRoomStore
 
     private sealed class Room
     {
-        public Room(string token, string name, DateTimeOffset createdAt, DateTimeOffset expiresAt, string videoId)
+        public Room(string token, string name, DateTimeOffset createdAt, DateTimeOffset expiresAt, string videoId, string addedBy)
         {
             Token = token; Name = name; CreatedAt = createdAt; ExpiresAt = expiresAt; VideoId = videoId; AnchoredAt = createdAt;
+            Queue.Add(CreateQueueItem(videoId, addedBy, createdAt));
         }
         public string Token { get; }
         public string Name { get; }
@@ -239,6 +359,8 @@ public sealed class YouTubeRoomStore
         public DateTimeOffset AnchoredAt { get; set; }
         public long Version { get; set; }
         public string? ChangedBy { get; set; }
+        public List<QueueItem> Queue { get; } = [];
+        public RoomTransition? Transition { get; set; }
         public Dictionary<string, Member> Members { get; } = new(StringComparer.Ordinal);
         public void UpsertMember(Guid userId, string displayName, Guid clientId, string status, DateTimeOffset now)
         {
@@ -248,4 +370,6 @@ public sealed class YouTubeRoomStore
     }
 
     private sealed record Member(string MemberId, string DisplayName, string Status, DateTimeOffset LastSeen);
+    private sealed record QueueItem(string QueueItemId, string VideoId, string AddedBy, DateTimeOffset AddedAt);
+    private sealed record RoomTransition(string Kind, string GroupId, string GroupName, string AnnouncedBy, DateTimeOffset AnnouncedAt);
 }

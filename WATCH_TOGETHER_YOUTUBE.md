@@ -49,6 +49,15 @@ Jellyfin + SeeingStone.YouTubeRooms plugin
   the target from the anchor position plus elapsed server time.
 - The renderer retries polling after ordinary network failures and retains the
   last room snapshot while reconnecting.
+- Each room owns an ordered queue of up to 100 videos. Members can paste up to
+  25 video links at once, add them to **Up Next**, play an entry immediately,
+  reorder or remove upcoming entries, and advance manually. The first client to
+  report that the content video ended advances the server queue; the expected
+  video id makes duplicate end reports harmless.
+- A member can create (or reuse) a normal Jellyfin SyncPlay group and publish it
+  as the room's handoff destination. Other room members receive an explicit
+  **Join Jellyfin party** prompt. The YouTube room remains available as a
+  temporary redirect for late or reconnecting members until it expires.
 
 ## YouTube and ads
 
@@ -91,6 +100,10 @@ attempt to detect, skip, or manipulate the ad.
 4. Run Seeing Stone with `pnpm start`, sign in to that server, and open
    **Watch Parties**.
 
+Protocol version 3 is required for queues and Jellyfin handoff. If Seeing Stone
+reports that the plugin is outdated, stop Jellyfin, replace the existing DLL
+with the newly published one, and restart Jellyfin before testing the client.
+
 The plugin is pinned to Jellyfin 10.11.11 because that is the version already
 tested and pinned by this repository's SyncPlay work. Match the package versions
 to the server before claiming compatibility with another Jellyfin release.
@@ -106,7 +119,7 @@ pnpm build
   -c Release -o .\artifacts\SeeingStone.YouTubeRooms
 ```
 
-The plugin has been compiled locally with portable .NET SDK 9.0.317 against the
+The protocol-v3 plugin has been compiled locally with portable .NET SDK 9.0.317 against the
 pinned Jellyfin 10.11.11 packages. The publish artifact is
 `artifacts/SeeingStone.YouTubeRooms/SeeingStone.YouTubeRooms.dll`. A live release
 gate must still run a two-account test against a disposable Jellyfin 10.11.11
@@ -114,6 +127,11 @@ server; this repository does not automatically modify or deploy to a live server
 
 ## Deliberately deferred
 
+- General in-app YouTube search and automatic expansion of playlist URLs. The
+  official iframe can play known videos, but catalog search and playlist item
+  discovery require an optional YouTube Data API project and credentials. The
+  queue therefore accepts individual video URLs, including several pasted one
+  per line, without introducing a shared API key in this MVP.
 - Chat, room history, persistent rooms, host roles, moderation, and kick controls.
 - WebSocket push; one-second polling is the reconnect-friendly MVP transport.
 - Automatic installation or modification of a live Jellyfin server.
