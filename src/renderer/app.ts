@@ -170,6 +170,7 @@ const joinedWatchParty = byId<HTMLElement>("joinedWatchParty");
 const watchPartyList = byId<HTMLElement>("watchPartyList");
 const youtubeRoomNameInput = byId<HTMLInputElement>("youtubeRoomNameInput");
 const youtubeCreateUrlInput = byId<HTMLInputElement>("youtubeCreateUrlInput");
+const youtubeTestAloneButton = byId<HTMLButtonElement>("youtubeTestAloneButton");
 const youtubeCreateButton = byId<HTMLButtonElement>("youtubeCreateButton");
 const youtubeRefreshButton = byId<HTMLButtonElement>("youtubeRefreshButton");
 const youtubeRoomStatus = byId<HTMLElement>("youtubeRoomStatus");
@@ -1238,6 +1239,26 @@ async function createYouTubeRoom(): Promise<void> {
     showToast(`${state.youtubeRooms.room?.name || "YouTube room"} created.`);
   } catch (error) { showToast(errorMessage(error, "The YouTube room could not be created.")); }
   finally { youtubeCreateButton.disabled = false; }
+}
+
+async function testYouTubeAlone(): Promise<void> {
+  const youtubeUrl = youtubeCreateUrlInput.value.trim();
+  if (!youtubeUrl) { showToast("Paste a YouTube link first."); youtubeCreateUrlInput.focus(); return; }
+  youtubeTestAloneButton.disabled = true;
+  try {
+    const result = await window.jellyfin.youtubeRooms.testAlone({ youtubeUrl });
+    if (!result.opened || !result.embedUrl) throw new Error("The official YouTube player could not be opened.");
+    activeTrailerItemId = null;
+    trailerLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    trailerTitle.textContent = "Solo YouTube test";
+    trailerFrame.src = result.embedUrl;
+    openTrailerBrowserButton.classList.add("is-hidden");
+    trailerScrim.classList.remove("is-hidden");
+    trailerPanel.classList.remove("is-hidden");
+    closeTrailerButton.focus();
+    showToast("Solo YouTube player opened. No room was created.");
+  } catch (error) { showToast(errorMessage(error, "The solo YouTube player could not be opened.")); }
+  finally { youtubeTestAloneButton.disabled = false; }
 }
 
 async function joinYouTubeRoom(roomId: string, button?: HTMLButtonElement): Promise<void> {
@@ -2845,6 +2866,7 @@ async function openTrailer(itemId: string): Promise<void> {
     else if (result.mode === "external") showToast("This trailer cannot be embedded, so it opened in your browser.");
     else if (result.embedUrl) {
       activeTrailerItemId = itemId;
+      openTrailerBrowserButton.classList.remove("is-hidden");
       trailerLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       trailerTitle.textContent = `${detailTitle.textContent || "Title"} Trailer`;
       trailerFrame.src = result.embedUrl;
@@ -2868,6 +2890,7 @@ function closeTrailer(): void {
   trailerScrim.classList.add("is-hidden");
   trailerPanel.classList.add("is-hidden");
   activeTrailerItemId = null;
+  openTrailerBrowserButton.classList.remove("is-hidden");
   trailerLastFocus?.focus();
   trailerLastFocus = null;
 }
@@ -6638,6 +6661,7 @@ mobileLiveTvButton.addEventListener("click", () => { void openLiveTv(); });
 mobileWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
 
 youtubeCreateButton.addEventListener("click", () => { void createYouTubeRoom(); });
+youtubeTestAloneButton.addEventListener("click", () => { void testYouTubeAlone(); });
 youtubeRefreshButton.addEventListener("click", () => { void refreshYouTubeRoom(); });
 youtubeLeaveButton.addEventListener("click", () => {
   youtubeLeaveButton.disabled = true;

@@ -71,7 +71,7 @@ import type { SyncPlayService } from "./services/syncPlay";
 import { discoverServers } from "./services/serverDiscovery";
 import type { CompanionSettingsBridge } from "../shared/companionContracts";
 import type { PlaybackCommandService } from "./services/playbackCommandService";
-import type { TrailerWindowController } from "./services/trailerWindow";
+import { youtubeVideoId, type TrailerWindowController } from "./services/trailerWindow";
 import type { SmartDownloadService } from "./services/smartDownloads";
 import type { PlaybackMetadataService } from "./services/playbackMetadata";
 import type { TrickplayService } from "./services/trickplay";
@@ -622,6 +622,14 @@ export function registerIpcHandlers(
     return youtubeRooms;
   };
   register(IPC.youtubeRoomsGetState, () => requireYouTubeRooms().refresh());
+  register(IPC.youtubeRoomsTestAlone, async (input) => {
+    const youtubeUrl = youtubeRoomVideoSchema.strict().parse(input).youtubeUrl;
+    const videoId = youtubeVideoId(youtubeUrl);
+    if (!videoId) throw new AppError("INVALID_YOUTUBE_URL", "Paste a supported YouTube video URL.", 400);
+    if (!trailerWindow) throw new AppError("YOUTUBE_TEST_UNAVAILABLE", "The solo YouTube player is unavailable in this build.", 503);
+    const result = await trailerWindow.open(`https://www.youtube.com/watch?v=${videoId}`);
+    return { opened: true, ...result };
+  });
   register(IPC.youtubeRoomsCreate, (input) => {
     const value = youtubeRoomCreateSchema.strict().parse(input);
     return requireYouTubeRooms().create(value.name, value.youtubeUrl);
