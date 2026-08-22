@@ -10,8 +10,22 @@ import type { JellyfinApi } from "./jellyfinApi";
 import { youtubeVideoId } from "./trailerWindow";
 
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const healthSchema = z.object({
+  protocolVersion: z.number().int().min(1),
+  roomLifetimeMinutes: z.number().int().positive(),
+});
+const roomSummarySchema = z.object({
+  roomId: tokenSchema,
+  name: z.string().min(1).max(80),
+  videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/).nullable(),
+  memberCount: z.number().int().min(1).max(32),
+  connectedMemberCount: z.number().int().min(0).max(32),
+  createdAtUnixMs: z.number().int().nonnegative(),
+  expiresAtUnixMs: z.number().int().positive(),
+}).strict();
 const roomSchema = z.object({
   inviteToken: tokenSchema,
+  name: z.string().min(1).max(80),
   serverNowUnixMs: z.number().int().nonnegative(),
   createdAtUnixMs: z.number().int().nonnegative(),
   expiresAtUnixMs: z.number().int().positive(),
@@ -47,14 +61,16 @@ function normalizeRoomClock(value: z.infer<typeof roomSchema>, receivedAtUnixMs:
 const emptyState = (clientId: string): YouTubeRoomViewState => ({
   connection: "signed-out",
   room: null,
+  openRooms: [],
   clientId,
   error: null,
 });
 
 function safeError(error: unknown): { code: string; message: string } {
   if (error instanceof AppError) {
+    if (error.code === "YOUTUBE_ROOMS_PLUGIN_OUTDATED") return { code: error.code, message: error.message };
     if (error.status === 404) return { code: "YOUTUBE_ROOMS_PLUGIN_MISSING", message: "Install the Seeing Stone YouTube Rooms plugin on this Jellyfin server." };
-    if (error.status === 403) return { code: "YOUTUBE_ROOM_FORBIDDEN", message: "That private room is unavailable to this Jellyfin account." };
+    if (error.status === 403) return { code: "YOUTUBE_ROOM_FORBIDDEN", message: "Join that YouTube room before changing it." };
     if (error.status === 410) return { code: "YOUTUBE_ROOM_EXPIRED", message: "That temporary room has expired." };
   }
   return { code: "YOUTUBE_ROOMS_UNAVAILABLE", message: "YouTube Rooms could not reach the Jellyfin server." };
@@ -86,13 +102,13 @@ export class YouTubeRoomService {
       return this.getState();
     }
     this.setState({ ...this.state, connection: "checking", error: null });
-    if (this.state.room) await this.poll();
-    else {
-      try {
-        await this.api.youtubeRoomRequest("/SeeingStone/YouTubeRooms");
-        this.setState({ ...this.state, connection: "connected", error: null });
-      } catch (error) { this.setUnavailable(error); }
-    }
+    try {
+      const health = healthSchema.parse(await this.api.youtubeRoomRequest("/SeeingStone/YouTubeRooms"));
+      if (health.protocolVersion < 2) throw new AppError("YOUTUBE_ROOMS_PLUGIN_OUTDATED", "Update the Seeing Stone YouTube Rooms plugin on this Jellyfin server.", 409);
+      await this.refreshOpenRooms();
+      if (this.state.room) await this.poll();
+      else this.setState({ ...this.state, connection: "connected", error: null });
+    } catch (error) { this.setUnavailable(error, Boolean(this.state.room)); }
     this.reconcilePolling();
     return this.getState();
   }
@@ -104,13 +120,22 @@ export class YouTubeRoomService {
     this.setState(emptyState(this.clientId));
   }
 
-  async create(youtubeUrl: string): Promise<YouTubeRoomViewState> {
-    const videoId = this.requireVideoId(youtubeUrl);
-    return this.mutate("/SeeingStone/YouTubeRooms", { clientId: this.clientId, videoId });
+  async refresh(): Promise<YouTubeRoomViewState> {
+    if (this.state.connection === "signed-out") return this.activate();
+    if (this.state.room) await this.poll();
+    else await this.refreshOpenRooms();
+    return this.getState();
   }
 
-  async join(inviteToken: string): Promise<YouTubeRoomViewState> {
-    const token = tokenSchema.parse(inviteToken.trim());
+  async create(name: string, youtubeUrl: string): Promise<YouTubeRoomViewState> {
+    const videoId = this.requireVideoId(youtubeUrl);
+    const roomName = name.trim();
+    if (!roomName || roomName.length > 80) throw new AppError("INVALID_YOUTUBE_ROOM_NAME", "Enter a room name up to 80 characters.", 400);
+    return this.mutate("/SeeingStone/YouTubeRooms", { clientId: this.clientId, name: roomName, videoId });
+  }
+
+  async join(roomId: string): Promise<YouTubeRoomViewState> {
+    const token = tokenSchema.parse(roomId.trim());
     return this.mutate(`/SeeingStone/YouTubeRooms/${token}/join`, { clientId: this.clientId });
   }
 
@@ -120,6 +145,7 @@ export class YouTubeRoomService {
     finally {
       this.presence = "idle";
       this.setState({ ...this.state, connection: "connected", room: null, error: null });
+      await this.refreshOpenRooms().catch(() => undefined);
       this.reconcilePolling();
     }
     return this.getState();
@@ -150,19 +176,27 @@ export class YouTubeRoomService {
   }
 
   private async poll(): Promise<void> {
-    if (!this.state.room || this.requestInFlight) return;
+    if (this.requestInFlight) return;
     this.requestInFlight = true;
-    const token = this.state.room.inviteToken;
     try {
-      const value = await this.api.youtubeRoomRequest(`/SeeingStone/YouTubeRooms/${token}/presence`, {
-        clientId: this.clientId,
-        status: this.presence,
-      });
-      const room = normalizeRoomClock(roomSchema.parse(value), Date.now());
-      this.setState({ ...this.state, connection: "connected", room, error: null });
+      if (this.state.room) {
+        const token = this.state.room.inviteToken;
+        const value = await this.api.youtubeRoomRequest(`/SeeingStone/YouTubeRooms/${token}/presence`, {
+          clientId: this.clientId,
+          status: this.presence,
+        });
+        const room = normalizeRoomClock(roomSchema.parse(value), Date.now());
+        this.setState({ ...this.state, connection: "connected", room, error: null });
+      } else await this.refreshOpenRooms();
     } catch (error) {
       this.setUnavailable(error, true);
     } finally { this.requestInFlight = false; }
+  }
+
+  private async refreshOpenRooms(): Promise<void> {
+    const value = await this.api.youtubeRoomRequest("/SeeingStone/YouTubeRooms/open");
+    const openRooms = z.array(roomSummarySchema).max(100).parse(value);
+    this.setState({ ...this.state, connection: "connected", openRooms, error: null });
   }
 
   private async mutate(path: string, body: unknown, setChecking = true): Promise<YouTubeRoomViewState> {
@@ -200,9 +234,9 @@ export class YouTubeRoomService {
   }
 
   private reconcilePolling(): void {
-    if (this.visible && this.state.room && !this.pollTimer) {
+    if (this.visible && this.state.connection !== "signed-out" && this.state.connection !== "plugin-missing" && !this.pollTimer) {
       this.pollTimer = setInterval(() => { void this.poll(); }, this.pollIntervalMs);
-    } else if ((!this.visible || !this.state.room) && this.pollTimer) this.stopPolling();
+    } else if ((!this.visible || this.state.connection === "signed-out" || this.state.connection === "plugin-missing") && this.pollTimer) this.stopPolling();
   }
 
   private stopPolling(): void {

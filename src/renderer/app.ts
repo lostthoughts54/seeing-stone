@@ -168,12 +168,14 @@ const refreshWatchPartiesButton = byId<HTMLButtonElement>("refreshWatchPartiesBu
 const watchPartyStatus = byId<HTMLElement>("watchPartyStatus");
 const joinedWatchParty = byId<HTMLElement>("joinedWatchParty");
 const watchPartyList = byId<HTMLElement>("watchPartyList");
+const youtubeRoomNameInput = byId<HTMLInputElement>("youtubeRoomNameInput");
 const youtubeCreateUrlInput = byId<HTMLInputElement>("youtubeCreateUrlInput");
 const youtubeCreateButton = byId<HTMLButtonElement>("youtubeCreateButton");
-const youtubeInviteInput = byId<HTMLInputElement>("youtubeInviteInput");
-const youtubeJoinButton = byId<HTMLButtonElement>("youtubeJoinButton");
+const youtubeRefreshButton = byId<HTMLButtonElement>("youtubeRefreshButton");
 const youtubeRoomStatus = byId<HTMLElement>("youtubeRoomStatus");
+const youtubeRoomList = byId<HTMLElement>("youtubeRoomList");
 const youtubeRoomPanel = byId<HTMLElement>("youtubeRoomPanel");
+const youtubeJoinedName = byId<HTMLElement>("youtubeJoinedName");
 const youtubeInviteToken = byId<HTMLInputElement>("youtubeInviteToken");
 const youtubeCopyInviteButton = byId<HTMLButtonElement>("youtubeCopyInviteButton");
 const youtubeLeaveButton = byId<HTMLButtonElement>("youtubeLeaveButton");
@@ -1130,14 +1132,40 @@ function renderYouTubeRoom(): void {
   const value = state.youtubeRooms;
   const room = value?.room ?? null;
   youtubeCreateButton.disabled = value?.connection === "checking";
-  youtubeJoinButton.disabled = value?.connection === "checking";
+  youtubeRefreshButton.disabled = value?.connection === "checking";
   youtubeRoomPanel.classList.toggle("is-hidden", !room);
+
+  const roomCards: HTMLElement[] = (value?.openRooms ?? []).map((openRoom) => {
+    const card = document.createElement("article");
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    const details = document.createElement("small");
+    const join = document.createElement("button");
+    const joined = room?.inviteToken === openRoom.roomId;
+    card.className = `youtube-room-card${joined ? " is-joined" : ""}`;
+    name.textContent = openRoom.name;
+    details.textContent = `${openRoom.connectedMemberCount} connected · ${openRoom.memberCount} member${openRoom.memberCount === 1 ? "" : "s"}`;
+    copy.append(name, details);
+    join.type = "button";
+    join.textContent = joined ? "Joined" : "Join";
+    join.disabled = Boolean(room) || value?.connection === "checking";
+    join.addEventListener("click", () => { void joinYouTubeRoom(openRoom.roomId, join); });
+    card.append(copy, join);
+    return card;
+  });
+  if (roomCards.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "youtube-room-list-empty";
+    empty.textContent = "No open YouTube rooms yet.";
+    roomCards.push(empty);
+  }
+  youtubeRoomList.replaceChildren(...roomCards);
 
   if (!value || value.connection === "checking") youtubeRoomStatus.textContent = "Checking the YouTube Rooms plugin on this Jellyfin server…";
   else if (value.connection === "plugin-missing") youtubeRoomStatus.textContent = value.error?.message || "Install the YouTube Rooms plugin on this Jellyfin server.";
   else if (value.connection === "reconnecting") youtubeRoomStatus.textContent = "Reconnecting through Jellyfin… playback will catch up automatically.";
-  else if (room) youtubeRoomStatus.textContent = "Private room connected through your Jellyfin server.";
-  else youtubeRoomStatus.textContent = "Create a temporary private room or paste an invite from the other viewer.";
+  else if (room) youtubeRoomStatus.textContent = `Connected to ${room.name} through your Jellyfin server.`;
+  else youtubeRoomStatus.textContent = "Create a room or join any open room on this Jellyfin server.";
 
   if (!room) {
     if (youtubeFrameVideoId) resetYouTubeFrame(null);
@@ -1145,6 +1173,7 @@ function renderYouTubeRoom(): void {
   }
 
   youtubeInviteToken.value = room.inviteToken;
+  youtubeJoinedName.textContent = room.name;
   youtubeMembers.replaceChildren(...room.members.map((member) => {
     const entry = document.createElement("span");
     entry.className = `youtube-member${member.connected ? "" : " is-away"}`;
@@ -1196,28 +1225,29 @@ function reconcileYouTubePlayer(): void {
 }
 
 async function createYouTubeRoom(): Promise<void> {
+  const name = youtubeRoomNameInput.value.trim();
   const youtubeUrl = youtubeCreateUrlInput.value.trim();
+  if (!name) { showToast("Enter a room name first."); youtubeRoomNameInput.focus(); return; }
   if (!youtubeUrl) { showToast("Paste a YouTube link first."); youtubeCreateUrlInput.focus(); return; }
   youtubeCreateButton.disabled = true;
   try {
-    state.youtubeRooms = await window.jellyfin.youtubeRooms.create({ youtubeUrl });
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.create({ name, youtubeUrl });
+    youtubeRoomNameInput.value = "";
     youtubeCreateUrlInput.value = "";
     renderYouTubeRoom();
-    showToast("Private YouTube room created. Share the invite token with Kayla.");
+    showToast(`${state.youtubeRooms.room?.name || "YouTube room"} created.`);
   } catch (error) { showToast(errorMessage(error, "The YouTube room could not be created.")); }
   finally { youtubeCreateButton.disabled = false; }
 }
 
-async function joinYouTubeRoom(): Promise<void> {
-  const inviteToken = youtubeInviteInput.value.trim();
-  youtubeJoinButton.disabled = true;
+async function joinYouTubeRoom(roomId: string, button?: HTMLButtonElement): Promise<void> {
+  if (button) button.disabled = true;
   try {
-    state.youtubeRooms = await window.jellyfin.youtubeRooms.join({ inviteToken });
-    youtubeInviteInput.value = "";
+    state.youtubeRooms = await window.jellyfin.youtubeRooms.join({ roomId });
     renderYouTubeRoom();
-    showToast("Joined the private YouTube room.");
+    showToast(`Joined ${state.youtubeRooms.room?.name || "the YouTube room"}.`);
   } catch (error) { showToast(errorMessage(error, "That YouTube room could not be joined.")); }
-  finally { youtubeJoinButton.disabled = false; }
+  finally { if (button) button.disabled = false; }
 }
 
 async function refreshYouTubeRoom(): Promise<void> {
@@ -6447,9 +6477,12 @@ function resetSignedInState(): void {
   toast.classList.add("is-hidden");
   downloadsList.replaceChildren();
   watchPartyList.replaceChildren();
+  youtubeRoomList.replaceChildren();
   youtubeMembers.replaceChildren();
   youtubeRoomPanel.classList.add("is-hidden");
   youtubeRoomStatus.textContent = "";
+  youtubeRoomNameInput.value = "";
+  youtubeCreateUrlInput.value = "";
   joinedWatchParty.replaceChildren();
   joinedWatchParty.classList.add("is-hidden");
   watchPartyStatus.textContent = "";
@@ -6605,7 +6638,7 @@ mobileLiveTvButton.addEventListener("click", () => { void openLiveTv(); });
 mobileWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
 
 youtubeCreateButton.addEventListener("click", () => { void createYouTubeRoom(); });
-youtubeJoinButton.addEventListener("click", () => { void joinYouTubeRoom(); });
+youtubeRefreshButton.addEventListener("click", () => { void refreshYouTubeRoom(); });
 youtubeLeaveButton.addEventListener("click", () => {
   youtubeLeaveButton.disabled = true;
   void window.jellyfin.youtubeRooms.leave().then((value) => {
@@ -6620,7 +6653,7 @@ youtubeCopyInviteButton.addEventListener("click", () => {
   youtubeInviteToken.focus();
   youtubeInviteToken.select();
   const copied = document.execCommand("copy");
-  showToast(copied ? "Invite token copied." : "The invite token is selected—press Ctrl+C to copy it.");
+  showToast(copied ? "Room ID copied." : "The room ID is selected—press Ctrl+C to copy it.");
 });
 youtubeVideoForm.addEventListener("submit", (event) => {
   event.preventDefault();

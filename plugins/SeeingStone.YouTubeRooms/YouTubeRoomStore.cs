@@ -19,8 +19,18 @@ public sealed record RoomTimelineDto(
     [property: JsonPropertyName("version")] long Version,
     [property: JsonPropertyName("changedBy")] string? ChangedBy);
 
+public sealed record YouTubeRoomSummaryDto(
+    [property: JsonPropertyName("roomId")] string RoomId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("videoId")] string? VideoId,
+    [property: JsonPropertyName("memberCount")] int MemberCount,
+    [property: JsonPropertyName("connectedMemberCount")] int ConnectedMemberCount,
+    [property: JsonPropertyName("createdAtUnixMs")] long CreatedAtUnixMs,
+    [property: JsonPropertyName("expiresAtUnixMs")] long ExpiresAtUnixMs);
+
 public sealed record YouTubeRoomDto(
     [property: JsonPropertyName("inviteToken")] string InviteToken,
+    [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("serverNowUnixMs")] long ServerNowUnixMs,
     [property: JsonPropertyName("createdAtUnixMs")] long CreatedAtUnixMs,
     [property: JsonPropertyName("expiresAtUnixMs")] long ExpiresAtUnixMs,
@@ -35,7 +45,7 @@ public sealed class RoomAccessException : Exception
 
 public sealed class YouTubeRoomStore
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
     public static readonly TimeSpan RoomLifetime = TimeSpan.FromHours(6);
     private static readonly TimeSpan ConnectedWindow = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MemberRetention = TimeSpan.FromMinutes(1);
@@ -44,7 +54,7 @@ public sealed class YouTubeRoomStore
     private readonly object _gate = new();
     private readonly Dictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
-    public YouTubeRoomDto Create(Guid userId, string displayName, Guid clientId, string videoId)
+    public YouTubeRoomDto Create(Guid userId, string displayName, Guid clientId, string? name, string videoId)
     {
         ValidateVideoId(videoId);
         lock (_gate)
@@ -53,10 +63,32 @@ public sealed class YouTubeRoomStore
             var now = DateTimeOffset.UtcNow;
             string token;
             do { token = CreateToken(); } while (_rooms.ContainsKey(token));
-            var room = new Room(token, now, now.Add(RoomLifetime), videoId);
+            var room = new Room(token, NormalizeRoomName(name, displayName), now, now.Add(RoomLifetime), videoId);
             room.UpsertMember(userId, displayName, clientId, "paused", now);
             _rooms.Add(token, room);
             return Snapshot(room, now);
+        }
+    }
+
+    public IReadOnlyList<YouTubeRoomSummaryDto> ListOpenRooms()
+    {
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            CleanupExpired(now);
+            foreach (var room in _rooms.Values) PruneMembers(room, now);
+            foreach (var token in _rooms.Where(entry => entry.Value.Members.Count == 0).Select(entry => entry.Key).ToArray()) _rooms.Remove(token);
+            return _rooms.Values
+                .OrderBy(room => room.CreatedAt)
+                .Select(room => new YouTubeRoomSummaryDto(
+                    room.Token,
+                    room.Name,
+                    room.VideoId,
+                    room.Members.Count,
+                    room.Members.Values.Count(member => now - member.LastSeen <= ConnectedWindow),
+                    room.CreatedAt.ToUnixTimeMilliseconds(),
+                    room.ExpiresAt.ToUnixTimeMilliseconds()))
+                .ToArray();
         }
     }
 
@@ -151,13 +183,14 @@ public sealed class YouTubeRoomStore
 
     private static YouTubeRoomDto Snapshot(Room room, DateTimeOffset now)
     {
-        foreach (var key in room.Members.Where(entry => now - entry.Value.LastSeen > MemberRetention).Select(entry => entry.Key).ToArray()) room.Members.Remove(key);
+        PruneMembers(room, now);
         var members = room.Members.Values
             .OrderBy(member => member.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(member => new RoomMemberDto(member.MemberId, member.DisplayName, member.Status, now - member.LastSeen <= ConnectedWindow, member.LastSeen.ToUnixTimeMilliseconds()))
             .ToArray();
         return new YouTubeRoomDto(
             room.Token,
+            room.Name,
             now.ToUnixTimeMilliseconds(),
             room.CreatedAt.ToUnixTimeMilliseconds(),
             room.ExpiresAt.ToUnixTimeMilliseconds(),
@@ -175,16 +208,29 @@ public sealed class YouTubeRoomStore
         if (!VideoIdPattern.IsMatch(videoId)) throw new RoomAccessException(400, "Invalid YouTube video id.");
     }
 
+    private static void PruneMembers(Room room, DateTimeOffset now)
+    {
+        foreach (var key in room.Members.Where(entry => now - entry.Value.LastSeen > MemberRetention).Select(entry => entry.Key).ToArray()) room.Members.Remove(key);
+    }
+
+    private static string NormalizeRoomName(string? name, string displayName)
+    {
+        var value = string.IsNullOrWhiteSpace(name) ? $"{displayName}'s YouTube room" : name.Trim();
+        if (value.Length > 80 || value.Any(char.IsControl)) throw new RoomAccessException(400, "Room name must be 80 characters or fewer.");
+        return value;
+    }
+
     private static string MemberKey(Guid userId, Guid clientId) => $"{userId:N}:{clientId:N}";
     private static string CreateToken() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private sealed class Room
     {
-        public Room(string token, DateTimeOffset createdAt, DateTimeOffset expiresAt, string videoId)
+        public Room(string token, string name, DateTimeOffset createdAt, DateTimeOffset expiresAt, string videoId)
         {
-            Token = token; CreatedAt = createdAt; ExpiresAt = expiresAt; VideoId = videoId; AnchoredAt = createdAt;
+            Token = token; Name = name; CreatedAt = createdAt; ExpiresAt = expiresAt; VideoId = videoId; AnchoredAt = createdAt;
         }
         public string Token { get; }
+        public string Name { get; }
         public DateTimeOffset CreatedAt { get; }
         public DateTimeOffset ExpiresAt { get; }
         public string? VideoId { get; set; }

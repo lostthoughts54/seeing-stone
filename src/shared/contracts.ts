@@ -762,6 +762,7 @@ export interface YouTubeRoomTimeline {
 
 export interface YouTubeRoom {
   inviteToken: string;
+  name: string;
   serverNowUnixMs: number;
   createdAtUnixMs: number;
   expiresAtUnixMs: number;
@@ -769,15 +770,26 @@ export interface YouTubeRoom {
   members: YouTubeRoomMember[];
 }
 
+export interface YouTubeRoomSummary {
+  roomId: string;
+  name: string;
+  videoId: string | null;
+  memberCount: number;
+  connectedMemberCount: number;
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+}
+
 export interface YouTubeRoomViewState {
   connection: YouTubeRoomConnection;
   room: YouTubeRoom | null;
+  openRooms: YouTubeRoomSummary[];
   clientId: string;
   error: { code: string; message: string } | null;
 }
 
-export interface YouTubeRoomCreateInput { youtubeUrl: string }
-export interface YouTubeRoomJoinInput { inviteToken: string }
+export interface YouTubeRoomCreateInput { name: string; youtubeUrl: string }
+export interface YouTubeRoomJoinInput { roomId: string }
 export interface YouTubeRoomVideoInput { youtubeUrl: string }
 export interface YouTubeRoomActionInput {
   action: "play" | "pause" | "seek";

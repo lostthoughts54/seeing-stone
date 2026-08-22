@@ -301,21 +301,23 @@
           <section id="watchPartiesView" class="view watch-parties-view is-hidden">
             <section class="youtube-together" aria-labelledby="youtubeTogetherHeading">
               <header class="page-heading youtube-together-heading">
-                <p class="eyebrow">YouTube · private room</p>
+                <p class="eyebrow">YouTube · Jellyfin rooms</p>
                 <h1 id="youtubeTogetherHeading">Watch YouTube Together</h1>
                 <p>Use your Jellyfin server to keep the content timeline together. YouTube plays in its official embedded player; ads remain untouched and may finish at different times.</p>
                 <div class="youtube-room-entry">
+                  <label for="youtubeRoomNameInput">New room name</label>
+                  <input id="youtubeRoomNameInput" type="text" maxlength="80" placeholder="YouTube night" autocomplete="off" />
                   <label for="youtubeCreateUrlInput">Start with a YouTube link</label>
-                  <div><input id="youtubeCreateUrlInput" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" /><button id="youtubeCreateButton" class="primary" type="button">Create private room</button></div>
-                  <label for="youtubeInviteInput">Or join with an invite token</label>
-                  <div><input id="youtubeInviteInput" type="text" maxlength="43" placeholder="Paste the 43-character invite token" autocomplete="off" spellcheck="false" /><button id="youtubeJoinButton" type="button">Join room</button></div>
+                  <div><input id="youtubeCreateUrlInput" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" /><button id="youtubeCreateButton" class="primary" type="button">Create room</button><button id="youtubeRefreshButton" type="button">Refresh</button></div>
                 </div>
               </header>
               <p id="youtubeRoomStatus" class="youtube-room-status" role="status" aria-live="polite"></p>
+              <div id="youtubeRoomList" class="youtube-room-list" aria-live="polite"></div>
               <section id="youtubeRoomPanel" class="youtube-room-panel is-hidden" aria-live="polite">
+                <h2 id="youtubeJoinedName" class="youtube-joined-name"></h2>
                 <div class="youtube-room-toolbar">
-                  <label>Private invite token<input id="youtubeInviteToken" type="text" readonly /></label>
-                  <button id="youtubeCopyInviteButton" type="button">Copy invite</button>
+                  <label>Room ID<input id="youtubeInviteToken" type="text" readonly /></label>
+                  <button id="youtubeCopyInviteButton" type="button">Copy room ID</button>
                   <button id="youtubeLeaveButton" type="button">Leave room</button>
                 </div>
                 <div id="youtubeMembers" class="youtube-members"></div>

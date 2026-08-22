@@ -621,9 +621,12 @@ export function registerIpcHandlers(
     if (!youtubeRooms) throw new AppError("YOUTUBE_ROOMS_UNAVAILABLE", "YouTube Rooms are unavailable in this build.", 503);
     return youtubeRooms;
   };
-  register(IPC.youtubeRoomsGetState, () => requireYouTubeRooms().getState());
-  register(IPC.youtubeRoomsCreate, (input) => requireYouTubeRooms().create(youtubeRoomCreateSchema.strict().parse(input).youtubeUrl));
-  register(IPC.youtubeRoomsJoin, (input) => requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).inviteToken));
+  register(IPC.youtubeRoomsGetState, () => requireYouTubeRooms().refresh());
+  register(IPC.youtubeRoomsCreate, (input) => {
+    const value = youtubeRoomCreateSchema.strict().parse(input);
+    return requireYouTubeRooms().create(value.name, value.youtubeUrl);
+  });
+  register(IPC.youtubeRoomsJoin, (input) => requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).roomId));
   register(IPC.youtubeRoomsLeave, () => requireYouTubeRooms().leave());
   register(IPC.youtubeRoomsSetVideo, (input) => requireYouTubeRooms().setVideo(youtubeRoomVideoSchema.strict().parse(input).youtubeUrl));
   register(IPC.youtubeRoomsAction, (input) => requireYouTubeRooms().action(youtubeRoomActionSchema.strict().parse(input)));

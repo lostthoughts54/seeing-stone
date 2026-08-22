@@ -2,8 +2,8 @@
 
 This Jellyfin 10.11.11 plugin is the coordination backend for Seeing Stone's
 YouTube **Watch Together** MVP. It is not a relay and has no account system.
-Every endpoint requires a normal Jellyfin user session, and a room is reachable
-only with its random 256-bit invite token.
+Every endpoint requires a normal Jellyfin user session. Named active rooms are
+listed to authenticated users of the same server and can be joined directly.
 
 Rooms are held in server memory and expire six hours after creation. Restarting
 Jellyfin intentionally removes them. The server assigns every play, pause, seek,
@@ -45,9 +45,9 @@ uses the same Jellyfin base URL and authentication that Seeing Stone already use
 
 ## Security and scope
 
-- Invite tokens contain 256 random bits and are never listed by the server.
-- Possession of a token is not sufficient: the request must also authenticate as
-  a Jellyfin user.
+- Room ids contain 256 random bits and appear in the authenticated open-room list.
+- A request must authenticate as a Jellyfin user; room ids do not grant anonymous
+  access.
 - A client must join before it can publish presence or playback actions.
 - Request bodies contain only a YouTube video id, client instance id, playback
   state, and position. Jellyfin credentials remain in Seeing Stone's main process.
