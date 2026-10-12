@@ -119,7 +119,7 @@ async function atomicWrite(directory: string, name: string, bytes: string | Uint
   } finally { await rm(temporary, { force: true }); }
 }
 
-async function subtitleBytes(response: Response, signal: AbortSignal): Promise<Buffer> {
+export async function subtitleBytes(response: Response, signal: AbortSignal): Promise<Buffer> {
   if (!response.ok || !response.body) {
     await response.body?.cancel();
     throw new Error("SUBTITLE_RESPONSE_INVALID");

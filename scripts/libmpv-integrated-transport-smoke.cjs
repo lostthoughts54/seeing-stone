@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require("node:fs");
 const { join, relative, resolve } = require("node:path");
 const { app, BrowserWindow, ipcMain, screen } = require("electron");
+const { createServer } = require("node:http");
 app.commandLine.appendSwitch("disable-error-dialogs");
 
 const root = resolve(__dirname, "..");
@@ -22,12 +23,16 @@ const resourcesRoot = resourcesArgument
   : null;
 const cpuReadback = process.argv.includes("--cpu-readback");
 const stress = process.argv.includes("--stress");
+const startPaused = process.argv.includes("--start-paused");
+const httpSource = process.argv.includes("--http-source");
+const httpSubtitle = process.argv.includes("--http-subtitle");
 const diagnosticLogPath = resolve(runDirectory, cpuReadback
   ? "libmpv-cpu-readback-smoke.ndjson"
   : "libmpv-shared-texture-smoke.ndjson");
 const codeRoot = resourcesRoot ? resolve(resourcesRoot, "app.asar", "dist") : resolve(root, "dist");
 const { LibMpvHost } = require(resolve(codeRoot, "main", "services", "libMpvHost.js"));
 const { ElectronLibMpvBridge } = require(resolve(codeRoot, "main", "services", "libMpvElectronBridge.js"));
+const { PlaybackProxy } = require(resolve(codeRoot, "main", "services", "playbackProxy.js"));
 const manifest = require(resourcesRoot
   ? resolve(resourcesRoot, "libmpv", "runtime-manifest.json")
   : resolve(root, "libmpv-runtime.json"));
@@ -40,6 +45,8 @@ let host = null;
 let bridge = null;
 let discoveryRequests = 0;
 let testDisplay = null;
+let fixtureServer = null;
+let subtitleProxy = null;
 
 function writeResult(result) {
   const report = {
@@ -70,8 +77,12 @@ async function shutdown() {
   await host?.destroy().catch(() => undefined);
   host = null;
   bridge = null;
+  await subtitleProxy?.close(); subtitleProxy = null;
   if (window && !window.isDestroyed()) window.destroy();
   window = null;
+  fixtureServer?.closeAllConnections();
+  if (fixtureServer) await new Promise(resolveClose => fixtureServer.close(resolveClose));
+  fixtureServer = null;
 }
 
 async function revealFixtureViewport() {
@@ -148,7 +159,39 @@ app.whenReady().then(async () => {
   await waitFor(() => discoveryRequests >= 1, 3000, "isolated renderer initialization");
   await revealFixtureViewport();
   bridge.updateViewport({ width: 960, height: 540, visible: true, revision: 1, deviceScaleFactor: window.webContents.getZoomFactor() });
-  const session = await host.open({ location: resolve(root, "assets", "fixtures", "libmpv-h264-gate.mp4") }, 0);
+  let location = resolve(root, "assets", "fixtures", "libmpv-h264-gate.mp4");
+  let subtitleLocation = null;
+  if (httpSource || httpSubtitle) {
+    const bytes = readFileSync(location);
+    fixtureServer = createServer((request, response) => {
+      if (request.url === "/subtitle.srt") {
+        response.writeHead(200, { "Content-Type": "text/plain" });
+        response.end("1\n00:00:00,000 --> 00:00:03,000\nWatch-party subtitle test\n");
+        return;
+      }
+      const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+      const start = range ? Number(range[1]) : 0;
+      const end = range?.[2] ? Math.min(bytes.length - 1, Number(range[2])) : bytes.length - 1;
+      response.writeHead(range ? 206 : 200, { "Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Content-Length": end - start + 1,
+        ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}) });
+      response.end(request.method === "HEAD" ? undefined : bytes.subarray(start, end + 1));
+    });
+    await new Promise(resolveListen => fixtureServer.listen(0, "127.0.0.1", resolveListen));
+    const origin = `http://127.0.0.1:${fixtureServer.address().port}`;
+    if (httpSource) location = `${origin}/fixture.mp4`;
+    subtitleLocation = `${origin}/subtitle.srt`;
+  }
+  const session = await host.open({ location, initialPaused: startPaused }, 0);
+  if (startPaused) assert.equal(await session.query("pause"), true, "Watch-party startup must remain paused until ready.");
+  if (httpSubtitle) {
+    subtitleProxy = new PlaybackProxy({ fetchExternalSubtitle: async () => fetch(subtitleLocation) });
+    const targets = await subtitleProxy.open({ playbackId: "fixture", source: "local", mediaUrl: location,
+      externalSubtitles: [{ streamIndex: 4, format: "srt", title: "Test", language: "en", isDefault: true, isForced: false }] }, { materializeSubtitles: true });
+    assert.ok(!targets.subtitles[0].url.startsWith("http"), "Native subtitles must load from prepared files.");
+    await session.command({ kind: "add-subtitle", location: targets.subtitles[0].url, select: true, title: "Test", language: "en" });
+    const subtitleTracks = await session.query("track-list");
+    assert.ok(subtitleTracks.some(track => track.type === "sub" && track.external), "The native player did not load the prepared subtitle.");
+  }
   if (stress) bridge.producer.command(["set", "loop-file", "inf"]);
   const tracks = await session.query("track-list");
   assert.ok(Array.isArray(tracks) && tracks.some((track) => track?.type === "video"), "Production bridge did not expose a video track.");
@@ -249,6 +292,9 @@ app.whenReady().then(async () => {
     presenterLayers,
     trackCount: tracks.length,
     playbackRates: [1.04, 0.94, 1],
+    startPaused,
+    httpSource,
+    httpSubtitle,
     exactSeekSeconds: 0.25,
     rendererReload: true,
     resizeTested: true,

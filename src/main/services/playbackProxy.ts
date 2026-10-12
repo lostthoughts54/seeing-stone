@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { subtitleBytes } from "./downloadSubtitles";
+import { AppError } from "./errors";
 import type { ExternalSubtitleTrack } from "../../shared/contracts";
 import type { PlaybackSessionService, ResolvedPlaybackSource } from "./playbackSession";
 
@@ -25,18 +30,30 @@ export class PlaybackProxy {
   private mediaCapabilityPath: string | null = null;
   private readonly subtitleCapabilities = new Map<string, ExternalSubtitleTrack>();
   private source: ResolvedPlaybackSource | null = null;
+  private subtitleAbort: AbortController | null = null;
+  private subtitleFiles: Promise<{ directory: string; targets: PlaybackTargets["subtitles"] }> | null = null;
 
   constructor(private readonly playback: PlaybackSessionService) {}
 
-  async open(source: ResolvedPlaybackSource): Promise<PlaybackTargets> {
+  async open(source: ResolvedPlaybackSource, options: { materializeSubtitles?: boolean } = {}): Promise<PlaybackTargets> {
     await this.close();
     this.source = source;
     const externalSubtitles = source.externalSubtitles ?? [];
+    let staged: PlaybackTargets["subtitles"] | null = null;
+    if (options.materializeSubtitles && externalSubtitles.length) {
+      // libmpv's synchronous sub-add waits for the file to load. A loopback
+      // request here would wait on this same blocked main process forever.
+      this.subtitleAbort = new AbortController();
+      this.subtitleFiles = this.materializeSubtitles(source, this.subtitleAbort.signal);
+      staged = (await this.subtitleFiles).targets;
+      if (this.source !== source) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.", 409);
+    }
     if (source.source === "local" && !source.progressiveLease && externalSubtitles.length === 0) {
       return { media: source.mediaUrl, subtitles: [] };
     }
     this.mediaCapabilityPath = source.source === "server" || source.progressiveLease ? `/${randomUUID()}` : null;
     for (const subtitle of externalSubtitles) {
+      if (staged) break;
       this.subtitleCapabilities.set(`/${randomUUID()}.${subtitle.format}`, subtitle);
     }
     this.server = createServer((request, response) => { void this.handle(request, response); });
@@ -50,7 +67,7 @@ export class PlaybackProxy {
     const origin = `http://127.0.0.1:${address.port}`;
     return {
       media: this.mediaCapabilityPath ? `${origin}${this.mediaCapabilityPath}` : source.mediaUrl,
-      subtitles: [...this.subtitleCapabilities].map(([path, subtitle]) => ({
+      subtitles: staged ?? [...this.subtitleCapabilities].map(([path, subtitle]) => ({
         url: `${origin}${path}`,
         title: subtitle.title,
         language: subtitle.language,
@@ -66,9 +83,41 @@ export class PlaybackProxy {
     this.mediaCapabilityPath = null;
     this.subtitleCapabilities.clear();
     this.source = null;
-    if (!server) return;
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    this.subtitleAbort?.abort(); this.subtitleAbort = null;
+    const subtitleFiles = this.subtitleFiles; this.subtitleFiles = null;
+    if (server) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    const files = await subtitleFiles?.catch(() => null);
+    if (files) await rm(files.directory, { recursive: true, force: true });
+  }
+
+  private async materializeSubtitles(source: ResolvedPlaybackSource, signal: AbortSignal): Promise<{ directory: string; targets: PlaybackTargets["subtitles"] }> {
+    const directory = await mkdtemp(join(tmpdir(), "seeing-stone-subtitles-"));
+    const targets: PlaybackTargets["subtitles"] = [];
+    try {
+      for (const subtitle of source.externalSubtitles ?? []) {
+        signal.throwIfAborted();
+        if (!["srt", "ass", "ssa", "vtt"].includes(subtitle.format)) continue;
+        try {
+          const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+          const response = await this.playback.fetchExternalSubtitle(source.playbackId, subtitle, requestSignal);
+          const bytes = await subtitleBytes(response, requestSignal);
+          signal.throwIfAborted();
+          const path = join(directory, `${randomUUID()}.${subtitle.format}`);
+          await writeFile(path, bytes, { flag: "wx", signal });
+          targets.push({ url: path, title: subtitle.title, language: subtitle.language, isDefault: subtitle.isDefault, streamIndex: subtitle.streamIndex });
+        } catch {
+          // An unavailable optional subtitle must not prevent video playback.
+          signal.throwIfAborted();
+        }
+      }
+      return { directory, targets };
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   private async handle(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {

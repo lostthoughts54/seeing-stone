@@ -817,7 +817,7 @@ export class MpvPlayerService implements PlayerController {
     if (source.source === "local" && !source.progressiveLease && (source.externalSubtitles?.length ?? 0) === 0) {
       return { media: source.mediaUrl, subtitles: [] };
     }
-    return this.proxy.open(source);
+    return this.proxy.open(source, { materializeSubtitles: Boolean(this.libMpvHost) });
   }
 
   private spawnProcess(executable: string, args: string[]): ChildProcess {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PlaybackProxy } from "../src/main/services/playbackProxy";
 import type { ResolvedPlaybackSource } from "../src/main/services/playbackSession";
+import { readFile, stat } from "node:fs/promises";
 
 const source: ResolvedPlaybackSource = {
   playbackId: "11111111-1111-4111-8111-111111111111",
@@ -16,6 +17,48 @@ const source: ResolvedPlaybackSource = {
 };
 
 describe("PlaybackProxy", () => {
+  it("loads native subtitles before playback and removes the temporary files on close", async () => {
+    const subtitle = { streamIndex: 4, format: "srt" as const, title: "English", language: "eng", isDefault: true, isForced: false };
+    const fetchExternalSubtitle = vi.fn(async () => new Response("1\n00:00:00,000 --> 00:00:03,000\nHello\n"));
+    const proxy = new PlaybackProxy({ fetchExternalSubtitle } as never);
+    const targets = await proxy.open({ ...source, source: "local", mediaUrl: "D:\\movie.mp4", externalSubtitles: [subtitle] }, { materializeSubtitles: true });
+    const file = targets.subtitles[0]!.url;
+    try {
+      expect(file).not.toMatch(/^https?:/);
+      expect(await readFile(file, "utf8")).toContain("Hello");
+      expect(targets.subtitles[0]).toMatchObject({ streamIndex: 4, isDefault: true, language: "eng" });
+      expect(targets.media).toBe("D:\\movie.mp4");
+      expect(fetchExternalSubtitle).toHaveBeenCalledOnce();
+    } finally { await proxy.close(); }
+    await expect(stat(file)).rejects.toThrow();
+  });
+
+  it("keeps video available when native subtitle fetching fails or exceeds the size limit", async () => {
+    const subtitle = { streamIndex: 4, format: "srt" as const, title: null, language: null, isDefault: false, isForced: false };
+    const fetchExternalSubtitle = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array(16 * 1024 * 1024 + 1)));
+    const proxy = new PlaybackProxy({ fetchExternalSubtitle } as never);
+    try {
+      const targets = await proxy.open({ ...source, source: "local", mediaUrl: "D:\\movie.mp4", externalSubtitles: [subtitle, { ...subtitle, streamIndex: 5 }] }, { materializeSubtitles: true });
+      expect(targets.subtitles).toEqual([]);
+      expect(targets.media).toBe("D:\\movie.mp4");
+    } finally { await proxy.close(); }
+  });
+
+  it("cancels subtitle preparation when playback is closed", async () => {
+    let fetching!: () => void;
+    const started = new Promise<void>(resolve => { fetching = resolve; });
+    const proxy = new PlaybackProxy({ fetchExternalSubtitle: async (_id: string, _track: unknown, signal: AbortSignal) => {
+      fetching();
+      return new Response(new ReadableStream({ start(controller) { signal.addEventListener("abort", () => controller.error(new Error("cancelled")), { once: true }); } }));
+    } } as never);
+    const opening = proxy.open({ ...source, externalSubtitles: [{ streamIndex: 4, format: "srt", title: null, language: null, isDefault: false, isForced: false }] }, { materializeSubtitles: true });
+    const rejected = expect(opening).rejects.toThrow();
+    await started;
+    await proxy.close();
+    await rejected;
+  });
+
   it("provides one loopback-only capability and forwards range requests without identity", async () => {
     const handle = vi.fn(async (request: Request) => new Response(Uint8Array.from([1, 2, 3]), {
       status: 206,
