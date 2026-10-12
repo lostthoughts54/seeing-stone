@@ -7,7 +7,7 @@
       "version": "0.7.3",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": "936c11371000be5db519840dade815836f3f8061",
+      "sourceRevision": "f274eb7be60bd75df4d5e32aed6d0ff847446b8b",
       "redistributionStatus": "source-only",
       "artifacts": [
         {
@@ -214,7 +214,7 @@
       },
       "provenance": {
         "immutableSourceUrl": "https://github.com/lostthoughts54/seeing-stone/archive/72a3f07a027e8ecc80a3862a27cb1166db237c80.zip",
-        "sourceArchive": "Seeing-Stone-0.7.3-source-936c113.zip",
+        "sourceArchive": "Seeing-Stone-0.7.3-source-f274eb7.zip",
         "sourceArchiveSha512": "sha512-1f799c42e2a9a1cbde6286801399b89d363071be252708820ca40083d7b1d3138f294dc6afcd88d6abe6fe0d397eb78551e3ce2fded29d14a9e16021fdcee359",
         "binaryHashes": [
           "seeing_stone_libmpv_bridge.node sha256:f41e6acfe24a9f732a5a16280ad406c06f5d909e46beba7805a462abe1b59564"
@@ -242,7 +242,7 @@
           "scripts/build-libmpv-native-bridge.ps1",
           "scripts/stage-libmpv-runtime.ps1"
         ],
-        "correspondingSource": "source-archives/Seeing-Stone-0.7.3-source-936c113.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.3-corresponding-source.zip",
+        "correspondingSource": "source-archives/Seeing-Stone-0.7.3-source-f274eb7.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.3-corresponding-source.zip",
         "applicationRelease": "0.7.3"
       }
     },

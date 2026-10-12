@@ -12,7 +12,7 @@
       "version": "0.7.3",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": "936c11371000be5db519840dade815836f3f8061",
+      "sourceRevision": "f274eb7be60bd75df4d5e32aed6d0ff847446b8b",
       "redistributionStatus": "source-only",
       "artifacts": [
         {
@@ -293,10 +293,10 @@
       "owner": "Seeing Stone 0.7.3",
       "name": "Seeing Stone application and libmpv bridge",
       "version": "0.7.3",
-      "revision": "936c11371000be5db519840dade815836f3f8061",
+      "revision": "f274eb7be60bd75df4d5e32aed6d0ff847446b8b",
       "license": "GPL-2.0-or-later",
       "obligation": "source-required",
-      "sourceArchive": "Seeing-Stone-0.7.3-source-936c113.zip",
+      "sourceArchive": "Seeing-Stone-0.7.3-source-f274eb7.zip",
       "noticeFiles": [
         "LICENSE"
       ],

@@ -55,10 +55,10 @@
   ],
   "sourceArchives": [
     {
-      "filename": "Seeing-Stone-0.7.3-source-936c113.zip",
-      "url": "https://github.com/lostthoughts54/seeing-stone/archive/936c11371000be5db519840dade815836f3f8061.zip",
-      "localPath": "artifacts/Seeing-Stone-0.7.3-source-936c113.zip",
-      "sha256": "2730904dd9db9a436b13f0f05e03c8dddd4c1315769e39f5cf9723390d79d4bf",
+      "filename": "Seeing-Stone-0.7.3-source-f274eb7.zip",
+      "url": "https://github.com/lostthoughts54/seeing-stone/archive/f274eb7be60bd75df4d5e32aed6d0ff847446b8b.zip",
+      "localPath": "artifacts/Seeing-Stone-0.7.3-source-f274eb7.zip",
+      "sha256": "9f985175fde7374ebc24b5a2b58477a23d0d313b012e91251c86b66aae8ceef3",
       "inclusion": "required-corresponding-source"
     },
     {
@@ -260,10 +260,10 @@
       "owner": "Seeing Stone 0.7.3",
       "name": "Seeing Stone application and libmpv bridge",
       "version": "0.7.3",
-      "revision": "936c11371000be5db519840dade815836f3f8061",
+      "revision": "f274eb7be60bd75df4d5e32aed6d0ff847446b8b",
       "license": "GPL-2.0-or-later",
       "obligation": "source-required",
-      "sourceArchive": "Seeing-Stone-0.7.3-source-936c113.zip",
+      "sourceArchive": "Seeing-Stone-0.7.3-source-f274eb7.zip",
       "noticeFiles": [
         "LICENSE"
       ],

@@ -112,7 +112,9 @@ for (const source of manifest?.sourceArchives ?? []) {
   catch { reject(`source archive is missing: ${source.filename}`); }
 }
 
-const packageRoot = resolve(root, ".runtime/release/win-unpacked");
+const releaseDirectoryName = process.env.SEEING_STONE_RELEASE_OUTPUT || "release";
+if (!/^[A-Za-z0-9._-]+$/.test(releaseDirectoryName) || [".", ".."].includes(releaseDirectoryName)) throw new Error("Release output must be a controlled directory name.");
+const packageRoot = resolve(root, ".runtime", releaseDirectoryName, "win-unpacked");
 try {
   const packaged = new Map();
   for (const path of await walkNative(packageRoot)) packaged.set(relative(packageRoot, path).replaceAll("\\", "/"), await sha256(path));

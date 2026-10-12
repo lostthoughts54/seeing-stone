@@ -3,7 +3,9 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const packageRoot = resolve(root, ".runtime/release/win-unpacked");
+const releaseDirectoryName = process.env.SEEING_STONE_RELEASE_OUTPUT || "release";
+if (!/^[A-Za-z0-9._-]+$/.test(releaseDirectoryName) || [".", ".."].includes(releaseDirectoryName)) throw new Error("Release output must be a controlled directory name.");
+const packageRoot = resolve(root, ".runtime", releaseDirectoryName, "win-unpacked");
 const manifest = JSON.parse(await readFile(resolve(root, "redistribution-compliance.json"), "utf8"));
 const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 const nativePattern = /\.(?:dll|exe|node)$/i;
@@ -53,7 +55,7 @@ if (failures.length) throw new Error(`REDISTRIBUTION_INVENTORY_FAILED\n- ${failu
 const output = {
   schemaVersion: 1,
   applicationVersion: packageJson.version,
-  packageDirectory: ".runtime/release/win-unpacked",
+  packageDirectory: `.runtime/${releaseDirectoryName}/win-unpacked`,
   generatedFrom: "production package plus redistribution-compliance.json",
   artifacts,
 };
