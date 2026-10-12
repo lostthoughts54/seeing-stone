@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "0.7.2",
+  "applicationVersion": "0.7.3",
   "packageDirectory": ".runtime/release/win-unpacked",
   "generatedFrom": "production package plus redistribution-compliance.json",
   "artifacts": [

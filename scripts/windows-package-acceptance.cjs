@@ -27,7 +27,10 @@ const {
 
 const root = resolve(__dirname, "..");
 const runtimeRoot = join(root, ".runtime");
-const releaseRoot = join(runtimeRoot, "release");
+const releaseDirectoryName = process.env.SEEING_STONE_RELEASE_OUTPUT || "release";
+assert.match(releaseDirectoryName, /^[A-Za-z0-9._-]+$/, "Release output must be a controlled directory name.");
+assert.ok(![".", ".."].includes(releaseDirectoryName), "Release output must remain within the runtime directory.");
+const releaseRoot = join(runtimeRoot, releaseDirectoryName);
 const acceptanceRoot = join(runtimeRoot, "package-acceptance");
 const installRoot = join(acceptanceRoot, "install");
 const userDataRoot = join(acceptanceRoot, "user-data");
