@@ -7,7 +7,7 @@
       "version": "0.7.2",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
+      "sourceRevision": "c2bc04372b3e610e6272de315deb256296748745",
       "redistributionStatus": "source-only",
       "artifacts": [
         {
@@ -151,7 +151,7 @@
           "scripts/build-libmpv-native-bridge.ps1"
         ],
         "correspondingSource": "pnpm-lock.yaml plus the immutable source URL",
-        "applicationRelease": "0.7.1"
+        "applicationRelease": "0.7.2"
       }
     },
     {
@@ -195,8 +195,8 @@
           "scripts/build-libmpv-runtime.ps1",
           "scripts/build-libmpv-runtime.sh"
         ],
-        "correspondingSource": "source-archives/mpv-v0.41.0.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
-        "applicationRelease": "0.7.1"
+        "correspondingSource": "source-archives/mpv-v0.41.0.tar.gz inside Seeing-Stone-0.7.2-corresponding-source.zip",
+        "applicationRelease": "0.7.2"
       }
     },
     {
@@ -242,8 +242,8 @@
           "scripts/build-libmpv-native-bridge.ps1",
           "scripts/stage-libmpv-runtime.ps1"
         ],
-        "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-72a3f07.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.1-corresponding-source.zip",
-        "applicationRelease": "0.7.1"
+        "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-72a3f07.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.2-corresponding-source.zip",
+        "applicationRelease": "0.7.2"
       }
     },
     {
@@ -290,8 +290,8 @@
           "pnpm-lock.yaml",
           "scripts/libmpv-render-context-smoke.cjs"
         ],
-        "correspondingSource": "source-archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
-        "applicationRelease": "0.7.1"
+        "correspondingSource": "source-archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz inside Seeing-Stone-0.7.2-corresponding-source.zip",
+        "applicationRelease": "0.7.2"
       }
     },
     {
@@ -333,8 +333,8 @@
           "scripts/build-libmpv-runtime.ps1",
           "scripts/build-libmpv-runtime.sh"
         ],
-        "correspondingSource": "source-archives/ffmpeg-8.1.2.tar.xz inside Seeing-Stone-0.7.1-corresponding-source.zip",
-        "applicationRelease": "0.7.1"
+        "correspondingSource": "source-archives/ffmpeg-8.1.2.tar.xz inside Seeing-Stone-0.7.2-corresponding-source.zip",
+        "applicationRelease": "0.7.2"
       }
     },
     {

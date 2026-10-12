@@ -49,11 +49,6 @@ async function main() {
   assert.equal(process.platform, "win32", "Windows package acceptance must run on Windows.");
   requireFile(installer);
   requireFile(unpackedExecutable);
-  const existingInstallations = queryInstallations();
-  safelyResetAcceptanceRoot();
-  mkdirSync(userDataRoot, { recursive: true });
-  mkdirSync(emptyCwd, { recursive: true });
-
   const artifact = {
     path: installer,
     bytes: statSync(installer).size,
@@ -64,6 +59,20 @@ async function main() {
   assertVersionInfo(unpackedExecutable);
   assertPackagedResources(unpackedRoot);
   await assertHardenedFuses(unpackedExecutable);
+
+  if (process.argv.includes("--verify-only")) {
+    runPackagedMediaProbe(join(unpackedRoot, "resources"));
+    process.stdout.write(`${JSON.stringify({
+      result: "passed", mode: "package-verification-only", version: packageJson.version,
+      architecture: "x64", installer: artifact,
+    }, null, 2)}\n`);
+    return;
+  }
+
+  const existingInstallations = queryInstallations();
+  safelyResetAcceptanceRoot();
+  mkdirSync(userDataRoot, { recursive: true });
+  mkdirSync(emptyCwd, { recursive: true });
 
   if (existingInstallations.length > 0) {
     const firstIdentity = await launchAndVerifyApp(unpackedExecutable, true);
