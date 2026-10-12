@@ -13,10 +13,7 @@ const result: PlaybackStartResult = {
   sourceKind: "direct-play",
 };
 
-function harness(): {
-  service: PlaybackCommandService;
-  player: { loadItem: ReturnType<typeof vi.fn>; setFullscreen: ReturnType<typeof vi.fn>; seek: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
-} {
+function harness() {
   const state: PlaybackState = {
     playbackId: result.playbackId, itemId: item.id, phase: "playing", source: "server", positionTicks: 0, durationTicks: result.durationTicks,
     paused: false, buffering: false, seekable: true, seekableUntilTicks: null, volume: 100, fullscreen: false, audioTracks: [], subtitleTracks: [], error: null,
@@ -27,6 +24,12 @@ function harness(): {
     setFullscreen: vi.fn(async () => ({})),
     getState: vi.fn(() => state),
     seek: vi.fn(async () => state),
+    setPaused: vi.fn(async () => state),
+    stop: vi.fn(async () => state),
+    setVolume: vi.fn(async (_playbackId: string, volume: number) => {
+      state.volume = volume;
+      return { ...state };
+    }),
   };
   const queue = { reset: vi.fn() };
   const service = new PlaybackCommandService(
@@ -38,10 +41,22 @@ function harness(): {
     },
     queue as unknown as PlaybackQueueStore,
   );
-  return { service, player };
+  return { service, player, state };
 }
 
 describe("PlaybackCommandService Companion presentation", () => {
+  it("starts a downloaded item and restores its queue metadata without requiring Jellyfin", async () => {
+    const getDetails = vi.fn(async () => { throw new Error("SERVER_UNAVAILABLE"); });
+    const localResult = { ...result, source: "local" as const, sourceKind: "offline-local" as const };
+    const player = { loadItem: vi.fn(async () => localResult), getState: () => ({ playbackId: result.playbackId }) };
+    const reset = vi.fn();
+    const service = new PlaybackCommandService(player as never, { getDetails } as never, { reset } as never, async () => item);
+    await expect(service.start(item.id, "resume", false, "local-user")).resolves.toEqual(localResult);
+    expect(player.loadItem).toHaveBeenCalledOnce();
+    expect(getDetails).not.toHaveBeenCalled();
+    expect(reset).toHaveBeenCalledWith(item);
+  });
+
   it("enters fullscreen after Companion playback starts", async () => {
     const { service, player } = harness();
     await service.start(item.id, "start-over");
@@ -80,6 +95,58 @@ describe("PlaybackCommandService Companion presentation", () => {
       .rejects.toMatchObject({ code: "MOVIE_VERSION_WATCH_PARTY_UNAVAILABLE" });
     expect(selectItem).not.toHaveBeenCalled();
     expect(player.loadItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("PlaybackCommandService mute", () => {
+  it("restores the actual native volume after repeated mute requests", async () => {
+    const { service, player, state } = harness();
+    state.volume = 37;
+    await service.setMuted(result.playbackId, true);
+    await service.setMuted(result.playbackId, true);
+    await expect(service.setMuted(result.playbackId, false)).resolves.toMatchObject({ volume: 37 });
+    expect(player.setVolume.mock.calls.map((call) => call[1])).toEqual([0, 0, 37]);
+  });
+
+  it("does not change an already audible volume when asked to unmute", async () => {
+    const { service, player, state } = harness();
+    state.volume = 23;
+    await expect(service.setMuted(result.playbackId, false)).resolves.toMatchObject({ volume: 23 });
+    expect(player.setVolume).not.toHaveBeenCalled();
+  });
+
+  it("preserves the last accepted volume when a later adjustment fails", async () => {
+    const { service, player } = harness();
+    await service.setVolume(result.playbackId, 28);
+    await service.setMuted(result.playbackId, true);
+    player.setVolume.mockRejectedValueOnce(new Error("The engine rejected the command."));
+    await expect(service.setVolume(result.playbackId, 88)).rejects.toThrow("rejected");
+    await expect(service.setMuted(result.playbackId, false)).resolves.toMatchObject({ volume: 28 });
+  });
+});
+
+describe("PlaybackCommandService shared action identity", () => {
+  it.each(["syncPlay", "features"] as const)("rejects stale pause, seek, and stop requests before contacting %s", async (room) => {
+    const { service, player } = harness();
+    const shared = {
+      isJoined: () => true,
+      requestPaused: vi.fn(async () => player.getState()),
+      requestSeek: vi.fn(async () => player.getState()),
+      requestStop: vi.fn(async () => player.getState()),
+    };
+    if (room === "syncPlay") service.setSyncPlay(shared as never);
+    else service.setPlayerFeatures(shared as never);
+    const staleId = "11111111-1111-4111-8111-111111111111";
+    await expect(service.setPaused(staleId, true)).rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+    await expect(service.seek(staleId, 5_000_000)).rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+    await expect(service.stop(staleId)).rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+    expect(shared.requestPaused).not.toHaveBeenCalled();
+    expect(shared.requestSeek).not.toHaveBeenCalled();
+    expect(shared.requestStop).not.toHaveBeenCalled();
+    await service.setPaused(result.playbackId, true);
+    await service.stop(result.playbackId);
+    expect(shared.requestPaused).toHaveBeenCalledWith(true);
+    expect(shared.requestStop).toHaveBeenCalledOnce();
   });
 });
 

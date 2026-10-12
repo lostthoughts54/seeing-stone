@@ -26,7 +26,8 @@ public sealed record QueueActionRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("action")] string Action);
 public sealed record AdvanceRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
-    [property: System.Text.Json.Serialization.JsonPropertyName("expectedVideoId")] string ExpectedVideoId);
+    [property: System.Text.Json.Serialization.JsonPropertyName("expectedVideoId")] string ExpectedVideoId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("expectedQueueItemId")] string? ExpectedQueueItemId = null);
 public sealed record HandoffRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("clientId")] Guid ClientId,
     [property: System.Text.Json.Serialization.JsonPropertyName("groupId")] string GroupId,
@@ -75,7 +76,7 @@ public sealed class YouTubeRoomsController : ControllerBase
     public Task<ActionResult<YouTubeRoomDto>> QueueAction([FromRoute] string token, [FromBody] QueueActionRequest request) => ExecuteAsync(authorization => _rooms.QueueAction(token, authorization.UserId, request.ClientId, request.QueueItemId, request.Action));
 
     [HttpPost("{token}/advance")]
-    public Task<ActionResult<YouTubeRoomDto>> Advance([FromRoute] string token, [FromBody] AdvanceRequest request) => ExecuteAsync(authorization => _rooms.Advance(token, authorization.UserId, request.ClientId, request.ExpectedVideoId));
+    public Task<ActionResult<YouTubeRoomDto>> Advance([FromRoute] string token, [FromBody] AdvanceRequest request) => ExecuteAsync(authorization => _rooms.Advance(token, authorization.UserId, request.ClientId, request.ExpectedVideoId, request.ExpectedQueueItemId));
 
     [HttpPost("{token}/handoff")]
     public Task<ActionResult<YouTubeRoomDto>> Handoff([FromRoute] string token, [FromBody] HandoffRequest request) => ExecuteAsync(authorization => _rooms.Handoff(token, authorization.UserId, request.ClientId, request.GroupId, request.GroupName));

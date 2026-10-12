@@ -220,10 +220,17 @@ test("renderer/preload boundary contains no privileged escape hatch or report ch
   assert.doesNotMatch(downloadContract, /localPath|storageRoot|authenticatedUrl|headers|command|args/);
   const watchPartyContract = contracts.slice(
     contracts.indexOf("export type WatchPartyPlaybackState"),
-    contracts.indexOf("export interface JellyfinBridge"),
+    contracts.indexOf("export type YouTubeRoomConnection"),
   );
   assert.doesNotMatch(watchPartyContract, /accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|webSocket(?:Url|Endpoint|Headers|Token)|mediaUrl|api[_-]?key/i);
   assert.doesNotMatch(watchPartyContract, /(?:url|path|headers|credential|token)\s*:/i);
+  // YouTube has public user-entered URLs and an authenticated room invite token.
+  // Neither is a privileged Jellyfin credential or a playback source URL.
+  const youtubeRoomContract = contracts.slice(
+    contracts.indexOf("export type YouTubeRoomConnection"),
+    contracts.indexOf("export interface JellyfinBridge"),
+  );
+  assert.doesNotMatch(youtubeRoomContract, /accessToken|authorization|authenticatedUrl|serverUrl|localPath|filePath|headers|rawMessage|mediaUrl|api[_-]?key/i);
   for (const setting of [
     "contextIsolation: true",
     "sandbox: true",

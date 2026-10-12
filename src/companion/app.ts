@@ -1,6 +1,7 @@
 import type { CompanionCommand, CompanionLibrarySort, CompanionLibrarySummary, CompanionLiveTvChannel, CompanionLiveTvGuide, CompanionMediaSummary } from "../shared/companionContracts";
-import { getLibraries, getLibrary, getLiveTvGuide, getSeries, getSession, longPoll, pair, search, sendCommand, type RuntimeSession } from "./api";
+import { CompanionRequestError, getLibraries, getLibrary, getLiveTvGuide, getSeries, getSession, longPoll, pair, search, sendCommand, type RuntimeSession } from "./api";
 import { CompanionModel } from "./state";
+import { initializeYouTube } from "./youtube";
 
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const model = new CompanionModel();
@@ -19,6 +20,13 @@ let browseLoadedItems = 0;
 let liveTvGuide: CompanionLiveTvGuide | null = null;
 let liveTvGuideRequestId = 0;
 let liveTvSearchTimer = 0;
+let bootstrapRequest: Promise<void> | null = null;
+let queueSignature = "";
+const editingRanges = new Set<string>();
+const openYouTube = initializeYouTube(async (value) => {
+  if (!session || byId<HTMLFieldSetElement>("remoteControls").disabled) throw new Error("Reconnect the phone remote before adding videos.");
+  await sendCommand(session, value);
+});
 
 function extractTicket(): void {
   const match = location.hash.match(/^#\/pair\?(.+)$/);
@@ -29,23 +37,30 @@ function extractTicket(): void {
 
 function formatTicks(ticks: number): string {
   const seconds = Math.max(0, Math.floor(ticks / 10_000_000));
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const minutes = Math.floor(seconds / 60);
+  return seconds >= 3600
+    ? `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+    : `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function setConnection(text: string, stale = false): void {
-  byId("connection").textContent = text;
-  document.querySelectorAll<HTMLButtonElement>("#remote button").forEach((button) => {
-    if (!button.closest(".tabs")) button.disabled = stale;
-  });
+  setStatus("connection", text);
+  byId<HTMLFieldSetElement>("remoteControls").disabled = stale;
+}
+
+function setStatus(id: string, text: string): void {
+  const element = byId(id);
+  if (element.textContent !== text) element.textContent = text;
 }
 
 async function command(value: CompanionCommand): Promise<void> {
-  if (!session) return;
+  if (!session || byId<HTMLFieldSetElement>("remoteControls").disabled) return;
+  byId("commandStatus").textContent = "";
   try {
     await sendCommand(session, value);
   } catch (error) {
-    setConnection(error instanceof Error ? error.message : "The command could not be sent.");
-    await bootstrap().catch(() => undefined);
+    byId("commandStatus").textContent = error instanceof Error ? error.message : "The command could not be sent.";
+    if (!(error instanceof CompanionRequestError) || error.status === 401 || error.status === 409) await bootstrap();
   }
 }
 
@@ -59,23 +74,40 @@ function render(): void {
   byId("mediaDetail").textContent = player.media?.seriesName
     ? [player.media.seriesName, player.media.seasonNumber !== null ? `S${player.media.seasonNumber}` : "", player.media.episodeNumber !== null ? `E${player.media.episodeNumber}` : ""].filter(Boolean).join(" · ")
     : player.media?.type ?? "";
+  setStatus("playbackStatus", player.buffering || player.phase === "buffering" ? "Buffering…"
+    : player.phase === "loading" ? "Loading on the desktop…"
+    : player.phase === "error" ? "Playback could not continue. Check the desktop for details."
+    : player.phase === "idle" || player.phase === "stopped" ? "Choose something from Browse, Up Next, or Live TV to play on your desktop."
+    : player.phase === "ended" ? "Playback finished." : "");
   const seekInput = byId<HTMLInputElement>("seek");
   const seekableUntil = player.seekableUntilTicks ?? player.durationTicks;
-  seekInput.max = String(Math.max(1, seekableUntil));
-  seekInput.value = String(Math.min(player.positionTicks, seekableUntil || 1));
-  seekInput.setAttribute("aria-valuetext", player.seekableUntilTicks === null
-    ? formatTicks(player.positionTicks)
-    : `${formatTicks(player.positionTicks)}; available through ${formatTicks(seekableUntil)}`);
+  if (!editingRanges.has("seek")) {
+    seekInput.max = String(Math.max(1, seekableUntil));
+    seekInput.value = String(Math.min(player.positionTicks, seekableUntil || 1));
+    seekInput.setAttribute("aria-valuetext", player.seekableUntilTicks === null
+      ? formatTicks(player.positionTicks)
+      : `${formatTicks(player.positionTicks)}; available through ${formatTicks(seekableUntil)}`);
+  }
   seekInput.disabled = !player.controls.canSeek;
-  byId("position").textContent = formatTicks(player.positionTicks);
+  if (!editingRanges.has("seek")) byId("position").textContent = formatTicks(player.positionTicks);
   byId("duration").textContent = formatTicks(player.durationTicks);
   byId("playPause").textContent = player.paused ? "Play" : "Pause";
-  byId<HTMLInputElement>("volume").value = String(player.volume);
+  byId("playPause").setAttribute("aria-label", player.paused ? "Play" : "Pause");
+  byId<HTMLButtonElement>("playPause").disabled = !player.controls.canPlayPause;
+  byId<HTMLButtonElement>("stop").disabled = !player.controls.canStop;
+  byId<HTMLButtonElement>("seekBack").disabled = !player.controls.canSeek;
+  byId<HTMLButtonElement>("seekForward").disabled = !player.controls.canSeek;
+  if (!editingRanges.has("volume")) {
+    byId<HTMLInputElement>("volume").value = String(player.volume);
+    byId("volume").setAttribute("aria-valuetext", `${player.volume}%`);
+  }
   byId("mute").textContent = player.muted ? "Unmute" : "Mute";
   byId<HTMLButtonElement>("previous").disabled = !(player.controls.canPrevious || player.controls.canPreviousChannel);
   byId<HTMLButtonElement>("next").disabled = !(player.controls.canNext || player.controls.canNextChannel);
   byId("previous").textContent = player.live ? "Channel −" : "‹‹";
   byId("next").textContent = player.live ? "Channel +" : "››";
+  byId("previous").setAttribute("aria-label", player.live ? "Previous channel" : "Previous item");
+  byId("next").setAttribute("aria-label", player.live ? "Next channel" : "Next item");
   byId("goLive").classList.toggle("hidden", !player.controls.canGoLive);
   const skipSegment = byId<HTMLButtonElement>("skipSegment");
   const skipSegmentFocused = document.activeElement === skipSegment;
@@ -93,12 +125,14 @@ function render(): void {
   timing.classList.toggle("hidden", !watchParty.joined);
   if (watchParty.joined) {
     const phaseLabel = watchParty.phase === "waiting-for-participant" ? "Waiting for another participant"
-      : watchParty.phase === "preparing" ? "Preparing this computer"
+      : watchParty.phase === "preparing" ? "Loading video on this computer"
+      : watchParty.phase === "buffering" ? "Buffering video on this computer"
+      : watchParty.phase === "retrying" ? "Retrying readiness confirmation"
       : watchParty.phase === "ready" ? "This computer is ready—waiting for everyone"
       : watchParty.phase === "starting" ? "Starting…"
       : watchParty.phase === "error" ? "This computer could not prepare playback"
       : watchParty.phase === "playing" ? "Playing together" : "Watch party joined";
-    byId("watchPartyPreparation").textContent = phaseLabel;
+    setStatus("watchPartyPreparation", phaseLabel);
     const offset = watchParty.localSyncOffsetMilliseconds;
     byId("watchPartyOffset").textContent = offset === 0 ? "In sync" : `${Math.abs(offset)} ms ${offset > 0 ? "earlier" : "later"}`;
     byId<HTMLButtonElement>("watchPartyEarlier").disabled = offset >= 2000;
@@ -112,7 +146,12 @@ function render(): void {
 
 function populateTracks(id: string, tracks: Array<{ id: number; label: string; selected: boolean }>, allowOff: boolean): void {
   const select = byId<HTMLSelectElement>(id);
+  const signature = JSON.stringify(tracks);
+  if (select.dataset.tracks === signature) return;
+  select.dataset.tracks = signature;
   select.replaceChildren();
+  select.disabled = tracks.length === 0;
+  if (!allowOff && !tracks.length) select.add(new Option("No audio tracks available", ""));
   if (allowOff) select.add(new Option("Off", "", false, !tracks.some((track) => track.selected)));
   for (const track of tracks) select.add(new Option(track.label, String(track.id), false, track.selected));
 }
@@ -131,12 +170,17 @@ function mediaCard(media: CompanionMediaSummary): HTMLElement {
   }
   const detail = document.createElement("span");
   detail.className = "muted";
-  detail.textContent = [media.seriesName, media.productionYear].filter(Boolean).join(" · ") || media.type;
+  const episodeNumber = media.type === "episode" ? [
+    media.seasonNumber === 0 ? "Special" : media.seasonNumber !== null ? `S${media.seasonNumber}` : "",
+    media.episodeNumber !== null ? `E${media.episodeNumber}` : "",
+  ].filter(Boolean).join(" ") : "";
+  detail.textContent = [media.seriesName, episodeNumber, media.productionYear].filter(Boolean).join(" · ") || media.type;
   const actions = document.createElement("div");
   actions.className = "actions";
   if (media.type === "series") {
     const episodes = document.createElement("button");
     episodes.textContent = "Episodes";
+    episodes.setAttribute("aria-label", `Browse episodes of ${media.name}`);
     episodes.addEventListener("click", () => { void openSeries(media); });
     actions.append(episodes);
     article.append(title, detail, actions);
@@ -145,6 +189,7 @@ function mediaCard(media: CompanionMediaSummary): HTMLElement {
   for (const [label, placement] of [["Play", "play-now"], ["Next", "play-next"], ["Queue", "queue-end"]] as const) {
     const button = document.createElement("button");
     button.textContent = label;
+    button.setAttribute("aria-label", `${label === "Next" ? "Play next:" : label === "Queue" ? "Add to queue:" : "Play"} ${media.name}`);
     button.disabled = !media.playable;
     button.addEventListener("click", () => void command({ type: "send-item", itemRef: media.itemRef, placement, resumeMode: "start-over" }));
     actions.append(button);
@@ -155,10 +200,15 @@ function mediaCard(media: CompanionMediaSummary): HTMLElement {
 
 function renderQueue(): void {
   const queue = model.bootstrap!.queue;
+  const signature = JSON.stringify(queue);
+  if (signature === queueSignature) return;
+  queueSignature = signature;
   const upcomingEntries = queue.entries.filter((entry) => entry.state === "upcoming");
   const list = byId<HTMLOListElement>("queueList");
   list.replaceChildren();
-  byId("queueMessage").textContent = queue.blockedReason === "watchparty" ? "Queue editing is paused during this watch party." : "";
+  byId("queueMessage").textContent = queue.blockedReason === "watchparty" ? "Queue editing is paused during this watch party."
+    : !queue.entries.length ? "Your queue is empty. Choose Next or Queue from Browse to add something."
+    : !upcomingEntries.length ? "Nothing else queued. Add something from Browse to keep watching." : "";
   byId<HTMLButtonElement>("clearQueue").disabled = !queue.editable || !queue.entries.some((entry) => entry.state === "upcoming");
   for (const entry of queue.entries) {
     const row = document.createElement("li");
@@ -212,14 +262,15 @@ function renderLibraryTabs(): void {
   for (const library of browseLibraries) {
     const button = document.createElement("button");
     button.type = "button";
-    button.role = "tab";
     button.textContent = library.name;
-    button.setAttribute("aria-selected", String(library.itemRef === activeLibraryRef && !activeSeries));
+    button.setAttribute("aria-pressed", String(library.itemRef === activeLibraryRef));
     button.addEventListener("click", () => {
+      clearTimeout(searchTimer);
       activeLibraryRef = library.itemRef;
       activeSeries = null;
       byId<HTMLInputElement>("search").value = "";
       renderLibraryTabs();
+      tabs.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
       void loadBrowse();
     });
     tabs.append(button);
@@ -243,6 +294,7 @@ async function initializeBrowse(): Promise<void> {
 }
 
 async function openSeries(media: CompanionMediaSummary): Promise<void> {
+  clearTimeout(searchTimer);
   activeSeries = { itemRef: media.itemRef, name: media.name };
   byId<HTMLInputElement>("search").value = "";
   renderLibraryTabs();
@@ -250,8 +302,11 @@ async function openSeries(media: CompanionMediaSummary): Promise<void> {
 }
 
 async function loadBrowse(query = "", append = false): Promise<void> {
+  query = query.trim();
   const requestId = ++browseRequestId;
   const list = byId("browseList");
+  const activeControl = list.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+  list.setAttribute("aria-busy", "true");
   if (!append) {
     list.textContent = "Loading…";
     browseLoadedItems = 0;
@@ -283,8 +338,31 @@ async function loadBrowse(query = "", append = false): Promise<void> {
     if (!append && !page.items.length) list.textContent = "No items found.";
   } catch (error) {
     if (requestId !== browseRequestId) return;
-    list.textContent = error instanceof Error ? error.message : "Library unavailable.";
-    byId("browseStatus").textContent = "";
+    const message = error instanceof Error ? error.message : "Library unavailable.";
+    if (!append) {
+      const explanation = document.createElement("p");
+      explanation.textContent = message;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Try again";
+      retry.setAttribute("aria-label", activeSeries && !query ? `Retry episodes of ${activeSeries.name}` : "Retry library results");
+      retry.addEventListener("click", () => {
+        if (requestId !== browseRequestId) return;
+        retry.disabled = true;
+        void loadBrowse(query);
+      });
+      list.replaceChildren(explanation, retry);
+    }
+    byId("browseStatus").textContent = append ? `${message} Your loaded items are still available. Try Load more again.` : "";
+    byId("browseMore").classList.toggle("hidden", !append || browseNextOffset === null);
+  } finally {
+    if (requestId === browseRequestId) {
+      list.setAttribute("aria-busy", "false");
+      if (activeControl && !activeControl.isConnected && document.activeElement === document.body
+        && !byId("browseView").classList.contains("hidden")) {
+        list.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+      }
+    }
   }
 }
 
@@ -402,14 +480,17 @@ function connectWebSocket(): void {
   const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/v1/events`, `seeing-stone.v3.${session.webSocketTicket}`);
   webSocket = socket;
   socket.addEventListener("open", () => {
+    if (webSocket !== socket) return;
     clearTimeout(reconnectTimer);
     reconnectIndex = 0;
     setConnection("Connected");
   });
   socket.addEventListener("message", (event) => {
+    if (webSocket !== socket) return;
     try {
       const envelope = JSON.parse(String(event.data)) as { topic: string; payload: unknown };
       model.apply(envelope.topic, envelope.payload);
+      setConnection("Connected");
     } catch { /* Invalid push frames never reach the UI. */ }
   });
   socket.addEventListener("close", () => { if (webSocket === socket) scheduleReconnect(); });
@@ -417,45 +498,84 @@ function connectWebSocket(): void {
 
 function scheduleReconnect(): void {
   if (document.hidden) return;
-  setConnection("Reconnecting…", Date.now() - model.lastContact > 10_000);
+  setConnection("Reconnecting…", true);
   const delays = [500, 1000, 2000, 5000, 10_000, 15_000];
   clearTimeout(reconnectTimer);
   const attempt = reconnectIndex++;
   reconnectTimer = window.setTimeout(() => {
     if (attempt >= delays.length && session) {
-      void longPoll().then((value) => model.setBootstrap(value)).finally(() => void bootstrap());
+      void longPoll().then((value) => model.setBootstrap(value)).catch(() => undefined).finally(() => void bootstrap());
     } else void bootstrap();
   }, delays[Math.min(attempt, delays.length - 1)] + Math.random() * 350);
 }
 
-async function bootstrap(): Promise<void> {
-  try {
-    session = await getSession();
-    model.setBootstrap(session.bootstrap);
-    byId("pairing").classList.add("hidden");
-    byId("remote").classList.remove("hidden");
-    setConnection("Connected");
-    connectWebSocket();
-  } catch {
-    session = null;
-    byId("remote").classList.add("hidden");
-    byId("pairing").classList.remove("hidden");
-    setConnection("Pairing required");
-  }
+function bootstrap(): Promise<void> {
+  if (bootstrapRequest) return bootstrapRequest;
+  clearTimeout(reconnectTimer);
+  bootstrapRequest = (async () => {
+    try {
+      const freshSession = await getSession();
+      // An outstanding command may already have allocated a sequence in this epoch.
+      if (session?.sessionEpoch === freshSession.sessionEpoch) {
+        session.nextSequence = Math.max(session.nextSequence, freshSession.nextSequence);
+        session.webSocketTicket = freshSession.webSocketTicket;
+        session.csrfToken = freshSession.csrfToken;
+      } else session = freshSession;
+      model.setBootstrap(freshSession.bootstrap);
+      byId("pairing").classList.add("hidden");
+      byId("connectionRecovery").classList.add("hidden");
+      byId("remote").classList.remove("hidden");
+      setConnection("Connected");
+      connectWebSocket();
+    } catch (error) {
+      if (error instanceof CompanionRequestError && error.status === 401) {
+        session = null;
+        const socket = webSocket;
+        webSocket = null;
+        socket?.close();
+        browseLibraries = [];
+        activeLibraryRef = null;
+        activeSeries = null;
+        byId("remote").classList.add("hidden");
+        byId("connectionRecovery").classList.add("hidden");
+        byId("pairing").classList.remove("hidden");
+        setConnection("Pairing required", true);
+      } else {
+        byId("pairing").classList.add("hidden");
+        byId("connectionRecovery").classList.toggle("hidden", Boolean(session));
+        byId("connectionRecoveryMessage").textContent = "Cannot reach your desktop. Keep Seeing Stone open and connect this phone to the same private network. Retrying automatically…";
+        scheduleReconnect();
+      }
+    }
+  })().finally(() => { bootstrapRequest = null; });
+  return bootstrapRequest;
 }
 
 extractTicket();
 model.addEventListener("change", render);
 byId<HTMLFormElement>("pairForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  const name = byId<HTMLInputElement>("deviceName").value;
-  const code = byId<HTMLInputElement>("pairCode").value;
+  const submit = byId<HTMLButtonElement>("pairSubmit");
+  if (submit.disabled) return;
+  const name = byId<HTMLInputElement>("deviceName").value.trim();
+  const code = byId<HTMLInputElement>("pairCode").value.trim();
   byId("pairError").textContent = "";
+  if (!name || (!pairingTicket && !/^[0-9]{8}$/.test(code))) {
+    byId("pairError").textContent = !name ? "Enter a name for this phone." : "Enter the 8-digit code shown on your desktop.";
+    byId<HTMLInputElement>(!name ? "deviceName" : "pairCode").focus();
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = "Pairing…";
   void pair(pairingTicket ? { ticket: pairingTicket, name } : { code, name }).then(() => {
     pairingTicket = null;
     return bootstrap();
-  }).catch((error) => { byId("pairError").textContent = error instanceof Error ? error.message : "Pairing failed."; });
+  }).catch((error) => {
+    byId("pairError").textContent = error instanceof Error ? error.message : "Pairing failed.";
+    if (error instanceof CompanionRequestError && error.status >= 400 && error.status < 500) pairingTicket = null;
+  }).finally(() => { submit.disabled = false; submit.textContent = "Pair phone"; });
 });
+byId("retryConnection").addEventListener("click", () => void bootstrap());
 document.querySelectorAll<HTMLButtonElement>(".tabs button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach((candidate) => candidate.removeAttribute("aria-current"));
@@ -464,6 +584,7 @@ document.querySelectorAll<HTMLButtonElement>(".tabs button").forEach((button) =>
     byId(`${button.dataset.view}View`).classList.remove("hidden");
     if (button.dataset.view === "browse") void initializeBrowse();
     if (button.dataset.view === "liveTv") void loadLiveTvGuide();
+    if (button.dataset.view === "youtube") void openYouTube();
   });
 });
 byId("playPause").addEventListener("click", () => void command({ type: "set-paused", paused: !model.bootstrap!.player.paused }));
@@ -474,6 +595,18 @@ byId("goLive").addEventListener("click", () => void command({ type: "go-live" })
 byId("seekBack").addEventListener("click", () => void command({ type: "seek-relative", seconds: -10 }));
 byId("seekForward").addEventListener("click", () => void command({ type: "seek-relative", seconds: 30 }));
 byId<HTMLInputElement>("seek").addEventListener("change", (event) => void command({ type: "seek", positionTicks: Number((event.target as HTMLInputElement).value) }));
+for (const id of ["seek", "volume"]) {
+  const range = byId<HTMLInputElement>(id);
+  range.addEventListener("pointerdown", () => editingRanges.add(id));
+  range.addEventListener("keydown", (event) => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) editingRanges.add(id);
+  });
+  range.addEventListener("input", () => {
+    range.setAttribute("aria-valuetext", id === "seek" ? formatTicks(Number(range.value)) : `${range.value}%`);
+    if (id === "seek") byId("position").textContent = formatTicks(Number(range.value));
+  });
+  for (const event of ["change", "blur", "pointercancel"]) range.addEventListener(event, () => editingRanges.delete(id));
+}
 byId("skipSegment").addEventListener("click", () => {
   const skipSegment = model.bootstrap?.player.skipSegment;
   if (skipSegment?.enabled) void command({ type: "seek", positionTicks: skipSegment.endTicks });
@@ -495,14 +628,16 @@ byId<HTMLSelectElement>("subtitleTrack").addEventListener("change", (event) => {
   void command({ type: "select-subtitle", trackId: value ? Number(value) : null });
 });
 byId("clearQueue").addEventListener("click", () => void command({ type: "queue-clear-upcoming", expectedQueueRevision: model.bootstrap!.queue.revision }));
-byId<HTMLFormElement>("searchForm").addEventListener("submit", (event) => { event.preventDefault(); void loadBrowse(byId<HTMLInputElement>("search").value); });
+byId<HTMLFormElement>("searchForm").addEventListener("submit", (event) => { event.preventDefault(); clearTimeout(searchTimer); void loadBrowse(byId<HTMLInputElement>("search").value); });
 byId<HTMLInputElement>("search").addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => void loadBrowse(byId<HTMLInputElement>("search").value), 300);
 });
 byId<HTMLSelectElement>("browseSort").addEventListener("change", () => { void loadBrowse(); });
 byId("browseBack").addEventListener("click", () => {
+  clearTimeout(searchTimer);
   activeSeries = null;
+  byId<HTMLInputElement>("search").value = "";
   renderLibraryTabs();
   void loadBrowse();
 });
@@ -515,9 +650,16 @@ byId<HTMLInputElement>("liveTvSearch").addEventListener("input", () => {
   clearTimeout(liveTvSearchTimer);
   liveTvSearchTimer = window.setTimeout(renderLiveTvGuide, 120);
 });
-for (const eventName of ["pageshow", "online"] as const) window.addEventListener(eventName, () => void bootstrap());
+window.addEventListener("pageshow", (event) => { if (event.persisted) void bootstrap(); });
+window.addEventListener("online", () => void bootstrap());
+window.addEventListener("offline", () => setConnection("Offline — check your Wi-Fi connection", true));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { clearTimeout(reconnectTimer); webSocket?.close(); } else void bootstrap();
 });
-window.setInterval(() => { if (session && Date.now() - model.lastContact > 10_000) setConnection("Connection stale", true); }, 1000);
+window.setInterval(() => {
+  if (session && !document.hidden && Date.now() - model.lastContact > 10_000) {
+    setConnection("Reconnecting…", true);
+    if (webSocket?.readyState === WebSocket.OPEN) { webSocket.close(); }
+  }
+}, 1000);
 void bootstrap();

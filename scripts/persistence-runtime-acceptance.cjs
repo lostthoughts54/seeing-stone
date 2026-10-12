@@ -30,17 +30,26 @@ if (!process.versions.electron) {
 async function runChild() {
   assert.equal(process.env.LOCALFIRST_PERSISTENCE_CHILD, "1");
   const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
+  const { DATABASE_SCHEMA_VERSION } = require("../dist/main/services/persistenceTypes.js");
   const directory = await mkdtemp(join(tmpdir(), "lf-electron-sqlite-"));
   const service = new SqlitePersistenceService(directory);
   try {
     const health = await service.open();
-  assert.equal(health.schemaVersion, 8);
+    assert.equal(health.schemaVersion, DATABASE_SCHEMA_VERSION);
     assert.equal(health.journalMode, "wal");
     assert.equal(health.foreignKeys, true);
     assert.equal(health.quickCheck, "ok");
     assert.ok(health.workerThreadId > 0);
     assert.ok(Number(process.versions.node.split(".")[0]) >= 24);
     assert.ok(process.versions.sqlite);
+    // Exercise the new independent provider operations inside Electron's SQLite worker.
+    const providerId = "11111111-1111-4111-8111-111111111111";
+    const protectedConfiguration = Buffer.from([1, 2, 3, 4]); // Synthetic opaque bytes, not credentials.
+    await service.insertIptvProvider({ providerId, kind: "m3u", name: "Runtime fixture", protectedConfiguration, createdAt: 1, updatedAt: 1 });
+    assert.deepEqual(await service.listIptvProviders(), [{ providerId, kind: "m3u", name: "Runtime fixture" }]);
+    assert.deepEqual(Buffer.from((await service.getIptvProvider(providerId)).protectedConfiguration), protectedConfiguration);
+    await service.deleteIptvProvider(providerId);
+    assert.deepEqual(await service.listIptvProviders(), []);
     process.stdout.write(`Electron persistence acceptance passed (Electron ${process.versions.electron}, Node ${process.versions.node}, SQLite ${process.versions.sqlite}).\n`);
   } finally {
     await service.close();

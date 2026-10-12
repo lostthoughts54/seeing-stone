@@ -3,6 +3,23 @@ import { LibMpvCommandClient } from "../src/main/services/libMpvIpc";
 import type { LibMpvHostCommand, LibMpvSession } from "../src/main/services/libMpvHost";
 
 describe("LibMpvCommandClient", () => {
+  it("polls readiness properties every tick while spreading unrelated properties out", async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(async (property: string) => property === "time-pos" ? 1 : false);
+    const client = new LibMpvCommandClient({
+      generation: { playback: 1, surface: 1 }, command: async () => undefined,
+      query, updateViewport: () => undefined, stop: async () => undefined,
+    }, () => () => undefined);
+    try {
+      for (const [index, property] of ["time-pos", "seeking", "paused-for-cache", "duration", "track-list"].entries()) await client.observe(index, property);
+      query.mockClear();
+      await vi.advanceTimersByTimeAsync(300);
+      for (const property of ["time-pos", "seeking", "paused-for-cache"]) {
+        expect(query.mock.calls.filter(([name]) => name === property)).toHaveLength(3);
+      }
+      expect(query).toHaveBeenCalledTimes(12);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
   it("maps the shared controller command vocabulary onto the narrow host contract", async () => {
     const commands: LibMpvHostCommand[] = [];
     let stopped = 0;
@@ -18,6 +35,7 @@ describe("LibMpvCommandClient", () => {
     expect(await client.command(["get_property", "duration"])).toBe(12.5);
     await client.command(["set_property", "pause", true]);
     await client.command(["seek", 3.25, "absolute+exact"]);
+    await client.command(["seek", -0.1, "relative+exact"]);
     await client.command(["set_property", "volume", 72]);
     await client.command(["set_property", "aid", 4]);
     await client.command(["set_property", "sid", "no"]);
@@ -27,6 +45,7 @@ describe("LibMpvCommandClient", () => {
     expect(commands).toEqual([
       { kind: "pause" },
       { kind: "seek", positionTicks: 32_500_000 },
+      { kind: "seek-relative", deltaTicks: -1_000_000 },
       { kind: "volume", volume: 72 },
       { kind: "select-audio", trackId: 4 },
       { kind: "select-subtitle", trackId: null },

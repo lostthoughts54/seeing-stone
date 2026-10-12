@@ -39,6 +39,7 @@ export class UnavailablePlayerController implements PlayerController {
   async setVolume(): Promise<PlaybackState> { throw this.error(); }
   async setPaused(): Promise<PlaybackState> { throw this.error(); }
   async seek(): Promise<PlaybackState> { throw this.error(); }
+  async adjustLocalTimeline(): Promise<PlaybackState> { throw this.error(); }
   async setPlaybackRate(): Promise<PlaybackState> { throw this.error(); }
   async selectAudio(): Promise<PlaybackState> { throw this.error(); }
   async selectSubtitle(): Promise<PlaybackState> { throw this.error(); }

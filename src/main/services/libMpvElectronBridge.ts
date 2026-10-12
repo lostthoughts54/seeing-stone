@@ -1,6 +1,7 @@
 import { dirname } from "node:path";
 import { BrowserWindow, type IpcMain, sharedTexture } from "electron";
 import { AppError } from "./errors";
+import { logger } from "./logger";
 import { isStrictlyNewerFrameSequence } from "./libMpvFrameOrder";
 import {
   LibMpvDiagnosticLog,
@@ -90,6 +91,7 @@ interface NativeAddon {
     diagnosticLogging: boolean;
     cpuReadback: boolean;
     startPositionSeconds: number;
+    startPaused: boolean;
   }) => NativeProducer;
 }
 
@@ -101,8 +103,11 @@ interface PendingOpen {
 }
 
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const PLAYER_VIEWPORT_READY_TIMEOUT_MS = 5_000;
 const PRESENTATION_ACK_TIMEOUT_MS = 5_000;
 const PRESENTER_RECOVERY_DEBOUNCE_MS = 150;
+const TEXTURE_POOL_STALL_TIMEOUT_MS = 1_500;
+const MAX_TEXTURE_POOL_RECOVERIES = 2;
 const TEXTURE_RELEASE_TIMEOUT_MS = 5_000;
 const DIAGNOSTIC_POLL_INTERVAL_MS = 1_000;
 const DIAGNOSTIC_COUNTER_INTERVAL = 5;
@@ -126,9 +131,12 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   private sink: LibMpvNativeSink | null = null;
   private producer: NativeProducer | null = null;
   private generation: LibMpvGeneration | null = null;
+  private openingGeneration: LibMpvGeneration | null = null;
+  private openRevision = 0;
+  private stopping: Promise<void> | null = null;
   private viewport: LibMpvHostViewport = { width: 0, height: 0, visible: false, revision: 0, deviceScaleFactor: 1 };
   private pumpTimer: ReturnType<typeof setTimeout> | null = null;
-  private pumping = false;
+  private pumping: object | null = null;
   private stopped = true;
   private destroyed = false;
   private listenerReady = false;
@@ -139,6 +147,9 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   private surfaceEpoch = 0;
   private pendingOpen: PendingOpen | null = null;
   private lastTransferredSequence = 0;
+  private texturePoolStalledAt: number | null = null;
+  private texturePoolRecoveries = 0;
+  private presentationsSincePoolRecovery = 0;
   private awaitingCpuFrameRelease: { slot: number; sequence: number } | null = null;
   private diagnosticsTimer: ReturnType<typeof setInterval> | null = null;
   private diagnosticPollCount = 0;
@@ -173,6 +184,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     this.awaitingPresentedSequence = null;
     if (this.presentationTimer) clearTimeout(this.presentationTimer);
     this.presentationTimer = null;
+    if (++this.presentationsSincePoolRecovery >= 6) this.texturePoolRecoveries = 0;
     const firstPresentation = Boolean(this.pendingOpen && !this.pendingOpen.firstFramePresented);
     if (firstPresentation && !this.window.isDestroyed()) this.window.webContents.invalidate();
     if (this.pendingOpen && !this.pendingOpen.firstFramePresented) {
@@ -205,9 +217,8 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     const phase = typeof record.phase === "string" ? record.phase : "";
     if (!Number.isSafeInteger(sequence) || !Number.isSafeInteger(surfaceGeneration)) return;
     if (!this.sharedTextureSlots.matches(sequence, surfaceGeneration)) {
-      if (!this.stopped) this.textureLifecycleViolation("LIBMPV_TEXTURE_RELEASE_SIGNAL_WITHOUT_MATCHING_SLOT", {
-        phase, sequence, surfaceGeneration,
-      });
+      // Renderer lifecycle messages are telemetry. The managed GPU release may
+      // have completed before a late diagnostic message reaches main.
       return;
     }
     this.diagnosticLog?.write(`texture-${phase}`, {
@@ -216,12 +227,6 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       textureId: typeof record.textureId === "string" ? record.textureId : null,
       reason: typeof record.reason === "string" ? record.reason : null,
     });
-    if (phase !== "renderer-gpu-release-complete") return;
-    try {
-      this.sharedTextureSlots.markRendererGpuReleaseComplete(sequence);
-    } catch (error) {
-      this.textureLifecycleViolation(error instanceof Error ? error.message : String(error), { sequence, surfaceGeneration });
-    }
   };
 
   constructor(
@@ -264,10 +269,14 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       if (this.producer && !this.stopped && this.listenerReady) this.startPresenter();
     });
     window.on("minimize", () => {
-      this.viewport = { ...this.viewport, visible: false };
       this.producer?.setSuspended(true);
     });
-    window.on("restore", () => this.requestPresenterRecovery("window-restore"));
+    window.on("restore", () => {
+      // Window minimization is separate from renderer layout. Overwriting the
+      // last visible viewport here leaves later playback stuck after restore.
+      this.producer?.setSuspended(!this.viewport.visible);
+      this.requestPresenterRecovery("window-restore");
+    });
     window.on("maximize", () => this.requestPresenterRecovery("window-maximize"));
     window.on("unmaximize", () => this.requestPresenterRecovery("window-unmaximize"));
     window.on("enter-full-screen", () => this.requestPresenterRecovery("window-enter-full-screen"));
@@ -281,11 +290,24 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
 
   async open(source: LibMpvHostSource, startPositionTicks: number, generation: LibMpvGeneration): Promise<void> {
     if (this.destroyed || !this.sink) throw new AppError("LIBMPV_UNAVAILABLE", "The experimental player is unavailable.", 503);
+    const revision = ++this.openRevision;
+    this.openingGeneration = { ...generation };
     await this.stopCurrent();
+    this.assertOpening(revision);
     this.generation = { ...generation };
+    // A remote SyncPlay queue reaches main before the renderer has necessarily
+    // opened its player shell. Starting the producer while the viewport is still
+    // hidden suspends frame delivery, so the first-frame gate can otherwise time
+    // out on whichever computer did not select the item. Local starts normally
+    // satisfy this immediately because their shell is opened before playback.
+    await this.waitForPlayerViewport(revision);
+    this.assertOpening(revision);
     this.stopped = false;
     this.presenterReady = false;
     this.lastTransferredSequence = 0;
+    this.texturePoolStalledAt = null;
+    this.texturePoolRecoveries = 0;
+    this.presentationsSincePoolRecovery = 0;
     try {
       this.producer = new this.addon.LibMpvVideoProducer({
         libraryPath: this.libraryPath,
@@ -300,6 +322,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         diagnosticLogging: this.diagnostics?.enabled ?? false,
         cpuReadback: this.diagnostics?.presentationMode === "cpu-readback",
         startPositionSeconds: Math.max(0, startPositionTicks / 10_000_000),
+        startPaused: source.initialPaused === true,
       });
     } catch {
       this.stopped = true;
@@ -316,8 +339,11 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     });
     if (this.listenerReady) this.startPresenter();
     await firstFrame.catch(async (error) => {
-      await this.stopCurrent();
+      // A cancelled open must not tear down the channel that superseded it.
+      if (revision === this.openRevision) await this.stopCurrent();
       throw error;
+    }).finally(() => {
+      if (revision === this.openRevision) this.openingGeneration = null;
     });
   }
 
@@ -328,6 +354,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         case "play": return ["set", "pause", "no"];
         case "pause": return ["set", "pause", "yes"];
         case "seek": return ["seek", String(command.positionTicks / 10_000_000), "absolute+exact"];
+        case "seek-relative": return ["seek", String(command.deltaTicks / 10_000_000), "relative+exact"];
         case "rate": return ["set", "speed", String(command.rate)];
         case "volume": return ["set", "volume", String(command.volume)];
         case "select-audio": return ["set", "aid", command.trackId === null ? "no" : String(command.trackId)];
@@ -356,18 +383,22 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       height: Math.max(0, viewport.height),
       deviceScaleFactor: Math.max(0.5, Math.min(4, viewport.deviceScaleFactor)),
     };
-    this.producer?.setSuspended(!this.viewport.visible);
+    this.producer?.setSuspended(!this.viewport.visible || this.window.isMinimized());
     if (this.viewport.visible) this.schedulePump();
   }
 
   async stop(generation: LibMpvGeneration): Promise<void> {
-    if (!generationMatches(this.generation, generation)) return;
+    if (!generationMatches(this.generation, generation) && !generationMatches(this.openingGeneration, generation)) return;
+    this.openRevision += 1;
+    this.openingGeneration = null;
     await this.stopCurrent();
   }
 
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.openRevision += 1;
+    this.openingGeneration = null;
     await this.stopCurrent();
     this.sink = null;
     this.ipcMain.removeListener(LIBMPV_PRESENTER_IPC.listenerReady, this.onListenerReady);
@@ -380,6 +411,36 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
 
   private authorized(event: Electron.IpcMainEvent): boolean {
     return !this.window.isDestroyed() && event.sender === this.window.webContents && event.senderFrame === event.sender.mainFrame;
+  }
+
+  private assertOpening(revision: number): void {
+    if (this.destroyed || revision !== this.openRevision) {
+      throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.", 409);
+    }
+  }
+
+  private async waitForPlayerViewport(revision: number): Promise<void> {
+    const deadline = Date.now() + PLAYER_VIEWPORT_READY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      this.assertOpening(revision);
+      if (!this.window.isDestroyed() && !this.window.isMinimized()
+        && this.viewport.visible && this.viewport.width >= 16 && this.viewport.height >= 16) return;
+      await delay(25);
+    }
+    this.assertOpening(revision);
+    logger.warn("The video viewport did not become ready before playback startup.", {
+      visible: this.viewport.visible,
+      width: this.viewport.width,
+      height: this.viewport.height,
+      revision: this.viewport.revision,
+      windowDestroyed: this.window.isDestroyed(),
+      windowMinimized: !this.window.isDestroyed() && this.window.isMinimized(),
+    });
+    throw new AppError(
+      "LIBMPV_VIEWPORT_NOT_READY",
+      "The player screen did not become ready for video. Restore the app window and try playback again.",
+      503,
+    );
   }
 
   private matchesSurface(input: unknown): boolean {
@@ -396,6 +457,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
 
   private startPresenter(): void {
     if (!this.producer || this.stopped || this.window.isDestroyed()) return;
+    this.pumping = null;
     this.presenterReady = false;
     this.awaitingPresentedSequence = null;
     if (this.presentationTimer) clearTimeout(this.presentationTimer);
@@ -426,7 +488,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   }
 
   private schedulePump(): void {
-    if (this.stopped || this.destroyed || !this.presenterReady || !this.viewport.visible
+    if (this.stopped || this.destroyed || !this.presenterReady || !this.viewport.visible || this.window.isMinimized()
       || this.awaitingPresentedSequence !== null || this.pumpTimer) return;
     this.pumpTimer = setTimeout(() => {
       this.pumpTimer = null;
@@ -435,12 +497,13 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
   }
 
   private async pumpOne(): Promise<void> {
-    if (this.pumping || this.stopped || !this.presenterReady || !this.viewport.visible || !this.producer || this.window.isDestroyed()) {
+    if (this.pumping || this.stopped || !this.presenterReady || !this.viewport.visible || !this.producer || this.window.isDestroyed() || this.window.isMinimized()) {
       this.schedulePump();
       return;
     }
     const producer = this.producer;
     const surfaceGeneration = this.surfaceEpoch;
+    const generation = this.generation && { ...this.generation };
     let frame: NativeFrame | null = null;
     try {
       frame = producer.nextFrame();
@@ -449,16 +512,39 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       return;
     }
     if (!frame) {
+      // A completed presentation does not guarantee a free native slot: a lost
+      // release can fill the pool after the last presentation was acknowledged.
+      // The acknowledgement timeout cannot detect this state.
+      const stats = producer.getStats();
+      if ((this.diagnostics?.presentationMode ?? "shared-texture") === "shared-texture"
+        && stats.poolSize > 0 && stats.outstandingFrames >= stats.poolSize) {
+        this.texturePoolStalledAt ??= Date.now();
+        if (Date.now() - this.texturePoolStalledAt >= TEXTURE_POOL_STALL_TIMEOUT_MS) {
+          this.texturePoolStalledAt = null;
+          this.presentationsSincePoolRecovery = 0;
+          if (++this.texturePoolRecoveries > MAX_TEXTURE_POOL_RECOVERIES) {
+            this.presenterReady = false;
+            this.fail("LIBMPV_TEXTURE_POOL_STALLED");
+            return;
+          }
+          this.requestPresenterRecovery("texture-pool-stalled");
+          return;
+        }
+      } else this.texturePoolStalledAt = null;
       this.schedulePump();
       return;
     }
+    this.texturePoolStalledAt = null;
     if (!isStrictlyNewerFrameSequence(this.lastTransferredSequence, frame.sequence)) {
       producer.releaseFrame(frame.slot, frame.sequence);
       this.schedulePump();
       return;
     }
     this.lastTransferredSequence = frame.sequence;
-    this.pumping = true;
+    const transfer = {};
+    this.pumping = transfer;
+    const isCurrentTransfer = () => this.pumping === transfer && this.producer === producer
+      && this.surfaceEpoch === surfaceGeneration && !this.stopped;
     this.awaitingPresentedSequence = frame.sequence;
     this.presentationTimer = setTimeout(() => {
       if (this.awaitingPresentedSequence !== frame!.sequence) return;
@@ -502,7 +588,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
             slot: frame!.slot,
           });
           try {
-            if (!this.sharedTextureSlots.has(frame!.sequence)) return;
+            if (!this.sharedTextureSlots.matches(frame!.sequence, surfaceGeneration)) return;
             this.sharedTextureSlots.markAllReferencesReleased(frame!.sequence);
           } catch (error) {
             this.textureLifecycleViolation(error instanceof Error ? error.message : String(error), {
@@ -527,6 +613,9 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         frame: this.window.webContents.mainFrame,
         importedSharedTexture: imported,
       }, { sequence: frame.sequence, surfaceGeneration });
+      // Channel changes and presenter resets may finish before this async send.
+      // Its completion must not alter the replacement's frame or error state.
+      if (!isCurrentTransfer()) return;
       this.diagnosticLog?.write("texture-send-complete", {
         sequence: frame.sequence,
         slot: frame.slot,
@@ -537,8 +626,8 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         sequence: frame.sequence,
         transport: "Electron sharedTexture",
       });
-      if (this.generation) {
-        this.sink?.frame(this.generation, {
+      if (generation) {
+        this.sink?.frame(generation, {
           sequence: frame.sequence,
           width: frame.width,
           height: frame.height,
@@ -546,7 +635,8 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
         });
       }
     } catch (error) {
-      if (!imported && frame && this.sharedTextureSlots.has(frame.sequence)) {
+      if (!isCurrentTransfer()) return;
+      if (!imported && frame && this.sharedTextureSlots.matches(frame.sequence, surfaceGeneration)) {
         try { this.sharedTextureSlots.abandonUnimported(frame.sequence); } catch (releaseError) {
           this.textureLifecycleViolation(releaseError instanceof Error ? releaseError.message : String(releaseError), {
             sequence: frame.sequence,
@@ -565,8 +655,10 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       this.fail("LIBMPV_TEXTURE_TRANSFER_FAILED");
     } finally {
       imported?.release();
-      this.pumping = false;
-      this.schedulePump();
+      if (this.pumping === transfer) {
+        this.pumping = null;
+        this.schedulePump();
+      }
     }
   }
 
@@ -611,7 +703,7 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
       this.presentationTimer = null;
       this.fail("LIBMPV_CPU_FRAME_TRANSFER_FAILED");
     } finally {
-      this.pumping = false;
+      this.pumping = null;
       this.schedulePump();
     }
   }
@@ -719,14 +811,13 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
 
   private logSharedTextureSlotLifecycle(
     event: SharedTextureSlotLifecycleEvent,
-    state: { slot: number; sequence: number; surfaceGeneration: number; allReferencesReleased: boolean; rendererGpuReleaseComplete: boolean },
+    state: { slot: number; sequence: number; surfaceGeneration: number; allReferencesReleased: boolean },
   ): void {
     this.diagnosticLog?.write(`texture-${event}`, {
       slot: state.slot,
       sequence: state.sequence,
       surfaceGeneration: state.surfaceGeneration,
       allReferencesReleased: state.allReferencesReleased,
-      rendererGpuReleaseComplete: state.rendererGpuReleaseComplete,
     });
   }
 
@@ -749,8 +840,18 @@ export class ElectronLibMpvBridge implements LibMpvNativeBridge {
     }
   }
 
-  private async stopCurrent(): Promise<void> {
+  private stopCurrent(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    const stopping = this.performStopCurrent().finally(() => {
+      if (this.stopping === stopping) this.stopping = null;
+    });
+    this.stopping = stopping;
+    return stopping;
+  }
+
+  private async performStopCurrent(): Promise<void> {
     this.stopped = true;
+    this.pumping = null;
     const producer = this.producer;
     if (producer && this.diagnosticLog) {
       this.collectDiagnostics();

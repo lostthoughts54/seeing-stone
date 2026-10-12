@@ -4,6 +4,9 @@ import type {
   ExternalSubtitleTrack,
   HomePayload,
   LibrarySummary,
+  LibraryFilterOptionsInput,
+  FilterChoice,
+  FilterChoicePage,
   BrowseQuery,
   BrowsePage,
   MediaItem,
@@ -88,6 +91,17 @@ const HOME_ITEM_FIELDS = [
   "CommunityRating",
 ].join(",");
 const HOME_ROW_TIMEOUT_MS = 6_000;
+const PEOPLE_FILTER_CACHE_TTL_MS = 5 * 60_000;
+const PEOPLE_FILTER_CACHE_SCOPES = 4;
+const PEOPLE_FILTER_PAGE_SIZE = 250;
+const PEOPLE_FILTER_MAX_ITEMS = 50_000;
+const PEOPLE_FILTER_MAX_PEOPLE = 100_000;
+const PEOPLE_FILTER_TIMEOUT_MS = 90_000;
+
+interface PeopleFilterCacheEntry {
+  expiresAt: number;
+  promise: Promise<FilterChoice[]>;
+}
 
 type JsonRecord = Record<string, unknown>;
 type AuthenticatedRequestOptions = {
@@ -622,6 +636,7 @@ export class JellyfinApi {
   private liveTvSearchCache: LiveTvSearchCache | null = null;
   private liveTvSearchCachePromise: Promise<LiveTvSearchCache> | null = null;
   private browseController: AbortController | null = null;
+  private readonly peopleFilterCache = new Map<string, PeopleFilterCacheEntry>();
   private readonly connectionListeners = new Set<(diagnostics: JellyfinConnectionDiagnostics) => void>();
 
   constructor(
@@ -796,11 +811,18 @@ export class JellyfinApi {
 
   /** Authenticated main-process boundary for the bundled YouTube Rooms Jellyfin plugin. */
   youtubeRoomRequest(path: string, body?: unknown, method: "GET" | "POST" | "DELETE" = body === undefined ? "GET" : "POST"): Promise<unknown> {
-    if (!/^\/SeeingStone\/YouTubeRooms(?:\/open|\/[A-Za-z0-9_-]{43}\/(?:join|leave|video|action|presence))?$/.test(path)) {
+    if (!/^\/SeeingStone\/YouTubeRooms(?:\/open|\/[A-Za-z0-9_-]{43}\/(?:join|leave|video|action|presence|queue\/add|queue\/action|advance|handoff))?$/.test(path)) {
       throw new AppError("INVALID_YOUTUBE_ROOM_ENDPOINT", "The YouTube room endpoint is invalid.", 400);
     }
     return this.request(path, {}, {
       method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+
+  playerFeaturesRequest(body?: unknown): Promise<unknown> {
+    return this.request(body === undefined ? "/SeeingStone/PlayerFeatures" : "/SeeingStone/PlayerFeatures/command", {}, {
+      method: body === undefined ? "GET" : "POST",
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   }
@@ -928,6 +950,148 @@ export class JellyfinApi {
       items,
       totalRecordCount: Math.max(items.length, Math.floor(asNumber(result.TotalRecordCount, items.length))),
     };
+  }
+
+  async getLibraryFilterOptions(input: LibraryFilterOptionsInput): Promise<FilterChoicePage> {
+    const session = this.requireSession();
+    const sessionRevision = this.sessionRevision;
+    const assertSession = (): void => {
+      if (this.session !== session || this.sessionRevision !== sessionRevision) {
+        throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.");
+      }
+    };
+    const includeItemTypes = input.type === "Mixed" ? "Movie,Series,Episode,Video" : input.type;
+    const query = input.query?.trim() ?? "";
+    if (input.kind === "genres") {
+      // This endpoint supports both library and user scope on Jellyfin 10.11.
+      // Request one extra row so pagination works even if a server omits totals.
+      const result = asRecord(await this.request("/Genres", {
+        UserId: session.userId,
+        ParentId: input.libraryId,
+        IncludeItemTypes: includeItemTypes,
+        ...(query ? { SearchTerm: query } : {}),
+        SortBy: "SortName", SortOrder: "Ascending",
+        StartIndex: String(input.startIndex), Limit: String(input.limit + 1),
+        EnableImages: "false", EnableTotalRecordCount: "false",
+      }, {}, { markUnavailableOnFailure: false }));
+      assertSession();
+      if (!Array.isArray(result.Items) || result.Items.length > input.limit + 1) {
+        throw new AppError("FILTER_OPTIONS_INVALID", "Jellyfin returned an invalid genre list. Try again.");
+      }
+      const items = new Map<string, FilterChoice>();
+      for (const raw of result.Items.slice(0, input.limit)) {
+        const label = asString(asRecord(raw).Name).trim();
+        if (label && label.length <= 256) items.set(label, { value: label, label });
+      }
+      const hasMore = result.Items.length > input.limit;
+      return { items: [...items.values()], hasMore, nextStartIndex: hasMore ? input.startIndex + input.limit : null };
+    }
+
+    const cacheKey = JSON.stringify([input.libraryId, input.type]);
+    let cache = this.peopleFilterCache.get(cacheKey);
+    if (cache && cache.expiresAt <= Date.now()) {
+      this.peopleFilterCache.delete(cacheKey);
+      cache = undefined;
+    }
+    if (!cache) {
+      if (this.peopleFilterCache.size >= PEOPLE_FILTER_CACHE_SCOPES) {
+        // Never evict a pending index and accidentally start it a second time.
+        const evictable = [...this.peopleFilterCache].find(([, value]) => Number.isFinite(value.expiresAt));
+        if (!evictable) throw new AppError("FILTER_OPTIONS_BUSY", "People are loading for other libraries. Try again shortly.");
+        this.peopleFilterCache.delete(evictable[0]);
+      }
+      const entry: PeopleFilterCacheEntry = { expiresAt: Infinity, promise: Promise.resolve([]) };
+      entry.promise = this.loadLibraryPeople(session.userId, input.libraryId, includeItemTypes, assertSession)
+        .then((items) => {
+          assertSession();
+          entry.expiresAt = Date.now() + PEOPLE_FILTER_CACHE_TTL_MS;
+          return items;
+        })
+        .catch((error: unknown) => {
+          if (this.peopleFilterCache.get(cacheKey) === entry) this.peopleFilterCache.delete(cacheKey);
+          throw error;
+        });
+      this.peopleFilterCache.set(cacheKey, entry);
+      cache = entry;
+    } else {
+      this.peopleFilterCache.delete(cacheKey);
+      this.peopleFilterCache.set(cacheKey, cache);
+    }
+    const all = await cache.promise;
+    assertSession();
+    const normalizedQuery = query.normalize("NFKC").toLocaleLowerCase();
+    const matches = normalizedQuery
+      ? all.filter((person) => person.label.normalize("NFKC").toLocaleLowerCase().includes(normalizedQuery))
+      : all;
+    const next = input.startIndex + input.limit;
+    const hasMore = next < matches.length;
+    return {
+      items: matches.slice(input.startIndex, next).map((item) => ({ ...item })),
+      hasMore,
+      nextStartIndex: hasMore ? next : null,
+    };
+  }
+
+  private async loadLibraryPeople(
+    userId: string,
+    libraryId: string,
+    includeItemTypes: string,
+    assertSession: () => void,
+  ): Promise<FilterChoice[]> {
+    // Jellyfin 10.11 /Persons has neither ParentId nor StartIndex. A lazy,
+    // session-scoped metadata index is needed to offer complete library facets.
+    // Only the additional People field is requested, with item images and user
+    // data disabled. Only person ids/names are retained from the response.
+    const timeout = AbortSignal.timeout(PEOPLE_FILTER_TIMEOUT_MS);
+    const people = new Map<string, FilterChoice>();
+    const seenItems = new Set<string>();
+    let startIndex = 0;
+    while (startIndex <= PEOPLE_FILTER_MAX_ITEMS) {
+      assertSession();
+      timeout.throwIfAborted();
+      const limit = Math.min(PEOPLE_FILTER_PAGE_SIZE, PEOPLE_FILTER_MAX_ITEMS - startIndex + 1);
+      const result = asRecord(await this.request(`/Users/${encodeURIComponent(userId)}/Items`, {
+        ParentId: libraryId, IncludeItemTypes: includeItemTypes, Recursive: "true",
+        Fields: "People", EnableImages: "false", EnableUserData: "false", EnableTotalRecordCount: "false",
+        SortBy: "SortName", SortOrder: "Ascending",
+        StartIndex: String(startIndex), Limit: String(limit),
+      }, { signal: AbortSignal.any([timeout, AbortSignal.timeout(15_000)]) }, { markUnavailableOnFailure: false }));
+      assertSession();
+      if (!Array.isArray(result.Items) || result.Items.length > limit) {
+        throw new AppError("FILTER_OPTIONS_INVALID", "Jellyfin returned an invalid people list. Try again.");
+      }
+      if (startIndex + result.Items.length > PEOPLE_FILTER_MAX_ITEMS) {
+        throw new AppError("FILTER_OPTIONS_LIMIT", "This library is too large to load its people list safely.");
+      }
+      const previousSize = seenItems.size;
+      for (const raw of result.Items) {
+        const item = asRecord(raw);
+        const itemId = safeOpaqueIdentifier(item.Id, 128);
+        if (!itemId) throw new AppError("FILTER_OPTIONS_INVALID", "Jellyfin returned an invalid people list. Try again.");
+        if (seenItems.has(itemId)) continue;
+        seenItems.add(itemId);
+        for (const rawPerson of Array.isArray(item.People) ? item.People : []) {
+          const person = asRecord(rawPerson);
+          const value = safeOpaqueIdentifier(person.Id, 128);
+          const label = asString(person.Name).trim();
+          if (value && label && label.length <= 256 && !people.has(value)) {
+            people.set(value, { value, label });
+            if (people.size > PEOPLE_FILTER_MAX_PEOPLE) {
+              throw new AppError("FILTER_OPTIONS_LIMIT", "This library is too large to load its people list safely.");
+            }
+          }
+        }
+      }
+      if (result.Items.length && seenItems.size === previousSize) {
+        throw new AppError("FILTER_OPTIONS_INVALID", "Jellyfin repeated a people page. Try again.");
+      }
+      startIndex += result.Items.length;
+      if (result.Items.length < limit) {
+        assertSession();
+        return [...people.values()].sort((left, right) => left.label.localeCompare(right.label) || left.value.localeCompare(right.value));
+      }
+    }
+    throw new AppError("FILTER_OPTIONS_LIMIT", "This library is too large to load its people list safely.");
   }
 
   async browse(query: BrowseQuery): Promise<BrowsePage> {
@@ -1088,6 +1252,41 @@ export class JellyfinApi {
       Fields: ITEM_FIELDS,
     }));
     return this.items(result).map(sanitizeMediaItem);
+  }
+
+  async getCompanionEpisodesPage(seriesId: string, startIndex: number, limit: number): Promise<{ items: MediaItem[]; nextOffset: number | null }> {
+    if (!Number.isSafeInteger(startIndex) || startIndex < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw new AppError("INVALID_EPISODE_PAGE", "The episode page is invalid.", 400);
+    }
+    const session = this.requireSession();
+    let result: JsonRecord;
+    try {
+      // Jellyfin's whole-series endpoint retains season/aired-special ordering
+      // and pages before building DTOs. Avoid fetching every season and all its
+      // playback metadata just to show a small page on the phone.
+      result = asRecord(await this.request(`/Shows/${encodeURIComponent(seriesId)}/Episodes`, {
+        UserId: session.userId,
+        StartIndex: String(startIndex),
+        Limit: String(limit + 1),
+        Fields: "PrimaryImageAspectRatio",
+        EnableUserData: "false",
+        EnableImageTypes: "Primary",
+        ImageTypeLimit: "1",
+      }, { signal: AbortSignal.timeout(10_000) }, { markUnavailableOnFailure: false }));
+    } catch (error) {
+      if (error instanceof AppError && (error.code === "BROWSE_REQUEST_FAILED" || error.code === "REQUEST_TIMEOUT")) {
+        throw new AppError("EPISODE_PAGE_UNAVAILABLE", "Episodes could not be loaded from Jellyfin. Please try again.", 503);
+      }
+      throw error;
+    }
+    if (!Array.isArray(result.Items) || result.Items.length > limit + 1
+      || result.Items.some((item) => asRecord(item).Type !== "Episode" || !asString(asRecord(item).Id))) {
+      throw new AppError("EPISODE_PAGE_INVALID", "Jellyfin returned an invalid episode page. Please try again.", 502);
+    }
+    return {
+      items: result.Items.slice(0, limit).map(sanitizeMediaItem),
+      nextOffset: result.Items.length > limit ? startIndex + limit : null,
+    };
   }
 
   async getSeriesEpisodesPage(seriesId: string, startIndex: number, limit = 200): Promise<SeriesEpisodesPage> {
@@ -1816,6 +2015,7 @@ export class JellyfinApi {
     this.session = session;
     this.liveTvSearchCache = null;
     this.liveTvSearchCachePromise = null;
+    this.peopleFilterCache.clear();
     this.sessionRevision += 1;
     this.connectionMeasurement = null;
     this.emitConnectionDiagnostics();

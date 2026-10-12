@@ -84,7 +84,7 @@ export const companionQueueStateSchema = z.object({
 
 export const companionWatchPartyStateSchema = z.object({
   joined: z.boolean(),
-  phase: z.enum(["idle", "waiting-for-participant", "preparing", "ready", "starting", "playing", "error"]),
+  phase: z.enum(["idle", "waiting-for-participant", "preparing", "buffering", "retrying", "ready", "starting", "playing", "error"]),
   participantCount: z.number().int().min(0).max(128),
   minimumParticipants: z.literal(2),
   localSyncOffsetMilliseconds: z.number().int().min(-2000).max(2000).refine((value) => value % 100 === 0),
@@ -130,6 +130,9 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("seek-relative"), seconds: z.number().finite().min(-300).max(300) }).strict(),
   z.object({ type: z.literal("set-volume"), volume: z.number().int().min(0).max(100) }).strict(),
   z.object({ type: z.literal("toggle-mute") }).strict(),
+  z.object({ type: z.literal("youtube-add"), videoUrl: z.string().trim().min(1).max(2048).refine((value) => !/[\r\n]/.test(value)), roomId: z.string().regex(/^[A-Za-z0-9_-]{43}$/), playNow: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal("youtube-control"), roomId: z.string().regex(/^[A-Za-z0-9_-]{43}$/), queueItemId: z.string().regex(/^[0-9a-f]{32}$/i), action: z.enum(["play", "pause", "next", "restart", "back", "forward"]) }).strict(),
+  z.object({ type: z.literal("youtube-queue"), roomId: z.string().regex(/^[A-Za-z0-9_-]{43}$/), queueItemId: z.string().regex(/^[0-9a-f]{32}$/i), action: z.enum(["play", "remove", "move-up", "move-down"]) }).strict(),
   z.object({ type: z.literal("previous") }).strict(),
   z.object({ type: z.literal("next") }).strict(),
   z.object({ type: z.literal("go-live") }).strict(),

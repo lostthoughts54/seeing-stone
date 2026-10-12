@@ -17,6 +17,8 @@ import {
   type PlaybackHeadRecord,
   type PlaybackRevisionRecord,
   type SmartSeriesRecord,
+  type IptvProviderRecord,
+  type IptvCatalogueOperation,
 } from "./persistenceTypes";
 
 const port = parentPort;
@@ -291,6 +293,44 @@ CREATE TABLE smart_episode_skips (
 ) STRICT, WITHOUT ROWID;
 `;
 
+// No Jellyfin foreign keys: IPTV must be usable before a server or profile exists.
+const MIGRATION_9 = `
+CREATE TABLE iptv_providers (
+  provider_id TEXT PRIMARY KEY CHECK (length(provider_id) = 36),
+  kind TEXT NOT NULL CHECK (kind IN ('xtream', 'm3u')),
+  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  protected_configuration BLOB NOT NULL CHECK (length(protected_configuration) BETWEEN 1 AND 65536),
+  created_at INTEGER NOT NULL CHECK (created_at >= 0),
+  updated_at INTEGER NOT NULL CHECK (updated_at >= created_at)
+) STRICT;
+`;
+
+const MIGRATION_10 = `
+CREATE TABLE iptv_catalogue_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES iptv_providers(provider_id) ON DELETE CASCADE,
+  published INTEGER NOT NULL DEFAULT 0 CHECK (published IN (0, 1)),
+  completed_at INTEGER,
+  UNIQUE(provider_id, snapshot_id)
+) STRICT;
+CREATE UNIQUE INDEX iptv_catalogue_active ON iptv_catalogue_snapshots(provider_id) WHERE published = 1;
+CREATE TABLE iptv_catalogue_items (
+  provider_id TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL,
+  content_type TEXT NOT NULL CHECK (content_type IN ('live', 'movie', 'series')),
+  item_id TEXT NOT NULL CHECK (length(item_id) BETWEEN 1 AND 512),
+  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 1024),
+  name_key TEXT NOT NULL,
+  group_id TEXT,
+  group_name TEXT,
+  channel_number TEXT,
+  PRIMARY KEY(snapshot_id, content_type, item_id),
+  FOREIGN KEY(provider_id, snapshot_id) REFERENCES iptv_catalogue_snapshots(provider_id, snapshot_id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+CREATE INDEX iptv_catalogue_browse ON iptv_catalogue_items(snapshot_id, content_type, name_key, item_id);
+CREATE INDEX iptv_catalogue_groups ON iptv_catalogue_items(snapshot_id, content_type, group_id, name_key, item_id);
+`;
+
 const DOWNLOAD_TRANSITIONS: Record<DownloadJobState, ReadonlySet<DownloadJobState>> = {
   queued: new Set(["downloading", "paused", "failed", "cancelled"]),
   downloading: new Set(["paused", "completed", "failed", "cancelled"]),
@@ -380,6 +420,26 @@ function initialize(): PersistenceHealth {
         db().exec("PRAGMA user_version = 8");
       });
     }
+    if (version < 9) {
+      transaction(() => {
+        db().exec(MIGRATION_9);
+        db().exec("PRAGMA user_version = 9");
+      });
+    }
+    if (version < 10) {
+      transaction(() => {
+        db().exec(MIGRATION_10);
+        db().exec("PRAGMA user_version = 10");
+      });
+    }
+    if (version < 11) transaction(() => {
+      db().exec(`CREATE TABLE iptv_channel_favourites (
+        provider_id TEXT NOT NULL REFERENCES iptv_providers(provider_id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL,
+        PRIMARY KEY(provider_id, channel_id)
+      ); PRAGMA user_version = 11;`);
+    });
+    db().prepare("DELETE FROM iptv_catalogue_snapshots WHERE published = 0").run();
     const now = Date.now();
     db().prepare(`
       UPDATE download_jobs
@@ -1088,6 +1148,99 @@ function listPlaybackHeadsForSeries(serverId: string, userId: string, seriesId: 
     .filter((head): head is PlaybackHeadRecord => head !== null);
 }
 
+function iptvProviderRow(row: Record<string, unknown>): IptvProviderRecord {
+  return {
+    providerId: String(row.provider_id), kind: row.kind as IptvProviderRecord["kind"], name: String(row.name),
+    protectedConfiguration: row.protected_configuration as Uint8Array,
+    createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
+  };
+}
+
+function iptvCatalogue(operation: IptvCatalogueOperation): unknown {
+  // Keep this equivalent to isIptvProviderHeading. Apply before counting/paging,
+  // including existing snapshots, so headings never consume a channel slot.
+  const playable = "(content_type <> 'live' OR name NOT GLOB '###*###')";
+  const providerId = operation.providerId;
+  if (operation.action === "favourite") {
+    if (operation.favourite) {
+      db().prepare(`INSERT OR IGNORE INTO iptv_channel_favourites(provider_id,channel_id)
+        SELECT provider_id,item_id FROM iptv_catalogue_items WHERE provider_id=? AND content_type='live' AND item_id=?
+        AND snapshot_id IN (SELECT snapshot_id FROM iptv_catalogue_snapshots WHERE provider_id=? AND published=1)`).run(providerId, operation.channelId, providerId);
+    } else db().prepare("DELETE FROM iptv_channel_favourites WHERE provider_id=? AND channel_id=?").run(providerId, operation.channelId);
+    return null;
+  }
+  if (operation.action === "begin") {
+    db().prepare("INSERT INTO iptv_catalogue_snapshots(snapshot_id,provider_id) VALUES (?,?)").run(operation.snapshotId, providerId);
+    return null;
+  }
+  if (operation.action === "discard") {
+    db().prepare("DELETE FROM iptv_catalogue_snapshots WHERE provider_id=? AND snapshot_id=? AND published=0").run(providerId, operation.snapshotId);
+    return null;
+  }
+  if (operation.action === "batch") {
+    if (!db().prepare("SELECT 1 FROM iptv_catalogue_snapshots WHERE provider_id=? AND snapshot_id=? AND published=0").get(providerId, operation.snapshotId)) {
+      throw new PersistenceWorkerError("IPTV_SNAPSHOT_STALE", "The catalogue import is no longer active.");
+    }
+    return transaction(() => {
+      const insert = db().prepare(`INSERT INTO iptv_catalogue_items(provider_id,snapshot_id,content_type,item_id,name,name_key,group_id,group_name,channel_number)
+        VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(snapshot_id,content_type,item_id) DO NOTHING`);
+      for (const item of operation.items) insert.run(providerId, operation.snapshotId, item.contentType, item.itemId, item.name, item.nameKey, item.groupId, item.groupName, item.channelNumber);
+      return null;
+    });
+  }
+  if (operation.action === "publish") return transaction(() => {
+    if (!db().prepare("SELECT 1 FROM iptv_catalogue_snapshots WHERE provider_id=? AND snapshot_id=? AND published=0").get(providerId, operation.snapshotId)) {
+      throw new PersistenceWorkerError("IPTV_SNAPSHOT_STALE", "The catalogue import is no longer active.");
+    }
+    db().prepare("UPDATE iptv_catalogue_snapshots SET published=0 WHERE provider_id=?").run(providerId);
+    db().prepare("UPDATE iptv_catalogue_snapshots SET published=1,completed_at=? WHERE provider_id=? AND snapshot_id=?").run(operation.completedAt, providerId, operation.snapshotId);
+    return null;
+  });
+  const active = db().prepare("SELECT snapshot_id,completed_at FROM iptv_catalogue_snapshots WHERE provider_id=? AND published=1").get(providerId);
+  if (operation.action === "status") {
+    if (!active) return null;
+    const counts = { live: 0, movie: 0, series: 0 };
+    for (const row of db().prepare(`SELECT content_type,COUNT(*) AS count FROM iptv_catalogue_items WHERE snapshot_id=? AND ${playable} GROUP BY content_type`).all(String(active.snapshot_id))) {
+      counts[row.content_type as keyof typeof counts] = Number(row.count);
+    }
+    return { snapshotId: String(active.snapshot_id), completedAt: Number(active.completed_at), counts };
+  }
+  if (operation.action === "item") {
+    if (!active) return null;
+    const row = db().prepare("SELECT * FROM iptv_catalogue_items WHERE snapshot_id=? AND content_type=? AND item_id=?").get(String(active.snapshot_id), operation.contentType, operation.itemId);
+    return row ? { contentType: row.content_type, itemId: row.item_id, name: row.name, nameKey: row.name_key, groupId: row.group_id, groupName: row.group_name, channelNumber: row.channel_number } : null;
+  }
+  if (operation.action === "groups") {
+    if (!active) return [];
+    return db().prepare(`SELECT group_id,MAX(group_name) AS name,COUNT(*) AS count FROM iptv_catalogue_items
+      WHERE snapshot_id=? AND content_type=? AND ${playable} AND group_id IS NOT NULL GROUP BY group_id ORDER BY name,group_id LIMIT 10000`)
+      .all(String(active.snapshot_id), operation.contentType).map((row) => ({ id: String(row.group_id), name: String(row.name ?? row.group_id), count: Number(row.count) }));
+  }
+  if (!active || active.snapshot_id !== operation.snapshotId) throw new PersistenceWorkerError("IPTV_SNAPSHOT_STALE", "The catalogue changed. Search again.");
+  const clauses = ["provider_id=?", "snapshot_id=?", "content_type=?", playable];
+  const favourite = "(content_type='live' AND EXISTS (SELECT 1 FROM iptv_channel_favourites f WHERE f.provider_id=iptv_catalogue_items.provider_id AND f.channel_id=iptv_catalogue_items.item_id))";
+  if (operation.favouritesOnly) clauses.push(favourite);
+  const values: Array<string | number> = [providerId, operation.snapshotId, operation.contentType];
+  if (operation.groupId !== null) { clauses.push("group_id=?"); values.push(operation.groupId); }
+  if (operation.query) {
+    clauses.push("(name_key LIKE ? ESCAPE '\\' OR channel_number LIKE ? ESCAPE '\\' OR item_id IN (SELECT value FROM json_each(?)))");
+    const query = `%${operation.query.replace(/[\\%_]/g, "\\$&")}%`;
+    values.push(query, query, JSON.stringify(operation.programmeChannelIds ?? []));
+  }
+  if (operation.afterName !== null) {
+    if (operation.contentType === "live") {
+      clauses.push(`(-${favourite},name_key,item_id) > (?,?,?)`);
+      values.push(operation.afterFavourite ? -1 : 0, operation.afterName, operation.afterId ?? "");
+    } else {
+      clauses.push("(name_key,item_id) > (?,?)"); values.push(operation.afterName, operation.afterId ?? "");
+    }
+  }
+  const order = operation.contentType === "live" ? "favourite DESC,name_key,item_id" : "name_key,item_id";
+  return db().prepare(`SELECT content_type,item_id,name,name_key,group_id,group_name,channel_number,${favourite} AS favourite FROM iptv_catalogue_items
+    WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT ?`).all(...values, operation.limit)
+    .map((row) => ({ contentType: row.content_type, itemId: row.item_id, name: row.name, nameKey: row.name_key, groupId: row.group_id, groupName: row.group_name, channelNumber: row.channel_number, favourite: Boolean(row.favourite) }));
+}
+
 function execute(operation: PersistenceOperation): unknown {
   if (operation.kind === "initialize") return initialize();
   if (operation.kind === "close") {
@@ -1098,6 +1251,22 @@ function execute(operation: PersistenceOperation): unknown {
   }
   initialize();
   switch (operation.kind) {
+    case "iptvCatalogue": return iptvCatalogue(operation.operation);
+    case "insertIptvProvider": {
+      const record = operation.record;
+      db().prepare(`INSERT INTO iptv_providers(provider_id, kind, name, protected_configuration, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(record.providerId, record.kind, record.name, record.protectedConfiguration, record.createdAt, record.updatedAt);
+      return null;
+    }
+    case "getIptvProvider": {
+      const row = db().prepare("SELECT * FROM iptv_providers WHERE provider_id = ?").get(operation.providerId);
+      return row ? iptvProviderRow(row) : null;
+    }
+    case "listIptvProviders": return db().prepare("SELECT provider_id, kind, name FROM iptv_providers ORDER BY created_at, provider_id").all()
+      .map((row) => ({ providerId: String(row.provider_id), kind: String(row.kind), name: String(row.name) }));
+    case "deleteIptvProvider": db().prepare("DELETE FROM iptv_providers WHERE provider_id = ?").run(operation.providerId); return null;
+    case "rotateIptvProviderProtection": db().prepare(`UPDATE iptv_providers SET protected_configuration = ?, updated_at = MAX(updated_at, ?)
+      WHERE provider_id = ?`).run(operation.protectedConfiguration, operation.updatedAt, operation.providerId); return null;
     case "getApplicationPreference": return getApplicationPreference(operation.key);
     case "setApplicationPreference": return setApplicationPreference(operation.key, operation.valueJson, operation.updatedAt);
     case "upsertCatalogIdentity": return upsertCatalogIdentity(operation.input);

@@ -122,6 +122,8 @@ async function runElectronChild() {
     let expireHome = false;
     let homeUnavailable = false;
     let homeGetCount = 0;
+    let sessionRestoreCount = 0;
+    const browseRequests = [];
     let logoutCount = 0;
     let seriesDetailsDelayMs = 0;
     const detailRequests = [];
@@ -237,7 +239,7 @@ async function runElectronChild() {
           connectionId: "24a625db-2973-49a1-bdb6-aae91ff9872c",
         };
       },
-      async restore() { return safeSession; },
+      async restore() { sessionRestoreCount += 1; return safeSession; },
       getSafeSession() { return safeSession; },
       async getLibraries() {
         return [
@@ -251,7 +253,9 @@ async function runElectronChild() {
       async getLibraryItems(_libraryId, type) {
         return type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeSeries];
       },
+      async getLibraryFilterOptions() { return { items: [], hasMore: false, nextStartIndex: null }; },
       async browse(query) {
+        browseRequests.push(structuredClone(query));
         let items = query.type === "Series" ? [runtimeSeries] : query.type === "Movie" ? [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie] : [runtimeItem, runtimeWatchedMovie, runtimeOtherMovie, runtimeSeries];
         if (typeof query.watched === "boolean") items = items.filter((item) => item.userData.played === query.watched);
         if (query.sort === "title-ascending") items.sort((left, right) => left.name.localeCompare(right.name));
@@ -321,6 +325,7 @@ async function runElectronChild() {
           }],
         };
       },
+      async getMovieVersions() { return []; },
       async getSeasons(seriesId) {
         seasonRequests.push(seriesId);
         return seriesId === runtimeSeries.id ? [runtimeSeasonOne, runtimeSeasonTwo] : [];
@@ -382,6 +387,7 @@ async function runElectronChild() {
       async activate() {},
       async deactivate() {},
       async list() { return [downloadedItem, downloadedMovie]; },
+      async getStorageSummary() { return { bytesUsed: 8, bytesAvailable: 1000000, bytesTotal: 1000008 }; },
       async listOfflinePlayable() {
         return [downloadedItem, downloadedMovie].map((download) => ({
           item: download.item,
@@ -573,6 +579,7 @@ async function runElectronChild() {
       }],
       joinedGroup: null,
       sharedControls: true,
+      preparation: { phase: "idle", minimumParticipants: 2, localSyncOffsetMilliseconds: 0, scheduledStartAtUnixMs: null },
       sync: { serverLatencyMs: null, localDriftTicks: null, authoritativeTimelineReady: false, measuredAtUnixMs: null },
       telemetry: {
         protocolVersion: 1,
@@ -838,23 +845,27 @@ async function runElectronChild() {
         server: ["connect", "discover"],
         session: ["getState", "login", "logout", "restore"],
         home: ["get"],
-        libraries: ["getItems", "list"],
+        libraries: ["getFilterOptions", "getItems", "list"],
         browse: ["get"],
+        people: ["getResults"],
+        updates: ["check", "open", "subscribe"],
+        playerFeatures: ["command", "subscribe"],
+        youtubeRooms: ["action", "addToQueue", "advance", "create", "getState", "handoff", "join", "leave", "presence", "queueAction", "setVideo", "setVisible", "subscribe", "testAlone"],
         search: ["query"],
         items: ["getDetails", "openTrailer", "setWatched"],
         shows: ["getEpisodes", "getSeasons"],
         artwork: ["getUrl"],
         playbackFeatures: ["getMediaSegments", "getTrickplayManifest", "getTrickplaySpriteUrl"],
-        mediaSources: ["getCapabilities"],
-        liveTv: ["cancelSchedule", "createRecording", "deleteRecording", "getGuide", "getRecordings", "getSeriesTimers", "getStatus", "getTimers", "updateSchedule"],
-        downloads: ["cancel", "chooseLocation", "delete", "getLocation", "list", "listOfflinePlayable", "openLocation", "pause", "resume", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
+        mediaSources: ["getCapabilities", "getVersions"],
+        liveTv: ["cancelSchedule", "createRecording", "deleteRecording", "getGuide", "getRecordings", "getSeriesTimers", "getStatus", "getTimers", "searchPrograms", "updateSchedule"],
+        downloads: ["cancel", "chooseLocation", "delete", "deleteWatched", "getLocation", "getStorage", "getWatchedCleanupPreview", "list", "listOfflinePlayable", "openLocation", "pause", "pauseAll", "resume", "resumePaused", "retry", "setKeep", "start", "subscribe", "useDefaultLocation"],
         smartDownloads: ["checkNow", "follow", "getState", "setLimit", "skip", "subscribe", "unfollow"],
         playback: ["cancelNextEpisode", "continueNextEpisode", "getAdapterPreference", "getState", "seek", "selectAudio", "selectSubtitle", "setAdapterPreference", "setFullscreen", "setPaused", "setRate", "setViewport", "setVolume", "start", "startLive", "stop", "subscribe"],
         sessionPanel: ["getSolo", "subscribeSolo"],
-        companion: ["beginPairing", "cancelPairing", "getStatus", "regeneratePort", "renameDevice", "revokeDevice", "selectNetwork", "setEnabled", "subscribe"],
+        companion: ["beginPairing", "cancelPairing", "getStatus", "getYouTubeSearchSettings", "regeneratePort", "renameDevice", "revokeDevice", "selectNetwork", "setEnabled", "setYouTubeApiKey", "subscribe"],
         licenses: ["list"],
         diagnostics: ["copyCleanMachine", "getCleanMachine", "saveCleanMachine"],
-        watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "setBufferingPolicy", "setLocalSyncOffset", "setVisible", "subscribe", "wait"],
+        watchParties: ["continue", "create", "getState", "join", "leave", "list", "resync", "retryPreparation", "setBufferingPolicy", "setLocalSyncOffset", "setVisible", "subscribe", "wait"],
       };
       assert.deepEqual(bridge.topKeys, Object.keys(expectedNestedKeys).sort());
       assert.deepEqual(bridge.nestedKeys, expectedNestedKeys);
@@ -889,8 +900,8 @@ async function runElectronChild() {
         const value = {
           main: entries("#mainLibraryNavigation [data-library-id]"),
           player: entries("#playerLibraryNavigation [data-library-id]"),
-          localCardIds: [],
-          localDetailTitle: null,
+          localCardTitles: [],
+          followedDetailTitle: null,
           followedShows: [],
           selectionCheckboxes: 0,
           selectedDeleteLabel: null,
@@ -898,24 +909,26 @@ async function runElectronChild() {
         document.querySelector('#mainLibraryNavigation [data-library-id="seeing-stone:downloaded"]')?.click();
         for (let attempt = 0; attempt < 100; attempt += 1) {
           if (document.getElementById("libraryTitle").textContent === "Downloaded"
-            && document.querySelectorAll("#libraryGrid [data-media-item]").length === 2) break;
+            && document.querySelectorAll("#libraryGrid .downloaded-individual-card").length === 2) break;
           await delay(20);
         }
-        value.localCardIds = [...document.querySelectorAll("#libraryGrid [data-media-item]")]
-          .map((card) => card.dataset.mediaItem).sort();
+        value.localCardTitles = [...document.querySelectorAll("#libraryGrid .downloaded-record-copy strong")]
+          .map((title) => title.textContent).sort();
         value.followedShows = [...document.querySelectorAll("#downloadedFollowedSeriesList strong")]
           .map((element) => element.textContent);
         document.getElementById("selectDownloadedButton").click();
         value.selectionCheckboxes = document.querySelectorAll("#libraryGrid [data-download-select]").length;
+        value.selectionIds = [...document.querySelectorAll("#libraryGrid [data-download-select]")]
+          .map((checkbox) => checkbox.dataset.downloadSelect).sort();
         document.querySelector('#libraryGrid [data-download-select="runtime-downloaded-movie-id"]')?.click();
         value.selectedDeleteLabel = document.getElementById("deleteSelectedDownloadedButton").textContent.trim();
         document.getElementById("cancelDownloadedSelectionButton").click();
-        document.querySelector('#libraryGrid [data-media-item="runtime-movie-id"]')?.click();
+        document.querySelector('#downloadedFollowedSeriesList .downloaded-followed-series-card').click();
         for (let attempt = 0; attempt < 100; attempt += 1) {
-          if (document.getElementById("detailTitle").textContent === "Runtime movie") break;
+          if (document.getElementById("detailTitle").textContent === "Runtime series") break;
           await delay(20);
         }
-        value.localDetailTitle = document.getElementById("detailTitle").textContent;
+        value.followedDetailTitle = document.getElementById("detailTitle").textContent;
         document.getElementById("navHomeButton").click();
         return value;
       })()`);
@@ -927,8 +940,9 @@ async function runElectronChild() {
       ];
       assert.deepEqual(result.main, expected);
       assert.deepEqual(result.player, expected);
-      assert.deepEqual(result.localCardIds, ["runtime-movie-id", "runtime-offline-episode-id"]);
-      assert.equal(result.localDetailTitle, "Runtime movie");
+      assert.deepEqual(result.localCardTitles, ["Runtime movie", "Runtime offline episode"]);
+      assert.deepEqual(result.selectionIds, ["runtime-download-id", "runtime-downloaded-movie-id"]);
+      assert.equal(result.followedDetailTitle, "Runtime series");
       assert.deepEqual(result.followedShows, ["Runtime series"]);
       assert.equal(result.selectionCheckboxes, 2);
       assert.equal(result.selectedDeleteLabel, "Delete selected (1)");
@@ -1002,7 +1016,7 @@ async function runElectronChild() {
         const custom = {
           label: document.getElementById("downloadLocationLabel").textContent,
           defaultVisible: !document.getElementById("defaultDownloadLocationButton").classList.contains("is-hidden"),
-          panelText: document.getElementById("downloadsPanel").textContent,
+          panelText: document.getElementById("downloadsView").textContent,
         };
         document.getElementById("openDownloadLocationButton").click();
         document.getElementById("defaultDownloadLocationButton").click();
@@ -1029,7 +1043,7 @@ async function runElectronChild() {
     await test("Phone Remote is prominent in primary navigation with live status", async () => {
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-        document.getElementById("closeDownloadsButton").click();
+        document.getElementById("navHomeButton").click();
         const button = document.getElementById("navCompanionButton");
         for (let attempt = 0; attempt < 100; attempt += 1) {
           if (button.getAttribute("aria-label")?.includes("off")) break;
@@ -1071,8 +1085,8 @@ async function runElectronChild() {
         document.getElementById("navWatchPartiesButton").click();
         await waitFor(() => document.querySelector(".watch-party-card h2")?.textContent === "Runtime movie night");
         const listed = {
-          title: document.querySelector("#watchPartiesView h1")?.textContent,
-          copy: document.querySelector("#watchPartiesView .page-heading > p:last-of-type")?.textContent,
+          title: document.querySelector("#watchPartiesView .watch-parties-heading h1")?.textContent,
+          copy: document.querySelector("#watchPartiesView .watch-parties-heading > p:last-of-type")?.textContent,
           group: document.querySelector(".watch-party-card h2")?.textContent,
           status: document.getElementById("watchPartyStatus").textContent,
         };
@@ -1081,7 +1095,7 @@ async function runElectronChild() {
         await waitFor(() => !document.getElementById("joinedWatchParty").classList.contains("is-hidden"));
         const joined = {
           name: document.querySelector("#joinedWatchParty strong")?.textContent,
-          participants: document.querySelectorAll("#joinedWatchParty p")[1]?.textContent,
+          participants: document.querySelector("#joinedWatchParty > p:not([class]):not([role])")?.textContent,
           shared: document.querySelector("#joinedWatchParty .shared-control-note")?.textContent,
         };
 
@@ -1303,6 +1317,7 @@ async function runElectronChild() {
       assert.equal(seasonRequests.at(-1), runtimeSeries.id);
       assert.deepEqual(episodeRequests.at(-1), { seriesId: runtimeSeries.id, seasonId: runtimeSeasonTwo.id });
 
+      await mainWindow.webContents.executeJavaScript('document.getElementById("navHomeButton").click()');
       seriesDetailsDelayMs = 150;
       const cancelled = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -1349,7 +1364,7 @@ async function runElectronChild() {
         const selectedLabel = batch.textContent.trim();
         batch.click();
         for (let attempt = 0; attempt < 150; attempt += 1) {
-          if (!document.getElementById("downloadsPanel").classList.contains("is-hidden")
+          if (!document.getElementById("downloadsView").classList.contains("is-hidden")
             && batch.textContent.trim() === "Download selected") break;
           await delay(20);
         }
@@ -1357,10 +1372,10 @@ async function runElectronChild() {
           episodeRows: document.querySelectorAll(".episode-row").length,
           episodeSelectors: document.querySelectorAll("[data-episode-select]").length,
           selectedLabel,
-          panelVisible: !document.getElementById("downloadsPanel").classList.contains("is-hidden"),
+          panelVisible: !document.getElementById("downloadsView").classList.contains("is-hidden"),
           batchDisabled: batch.disabled,
         };
-        document.getElementById("closeDownloadsButton").click();
+        document.getElementById("navHomeButton").click();
         document.getElementById("detailsBackButton").click();
         return value;
       })()`);
@@ -1375,6 +1390,7 @@ async function runElectronChild() {
     });
 
     await test("library filtering and sorting operate on the loaded Jellyfin library", async () => {
+      const browseRequestsBefore = browseRequests.length;
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         const titles = () => [...document.querySelectorAll("#libraryGrid .media-card strong")]
@@ -1384,34 +1400,59 @@ async function runElectronChild() {
           if (document.querySelectorAll("#libraryGrid .media-card").length === 3) break;
           await delay(20);
         }
-        const filter = document.getElementById("libraryFilter");
+        const waitForTitles = async (expected) => {
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (JSON.stringify(titles()) === JSON.stringify(expected)) return;
+            await delay(20);
+          }
+          throw new Error('Expected library titles ' + JSON.stringify(expected) + '; received ' + JSON.stringify(titles()));
+        };
         const sort = document.getElementById("librarySort");
         sort.value = "title-descending";
         sort.dispatchEvent(new Event("change", { bubbles: true }));
         for (let attempt = 0; attempt < 100 && titles()[0] !== "Zulu movie"; attempt += 1) await delay(20);
         const descending = titles();
-        filter.value = "unwatched";
-        filter.dispatchEvent(new Event("change", { bubbles: true }));
-        for (let attempt = 0; attempt < 100 && titles().length !== 2; attempt += 1) await delay(20);
+        document.getElementById("libraryFiltersButton").click();
+        const selectQuickFilter = (name) => {
+          const label = [...document.querySelectorAll('#filter-section-quick .filter-option')]
+            .find(option => option.querySelector('span')?.textContent === name);
+          if (!label) throw new Error('Missing visible quick filter: ' + name);
+          label.querySelector('input').click();
+        };
+        selectQuickFilter("Unplayed");
+        await waitForTitles(["Zulu movie", "Runtime movie"]);
         const unwatched = titles();
-        filter.value = "watched";
-        filter.dispatchEvent(new Event("change", { bubbles: true }));
-        for (let attempt = 0; attempt < 100 && titles().length !== 1; attempt += 1) await delay(20);
+        const activeFilterCount = document.getElementById("libraryFilterCount").textContent;
+        document.getElementById("clearLibraryFiltersButton").click();
+        await waitForTitles(["Zulu movie", "Runtime movie", "Alpha movie"]);
+        if (document.getElementById("libraryFilterDrawer").classList.contains("is-hidden")) throw new Error("Clearing filters unexpectedly closed the filter drawer.");
+        selectQuickFilter("Played");
+        await waitForTitles(["Alpha movie"]);
         const watched = titles();
+        document.getElementById("clearLibraryFiltersButton").click();
+        await waitForTitles(["Zulu movie", "Runtime movie", "Alpha movie"]);
+        document.getElementById("closeLibraryFiltersButton").click();
+        document.querySelector('[data-library-id="seeing-stone:downloaded"]').click();
+        const downloadedTitles = () => [...document.querySelectorAll('#libraryGrid .downloaded-record-copy strong')]
+          .map(title => title.textContent).sort();
+        for (let attempt = 0; attempt < 100 && downloadedTitles().length !== 2; attempt += 1) await delay(20);
+        const filter = document.getElementById("libraryFilter");
         filter.value = "downloaded";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
-        for (let attempt = 0; attempt < 100 && titles()[0] !== "Runtime movie"; attempt += 1) await delay(20);
-        const downloaded = titles();
+        const downloaded = downloadedTitles();
         filter.value = "all";
         filter.dispatchEvent(new Event("change", { bubbles: true }));
-        for (let attempt = 0; attempt < 100 && (titles().length !== 3 || titles()[0] !== "Zulu movie"); attempt += 1) await delay(20);
-        return { descending, unwatched, watched, downloaded };
+        document.querySelector('[data-library-id="runtime-library"]').click();
+        await waitForTitles(["Zulu movie", "Runtime movie", "Alpha movie"]);
+        return { descending, unwatched, watched, downloaded, activeFilterCount };
       })()`);
 
       assert.deepEqual(result.descending, ["Zulu movie", "Runtime movie", "Alpha movie"]);
       assert.deepEqual(result.unwatched, ["Zulu movie", "Runtime movie"]);
       assert.deepEqual(result.watched, ["Alpha movie"]);
-      assert.deepEqual(result.downloaded, ["Runtime movie"]);
+      assert.deepEqual(result.downloaded, ["Runtime movie", "Runtime offline episode"]);
+      assert.equal(result.activeFilterCount, "1");
+      assert.deepEqual(browseRequests.slice(browseRequestsBefore).filter((query) => typeof query.watched === "boolean").map((query) => query.watched), [false, true]);
     });
 
     await test("Home, library, and search cards expose narrow quick Play without replacing details navigation", async () => {
@@ -1529,7 +1570,7 @@ async function runElectronChild() {
       assert.equal(result.foundCard, true);
       assert.deepEqual(result.buttonLabels, ["Play", "Delete copy"]);
       assert.equal(result.playerTitle, downloadedItem.name);
-      assert.equal(result.playerMeta, "Episode - Downloaded");
+      assert.equal(result.playerMeta, "Episode - Downloaded • Media version");
       assert.equal(result.sourceBadge, "Direct Play");
       assert.equal(result.playbackItemId, downloadedItem.itemId);
       const playbackState = playback.getState();
@@ -1724,13 +1765,12 @@ async function runElectronChild() {
       assert.equal(result.episodeFit, "contain");
     });
 
-    await test("server-unavailable Home exposes a retry that restores the protected session", async () => {
-      const homeCallsBefore = homeGetCount;
+    await test("server-unavailable Home exposes a retry that retains the protected session", async () => {
       const artworkFetchesBefore = artworkFetchCount;
       homeUnavailable = true;
       const failed = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-        document.getElementById("closeDownloadsButton").click();
+        document.getElementById("navHomeButton").click();
         document.getElementById("refreshButton").click();
         for (let attempt = 0; attempt < 150; attempt += 1) {
           if (document.querySelector("[data-retry-connection]")) break;
@@ -1750,7 +1790,7 @@ async function runElectronChild() {
           offlineArtworkSource: offlineCard?.querySelector("img")?.getAttribute("src") ?? null,
           offlineRowTitle: [...document.querySelectorAll("#homeRows .row-heading h2")]
             .map((heading) => heading.textContent.trim()).find((title) => title === "Local playback available"),
-          downloadsPanelHidden: document.getElementById("downloadsPanel").classList.contains("is-hidden"),
+          downloadsPanelHidden: document.getElementById("downloadsView").classList.contains("is-hidden"),
         };
       })()`);
 
@@ -1768,6 +1808,10 @@ async function runElectronChild() {
       assert.equal(artworkFetchCount, artworkFetchesBefore);
       assert.equal(logoutCount, 0);
 
+      // Home navigation and Refresh each load the catalog. Isolate the retry itself
+      // so its exact request count does not include those two setup actions.
+      const homeCallsBeforeRetry = homeGetCount;
+      const restoresBeforeRetry = sessionRestoreCount;
       homeUnavailable = false;
       const recovered = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -1788,7 +1832,8 @@ async function runElectronChild() {
       assert.equal(recovered.homeCardRestored, true);
       assert.equal(recovered.failureRemoved, true);
       assert.equal(recovered.featureTitle, runtimeItem.name);
-      assert.equal(homeGetCount, homeCallsBefore + 2);
+      assert.equal(homeGetCount, homeCallsBeforeRetry + 1);
+      assert.equal(sessionRestoreCount, restoresBeforeRetry);
       assert.equal(logoutCount, 0);
     });
 

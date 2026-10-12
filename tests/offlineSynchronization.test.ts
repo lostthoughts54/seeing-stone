@@ -171,6 +171,58 @@ function remoteItem(positionTicks: number, played: boolean): MediaItem {
 }
 
 describe("OfflineSynchronizationService", () => {
+  it("preserves Season 0 specials interleaved by Jellyfin without rejecting the requested season", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const service = new OfflineSynchronizationService({ getAuthenticatedContext: () => context } as never,
+      persistence as never, { info() {}, warn() {}, error() {} });
+    const special = { ...remoteItem(0, false), id: "special-1", seasonId: "specials", parentIndexNumber: 0 };
+    const rows = await service.cacheEpisodes("series-1", "season-1", [remoteItem(0, false), special]);
+    expect(rows.map(row => row.seasonId)).toEqual(["season-1", "specials"]);
+    expect(rows[1].parentIndexNumber).toBe(0);
+    const saved = await persistence.getMediaItem(context.serverId, context.userId, special.id);
+    expect(saved?.seasonId).toBe("specials");
+    expect(persistence.revisions).toHaveLength(0);
+    await expect(service.cacheEpisodes("series-1", "season-1", [{ ...special, seriesId: "other-series" }]))
+      .rejects.toMatchObject({ code: "MEDIA_IDENTITY_MISMATCH" });
+    await service.shutdown();
+  });
+  it("caches browsed season episodes so watched actions queue offline and survive a stale season refresh", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    const getDetails = vi.fn(async () => { throw new Error("offline"); });
+    const service = new OfflineSynchronizationService({
+      getAuthenticatedContext: () => context,
+      getConnectionDiagnostics: () => ({ state: "offline" } as JellyfinConnectionDiagnostics),
+      getDetails, synchronizeOfflinePlayback: vi.fn(),
+    } as never, persistence as never, { info() {}, warn() {}, error() {} });
+    const episodes = [remoteItem(0, false), { ...remoteItem(0, false), id: "episode-2" }];
+    await service.cacheEpisodes("series-1", "season-1", episodes);
+    for (const item of episodes) {
+      await expect(service.setWatched(item.id, true)).resolves.toMatchObject({ itemId: item.id, watched: true, synchronization: "queued" });
+    }
+    expect(getDetails).not.toHaveBeenCalled();
+    const refreshed = await service.cacheEpisodes("series-1", "season-1", episodes);
+    expect(refreshed.map((item) => item.userData.played)).toEqual([true, true]);
+    expect(persistence.revisions).toHaveLength(2);
+    await service.shutdown();
+  });
+
+  it("rejects mismatched seasons and stops a watched action if its account changes", async () => {
+    const persistence = new MemoryPlaybackPersistence();
+    let identity = context;
+    const getDetails = vi.fn(async () => {
+      identity = { ...context, userId: "new-user" };
+      return remoteItem(0, false);
+    });
+    const service = new OfflineSynchronizationService({ getAuthenticatedContext: () => identity, getDetails } as never,
+      persistence as never, { info() {}, warn() {}, error() {} });
+    await expect(service.cacheEpisodes("series-1", "wrong-season", [remoteItem(0, false)]))
+      .rejects.toMatchObject({ code: "MEDIA_IDENTITY_MISMATCH" });
+    await expect(service.setWatched("episode-1", true)).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+    expect(persistence.revisions).toHaveLength(0);
+    expect(persistence.mediaItems.size).toBe(0);
+    await service.shutdown();
+  });
+
   it("coalesces automatic progress while preserving completion and explicit revisions", () => {
     const values = [
       revision(1),

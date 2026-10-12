@@ -5,7 +5,7 @@ Milestone 8 packages the accepted application as a branded x64 Windows desktop i
 ## Release shape
 
 - Electron Builder `26.15.3` creates an assisted NSIS installer for x64 Windows.
-- The stable application ID is `com.localfirst.jellyfin`; the product and executable name remain `LocalFirst Jellyfin` so existing Electron user data, protected sessions, device identity, SQLite state, and player preferences keep the same identity.
+- The application ID is `app.seeingstone.client`; the product and executable name are `Seeing Stone`. The standard Electron user-data directory is `%APPDATA%\Seeing Stone` and holds protected sessions, device identity, SQLite state, and player preferences.
 - Application code is stored in `resources\app.asar`. Only the SQLite worker and its runtime constants module are unpacked so Node's worker loader can execute them outside the archive. Before execution, main hashes both loose modules and compares them with a manifest stored inside the integrity-protected ASAR.
 - The controlled source-built runtime is copied to `resources\libmpv`. `libmpv-2.dll` and the native bridge provide production playback; the same build's verified `mpv.exe` is present only for headless downloaded-media validation. The historical `resources\mpv` hierarchy is prohibited.
 - Source maps, the imported prototype source, project tests, and development source folders are excluded from the application archive.
@@ -27,7 +27,7 @@ pnpm package:windows
 pnpm test:package
 ```
 
-The package test refuses to replace an existing LocalFirst Jellyfin installation. In an isolated workspace directory it verifies:
+The package test refuses to replace an existing Seeing Stone installation. In an isolated workspace directory it verifies:
 
 - x64 PE metadata, product name and version, artifact hash, and signing status;
 - the required controlled ASAR, unpacked-worker, Electron, libmpv, media-probe, manifest, and notice inventory, including the absence of `resources\mpv`;

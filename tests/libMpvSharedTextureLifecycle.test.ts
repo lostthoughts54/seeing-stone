@@ -2,25 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import { SharedTextureSlotLifecycle } from "../src/main/services/libMpvSharedTextureLifecycle";
 
 describe("SharedTextureSlotLifecycle", () => {
-  it("waits for the precise renderer GPU completion before reusing a native slot", () => {
+  it("retains a native slot until Electron releases all managed references and GPU work", () => {
     const releaseNative = vi.fn(() => true);
     const lifecycle = new SharedTextureSlotLifecycle();
     lifecycle.claim({ slot: 1, sequence: 10, surfaceGeneration: 1, releaseNative });
 
-    lifecycle.markAllReferencesReleased(10);
     expect(releaseNative).not.toHaveBeenCalled();
-
-    lifecycle.markRendererGpuReleaseComplete(10);
+    lifecycle.markAllReferencesReleased(10);
     expect(releaseNative).toHaveBeenCalledOnce();
     expect(lifecycle.pendingCount).toBe(0);
   });
 
-  it("does not wait for the coarse global reference callback after GPU completion", () => {
+  it("rejects duplicate release callbacks without freeing the native slot twice", () => {
     const releaseNative = vi.fn(() => true);
     const lifecycle = new SharedTextureSlotLifecycle();
     lifecycle.claim({ slot: 2, sequence: 20, surfaceGeneration: 1, releaseNative });
 
-    lifecycle.markRendererGpuReleaseComplete(20);
+    lifecycle.markAllReferencesReleased(20);
+    expect(() => lifecycle.markAllReferencesReleased(20)).toThrow("LIBMPV_TEXTURE_RELEASE_SIGNAL_WITHOUT_SLOT:20");
     expect(releaseNative).toHaveBeenCalledOnce();
     expect(lifecycle.pendingCount).toBe(0);
   });
@@ -35,8 +34,7 @@ describe("SharedTextureSlotLifecycle", () => {
   it("fails loudly when native release rejects a supposedly completed slot", () => {
     const lifecycle = new SharedTextureSlotLifecycle();
     lifecycle.claim({ slot: 0, sequence: 1, surfaceGeneration: 1, releaseNative: () => false });
-    lifecycle.markAllReferencesReleased(1);
-    expect(() => lifecycle.markRendererGpuReleaseComplete(1))
+    expect(() => lifecycle.markAllReferencesReleased(1))
       .toThrow("LIBMPV_NATIVE_TEXTURE_SLOT_RELEASE_REJECTED:0:1");
   });
 

@@ -73,7 +73,8 @@ describe("Windows release packaging boundary", () => {
     expect(config).toContain("from: .runtime/libmpv");
     expect(config).toContain("to: libmpv");
     expect(config).toContain('"*.dll"');
-    expect(config).toContain('"*.node"');
+    expect(config).toContain('"seeing_stone_libmpv_bridge.node"');
+    expect(config).not.toContain('"*.node"');
     expect(config).toContain('"mpv.exe"');
     expect(packageJson.scripts["package:windows"]).toContain("stage:libmpv-runtime");
     expect(packageJson.scripts["package:windows:dir"]).toContain("validate:libmpv-package");
@@ -81,7 +82,8 @@ describe("Windows release packaging boundary", () => {
     expect(releaseGate).toContain("LIBMPV_PUBLIC_RELEASE_NO_GO");
     expect(releaseGate).toContain("dependency-provenance.json");
     expect(releaseGate).toContain("public-release-acceptance.json");
-    expect(releaseGate).toContain("release-sources/libmpv");
+    expect(releaseGate).toContain(".runtime/corresponding-source-cache");
+    expect(releaseGate).toContain("corresponding source archive hash mismatch");
   });
 
   it("keeps synthetic Live TV channels out of every installer", async () => {

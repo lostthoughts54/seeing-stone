@@ -7,7 +7,7 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.7.1 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.7.2 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
@@ -24,7 +24,7 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 
 | Component | Version | License | Requirement | Source included |
 | --- | --- | --- | --- | --- |
-| Seeing Stone application and libmpv bridge | 0.7.1 | GPL-2.0-or-later | source-required | required corresponding source |
+| Seeing Stone application and libmpv bridge | 0.7.2 | GPL-2.0-or-later | source-required | required corresponding source |
 | mpv/libmpv | 0.41.0 | GPL-2.0-or-later | source-required | required corresponding source |
 | FFmpeg controlled runtime | 8.1.2 | LGPL-2.1-or-later | source-required | required corresponding source |
 | Chromium/Electron FFmpeg | Electron 43.1.0 / Chromium 150.0.7871.47 | LGPL-2.1-or-later | source-required | required corresponding source |
@@ -311,6 +311,7 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 | safe-buffer | 5.1.2 | MIT |
 | sanitize-filename | 1.6.4 | WTFPL OR ISC |
 | sax | 1.6.0 | BlueOak-1.0.0 |
+| saxes | 6.0.0 | ISC |
 | semver-compare | 1.0.0 | MIT |
 | semver | 7.8.5 | ISC |
 | serialize-error | 7.0.1 | MIT |
@@ -367,6 +368,7 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 | wrappy | 1.0.2 | ISC |
 | ws | 8.18.3 | MIT |
 | xmlbuilder | 15.1.1 | MIT |
+| xmlchars | 2.2.0 | MIT |
 | y18n | 4.0.3 | ISC |
 | yallist | 5.0.0 | BlueOak-1.0.0 |
 | yargs-parser | 18.1.3 | ISC |

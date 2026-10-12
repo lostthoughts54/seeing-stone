@@ -1,6 +1,42 @@
 import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
 
-export const DATABASE_SCHEMA_VERSION = 8;
+export const DATABASE_SCHEMA_VERSION = 11;
+
+export interface IptvCatalogueRecord {
+  contentType: "live" | "movie" | "series";
+  itemId: string;
+  name: string;
+  nameKey: string;
+  groupId: string | null;
+  groupName: string | null;
+  channelNumber: string | null;
+  favourite?: boolean;
+}
+export interface IptvCatalogueSnapshot {
+  snapshotId: string;
+  completedAt: number;
+  counts: { live: number; movie: number; series: number };
+}
+export type IptvCatalogueOperation =
+  | { action: "favourite"; providerId: string; channelId: string; favourite: boolean }
+  | { action: "begin"; providerId: string; snapshotId: string }
+  | { action: "batch"; providerId: string; snapshotId: string; items: IptvCatalogueRecord[] }
+  | { action: "publish"; providerId: string; snapshotId: string; completedAt: number }
+  | { action: "discard"; providerId: string; snapshotId: string }
+  | { action: "status"; providerId: string }
+  | { action: "item"; providerId: string; contentType: IptvCatalogueRecord["contentType"]; itemId: string }
+  | { action: "groups"; providerId: string; contentType: IptvCatalogueRecord["contentType"] }
+  | { action: "page"; providerId: string; snapshotId: string; contentType: IptvCatalogueRecord["contentType"]; query: string; groupId: string | null; afterName: string | null; afterId: string | null; limit: number; favouritesOnly?: boolean; afterFavourite?: boolean; programmeChannelIds?: string[] };
+
+/** Main/worker only. The complete setup (including credential-bearing URLs) is encrypted. */
+export interface IptvProviderRecord {
+  providerId: string;
+  kind: "xtream" | "m3u";
+  name: string;
+  protectedConfiguration: Uint8Array;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export type ApplicationPreferenceKey =
   | "player.adapter-mode"
@@ -237,6 +273,12 @@ export interface PersistenceHealth {
 
 export type PersistenceOperation =
   | { kind: "initialize" }
+  | { kind: "iptvCatalogue"; operation: IptvCatalogueOperation }
+  | { kind: "insertIptvProvider"; record: IptvProviderRecord }
+  | { kind: "getIptvProvider"; providerId: string }
+  | { kind: "listIptvProviders" }
+  | { kind: "deleteIptvProvider"; providerId: string }
+  | { kind: "rotateIptvProviderProtection"; providerId: string; protectedConfiguration: Uint8Array; updatedAt: number }
   | { kind: "getApplicationPreference"; key: ApplicationPreferenceKey }
   | { kind: "setApplicationPreference"; key: ApplicationPreferenceKey; valueJson: string; updatedAt: number }
   | { kind: "upsertCatalogIdentity"; input: CatalogIdentityInput }

@@ -99,6 +99,22 @@ describe("PlayerController mpv adapter", () => {
     });
   });
 
+  it("applies local watch-party timing without restarting the server stream", async () => {
+    const h = harness();
+
+    await expect(h.player.adjustLocalTimeline("playback-1", -1_000_000, {
+      origin: "remote-sync",
+      commandId: "local-offset:test",
+    })).resolves.toMatchObject({ positionTicks: 9_000_000 });
+
+    expect(h.commands).toContainEqual(["seek", -0.1, "relative+exact"]);
+    expect(h.events.at(-1)).toMatchObject({
+      action: "seek",
+      origin: "remote-sync",
+      commandId: "local-offset:test",
+    });
+  });
+
   it("sets bounded volume and publishes the new state immediately", async () => {
     const h = harness();
     const states: number[] = [];
@@ -109,6 +125,30 @@ describe("PlayerController mpv adapter", () => {
     expect(states).toEqual([42]);
     expect(h.events.at(-1)).toMatchObject({ action: "volume", origin: "local-user", state: { volume: 42 } });
     await expect(h.player.setVolume("playback-1", 101)).rejects.toMatchObject({ code: "INVALID_PLAYBACK_VOLUME" });
+  });
+
+  it.each(["volume", "pause", "seek", "rate", "audio", "subtitle", "fullscreen"] as const)("does not apply a late %s acknowledgement to replacement playback", async (action) => {
+    const h = harness();
+    const internals = h.player as unknown as Record<string, unknown>;
+    let finishCommand!: () => void;
+    internals.ipc = { command: () => new Promise<void>((resolve) => { finishCommand = resolve; }) };
+    const commands = {
+      volume: () => h.player.setVolume("playback-1", 42),
+      pause: () => h.player.setPaused("playback-1", true),
+      seek: () => h.player.seek("playback-1", 50_000_000),
+      rate: () => h.player.setRate("playback-1", 1.5),
+      audio: () => h.player.selectAudio("playback-1", null),
+      subtitle: () => h.player.selectSubtitle("playback-1", null),
+      fullscreen: () => h.player.setFullscreen("playback-1", true),
+    };
+    const pending = commands[action]();
+    internals.source = { playbackId: "replacement" };
+    const replacement = { ...h.player.getState(), playbackId: "replacement", itemId: "movie-2", positionTicks: 0, volume: 71 };
+    internals.state = replacement;
+    finishCommand();
+    await expect(pending).rejects.toMatchObject({ code: "INVALID_PLAYBACK" });
+    expect(internals.state).toEqual(replacement);
+    expect(h.events).toEqual([]);
   });
 
   it("turns the native Ctrl+R message into a local resync request and can show safe feedback", async () => {

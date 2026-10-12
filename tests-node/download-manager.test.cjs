@@ -7,6 +7,7 @@ const { DownloadManager } = require("../dist/main/services/downloadManager.js");
 const { AppError } = require("../dist/main/services/errors.js");
 const { LocalPlaybackResolver } = require("../dist/main/services/localPlaybackResolver.js");
 const { SqlitePersistenceService } = require("../dist/main/services/persistence.js");
+const { getLocalSubtitles, readLocalSubtitle } = require("../dist/main/services/downloadSubtitles.js");
 
 const identity = {
   serverId: "download-server",
@@ -137,6 +138,192 @@ async function closeFixture(value) {
   await value.persistence.close();
   await fs.rm(value.directory, { recursive: true, force: true });
 }
+
+test("a failed background queue lookup is handled once and later activation can recover", async () => {
+  let attempts = 0;
+  const errors = [];
+  const persistence = {
+    async upsertCatalogIdentity() {},
+    async listDownloadBundles() {
+      attempts += 1;
+      if (attempts === 1) throw new AppError("PERSISTENCE_UNAVAILABLE", "Local data storage is unavailable.", 503);
+      return [];
+    },
+  };
+  const manager = new DownloadManager(
+    createApi(Buffer.alloc(1)),
+    persistence,
+    { async probe() { assert.fail("No transfer should be started for an empty queue."); } },
+    path.join(os.tmpdir(), "lf-queue-recovery-fixture"),
+    { ...logger, error(message, details) { errors.push({ message, details }); } },
+  );
+  try {
+    await manager.activate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(attempts, 1);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /queue could not be loaded/i);
+    assert.equal(errors[0].details.error.code, "PERSISTENCE_UNAVAILABLE");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(attempts, 1, "A failed queue read must not enter an automatic retry loop.");
+
+    await manager.activate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(attempts, 2, "A later activation should be allowed to read the queue again.");
+    assert.equal(errors.length, 1);
+  } finally {
+    await manager.shutdown();
+  }
+});
+
+test("resume rejects a redirected download directory without touching outside files", async () => {
+  const value = await fixture(createApi(Buffer.alloc(1024 * 1024, 7), { slow: true }), {
+    probe: async (_root, target) => ({ actualSize: (await fs.stat(target)).size, container: "mkv" }),
+  });
+  let redirectedFolder;
+  try {
+    const started = await value.manager.start("movie-junction");
+    await waitForState(value.manager, "movie-junction", "downloading");
+    await value.manager.pause(started.downloadId);
+    const bundle = await value.persistence.getDownloadBundle(started.downloadId);
+    const folder = path.dirname(bundle.localVersion.localPath);
+    assert.ok(folder.startsWith(value.storageRoot + path.sep));
+    const outside = path.join(value.directory, "unrelated");
+    await fs.mkdir(outside);
+    const sentinels = [path.join(outside, "media.part"), path.join(outside, path.basename(bundle.localVersion.localPath))];
+    for (const file of sentinels) await fs.writeFile(file, "Do not change this unrelated file.");
+    await fs.rename(folder, folder + ".saved");
+    await fs.symlink(outside, folder, process.platform === "win32" ? "junction" : "dir");
+    redirectedFolder = folder;
+    assert.equal(await value.manager.acquireProgressive("movie-junction"), null);
+    await value.manager.resume(started.downloadId);
+    const failed = await waitForState(value.manager, "movie-junction", "failed");
+    assert.equal(failed.error.code, "INVALID_LOCAL_PATH");
+    for (const file of sentinels) assert.equal(await fs.readFile(file, "utf8"), "Do not change this unrelated file.");
+  } finally {
+    if (redirectedFolder) await fs.unlink(redirectedFolder);
+    await closeFixture(value);
+  }
+});
+
+test("resume rejects a hard-linked partial file before appending or truncating it", async () => {
+  const value = await fixture(createApi(Buffer.alloc(1024 * 1024, 7), { slow: true }), {
+    probe: async (_root, target) => ({ actualSize: (await fs.stat(target)).size, container: "mkv" }),
+  });
+  try {
+    const started = await value.manager.start("movie-hardlink");
+    await waitForState(value.manager, "movie-hardlink", "downloading");
+    await value.manager.pause(started.downloadId);
+    const bundle = await value.persistence.getDownloadBundle(started.downloadId);
+    const partial = path.join(path.dirname(bundle.localVersion.localPath), "media.part");
+    assert.ok(partial.startsWith(value.storageRoot + path.sep));
+    const outside = path.join(value.directory, "unrelated.txt");
+    await fs.writeFile(outside, "Preserve the original contents.");
+    await fs.rm(partial, { force: true });
+    await fs.link(outside, partial);
+    await value.manager.resume(started.downloadId);
+    const failed = await waitForState(value.manager, "movie-hardlink", "failed");
+    assert.equal(failed.error.code, "INVALID_LOCAL_PATH");
+    assert.equal(await fs.readFile(outside, "utf8"), "Preserve the original contents.");
+  } finally { await closeFixture(value); }
+});
+
+test("deleting a redirected completed download preserves the destination directory", async () => {
+  const value = await fixture(createApi(Buffer.alloc(1024, 7)), {
+    probe: async (_root, target) => ({ actualSize: (await fs.stat(target)).size, container: "mkv" }),
+  });
+  let redirectedFolder;
+  try {
+    await value.manager.start("movie-delete-junction");
+    const completed = await waitForState(value.manager, "movie-delete-junction", "downloaded");
+    const bundle = await value.persistence.getDownloadBundle(completed.downloadId);
+    const folder = path.dirname(bundle.localVersion.localPath);
+    assert.ok(folder.startsWith(value.storageRoot + path.sep));
+    const outside = path.join(value.directory, "unrelated");
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, "sentinel.txt"), "Keep this directory.");
+    await fs.rename(folder, folder + ".saved");
+    await fs.symlink(outside, folder, process.platform === "win32" ? "junction" : "dir");
+    redirectedFolder = folder;
+    await assert.rejects(value.manager.delete(completed.downloadId), { code: "INVALID_LOCAL_PATH" });
+    assert.equal(await fs.readFile(path.join(outside, "sentinel.txt"), "utf8"), "Keep this directory.");
+  } finally {
+    if (redirectedFolder) await fs.unlink(redirectedFolder);
+    await closeFixture(value);
+  }
+});
+
+test("downloads external subtitles with the exact video source and deletes them with that copy", async () => {
+  const content = Buffer.alloc(1024, 7);
+  const api = createApi(content);
+  const capabilities = api.getMediaSourceCapabilities;
+  api.getMediaSourceCapabilities = async (itemId) => {
+    const result = await capabilities(itemId);
+    result.sources[0].externalSubtitles = [{ streamIndex: 3, format: "srt", title: "English", language: "eng", isDefault: true, isForced: false }];
+    return result;
+  };
+  api.fetchExternalSubtitle = async (itemId, sourceId, index, format) => {
+    assert.equal(itemId, "movie-subtitle");
+    assert.equal(sourceId, "source-movie-subtitle");
+    assert.equal(index, 3);
+    assert.equal(format, "srt");
+    return new Response("saved subtitles");
+  };
+  const value = await fixture(api, { probe: async (_root, target) => ({ actualSize: (await fs.stat(target)).size, container: "mkv" }) });
+  try {
+    await value.manager.start("movie-subtitle");
+    const completed = await waitForState(value.manager, "movie-subtitle", "downloaded");
+    const bundle = await value.persistence.getDownloadBundle(completed.downloadId);
+    const subtitles = await getLocalSubtitles(bundle.localVersion);
+    assert.equal(subtitles.length, 1);
+    assert.equal(await (await readLocalSubtitle(subtitles[0])).text(), "saved subtitles");
+    const resolver = new LocalPlaybackResolver(api, value.persistence, { probe: async () => ({ actualSize: content.length, container: "mkv" }) }, [value.storageRoot]);
+    const resolved = await resolver.resolve("movie-subtitle", "resume");
+    assert.equal(resolved.localSubtitles.length, 1);
+    assert.equal(resolved.externalSubtitles[0].language, "eng");
+    assert.equal(resolved.externalSubtitles[0].file, undefined);
+    await value.manager.delete(completed.downloadId);
+    assert.equal(await fs.stat(path.dirname(bundle.localVersion.localPath)).catch(() => null), null);
+  } finally { await closeFixture(value); }
+});
+
+test("repairs existing videos without retransferring video and cancels repair before deletion", async () => {
+  const content = Buffer.alloc(1024, 8);
+  const api = createApi(content);
+  const value = await fixture(api, { probe: async (_root, target) => ({ actualSize: (await fs.stat(target)).size, container: "mkv" }) });
+  try {
+    await value.manager.start("movie-existing");
+    const completed = await waitForState(value.manager, "movie-existing", "downloaded");
+    const bundle = await value.persistence.getDownloadBundle(completed.downloadId);
+    api.fetchStaticStream = async () => { assert.fail("Video must not be downloaded again"); };
+    const capabilities = api.getMediaSourceCapabilities;
+    api.getMediaSourceCapabilities = async (itemId) => {
+      const result = await capabilities(itemId);
+      result.sources[0].externalSubtitles = [{ streamIndex: 3, format: "srt", title: "English", language: "eng", isDefault: false, isForced: false }];
+      return result;
+    };
+    api.fetchExternalSubtitle = async () => new Response("backfilled subtitles");
+    await value.manager.repairDownloadedSubtitles();
+    assert.equal((await getLocalSubtitles(bundle.localVersion)).length, 1);
+    const manifestPath = path.join(path.dirname(bundle.localVersion.localPath), "subtitles.json");
+    await fs.rm(manifestPath);
+    let begin;
+    const started = new Promise((resolve) => { begin = resolve; });
+    api.fetchExternalSubtitle = async (_item, _source, _index, _format, signal) => {
+      begin();
+      return new Response(new ReadableStream({
+        start(controller) { signal.addEventListener("abort", () => controller.error(new Error("aborted")), { once: true }); },
+      }));
+    };
+    const repairing = value.manager.repairDownloadedSubtitles();
+    await started;
+    await value.manager.delete(completed.downloadId);
+    await repairing;
+    assert.equal(await fs.stat(path.dirname(bundle.localVersion.localPath)).catch(() => null), null);
+    await value.manager.repairDownloadedSubtitles();
+    assert.equal(await fs.stat(path.dirname(bundle.localVersion.localPath)).catch(() => null), null);
+  } finally { await closeFixture(value); }
+});
 
 test("manual download finalizes only after size and probe checks, exposes no path, and deletes explicitly", async () => {
   const content = Buffer.alloc(192 * 1024, 7);

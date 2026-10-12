@@ -23,6 +23,8 @@ export type PlayerAction =
   | "fullscreen";
 
 export interface PlaybackCommandContext {
+  /** Main-validated IPTV identity; never inferred from a Jellyfin item ID. */
+  iptvIdentity?: import("../../shared/iptv").IptvPlayableIdentity;
   origin: PlayerActionOrigin;
   /** Exact renderer-requested source; validated again against Jellyfin negotiation. */
   preferredMediaSourceId?: string;
@@ -68,9 +70,12 @@ export interface PlaybackAdapter {
   loadItem(itemId: string, resumeMode: "resume" | "start-over", context?: PlayerCommandContext): Promise<PlaybackStartResult>;
   setPaused(playbackId: string, paused: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;
   seek(playbackId: string, positionTicks: number, context?: PlayerCommandContext): Promise<PlaybackState>;
+  /** Adjusts only this mpv timeline; it must not restart or seek the Jellyfin group. */
+  adjustLocalTimeline(playbackId: string, deltaTicks: number, context?: PlayerCommandContext): Promise<PlaybackState>;
   setPlaybackRate(playbackId: string, rate: number, context?: PlayerCommandContext): Promise<PlaybackState>;
   selectAudio(playbackId: string, trackId: number | null): Promise<PlaybackState>;
   selectSubtitle(playbackId: string, trackId: number | null): Promise<PlaybackState>;
+  setSubtitleDelay?(playbackId: string, seconds: number): Promise<void>;
   setFullscreen(playbackId: string, fullscreen: boolean, context?: PlayerCommandContext): Promise<PlaybackState>;
   continueNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState>;
   cancelNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState>;

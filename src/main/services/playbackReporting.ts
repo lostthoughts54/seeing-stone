@@ -4,6 +4,7 @@ import type { OfflineSynchronizationService } from "./offlineSynchronization";
 import type { DurablePlaybackReport, PlaybackActionKind, PlaybackRevisionRecord } from "./persistenceTypes";
 
 export interface AuthoritativePlaybackEvent extends DurablePlaybackReport {
+  iptvIdentity?: import("../../shared/iptv").IptvPlayableIdentity;
   itemId: string;
   positionTicks: number;
   actionKind: PlaybackActionKind;
@@ -24,6 +25,8 @@ export class PlaybackReportingService {
   ) {}
 
   async acceptAuthoritativeEvent(event: AuthoritativePlaybackEvent): Promise<void> {
+    // Live IPTV has no durable position and must never report to Jellyfin.
+    if (event.iptvIdentity) return;
     if (event.contentKind === "live-tv") {
       try {
         await this.api.reportAuthoritativePlayback({

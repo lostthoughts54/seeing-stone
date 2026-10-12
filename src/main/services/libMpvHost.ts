@@ -34,6 +34,7 @@ export type LibMpvHostCommand =
   | { kind: "play" }
   | { kind: "pause" }
   | { kind: "seek"; positionTicks: number }
+  | { kind: "seek-relative"; deltaTicks: number }
   | { kind: "rate"; rate: number }
   | { kind: "volume"; volume: number }
   | { kind: "select-audio"; trackId: number | null }
@@ -60,6 +61,7 @@ export interface LibMpvHostSource {
   location: string;
   httpHeaders?: Readonly<Record<string, string>>;
   startupTimeoutMilliseconds?: number;
+  initialPaused?: boolean;
 }
 
 export interface LibMpvGeneration {
@@ -140,9 +142,10 @@ export class LibMpvHost {
   }
 
   async open(source: LibMpvHostSource, startPositionTicks: number): Promise<LibMpvSession> {
+    const generation = this.nextPlaybackGeneration();
     await this.initialize();
     if (!this.bridge || this.destroyed) throw new AppError("LIBMPV_UNAVAILABLE", "The experimental player is unavailable.", 503);
-    const generation = this.nextPlaybackGeneration();
+    if (!this.isCurrent(generation)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.", 409);
     await this.bridge.open(source, startPositionTicks, generation);
     if (!this.isCurrent(generation)) {
       throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.", 409);

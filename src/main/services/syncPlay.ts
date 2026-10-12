@@ -93,7 +93,7 @@ type Envelope = z.infer<typeof envelopeSchema>;
 type GroupUpdate = z.infer<typeof groupUpdateSchema>;
 type Command = z.infer<typeof commandSchema>;
 
-interface MessageEntry { envelope: Envelope; receivedAt: number }
+interface MessageEntry { envelope: Envelope; sequence: number }
 interface SyncAnchor {
   membershipRevision: number;
   playlistItemId: string;
@@ -172,6 +172,7 @@ export class SyncPlayService {
   private rememberedGroupId: string | null = null;
   private reconciling = false;
   private messageHistory: MessageEntry[] = [];
+  private messageSequence = 0;
   private appliedMessageIds = new Set<string>();
   private currentPlaylistItemId: string | null = null;
   private playerUnsubscribe: (() => void) | null = null;
@@ -190,9 +191,22 @@ export class SyncPlayService {
   private lastDriftTicks: number | null = null;
   private driftMeasuredAtUnixMs: number | null = null;
   private localSyncOffsetMilliseconds = 0;
+  private appliedLocalOffsetTicks = 0;
+  private localOffsetPending = false;
+  private localOffsetRevision = 0;
+  private localOffsetInFlight = false;
+  private timelineCommandsInFlight = 0;
   private localItemPrepared = false;
   private readyReported = false;
   private currentItemStarted = false;
+  private scheduledCommandRevision = 0;
+  private cancelCommandWait: (() => void) | null = null;
+  private latestCommandEmittedAt = 0;
+  private preparationRevision = 0;
+  private preparationQueue: z.infer<typeof playQueueSchema> | null = null;
+  private readyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readyAttempts = 0;
+  private readyReportRevision = 0;
   private readonly telemetry: ParticipantTelemetryCoordinator;
 
   constructor(
@@ -280,6 +294,7 @@ export class SyncPlayService {
       this.reconnectAttempt = 0;
       this.startPeriodicTasks();
       this.setState({ ...this.state, availability: "available", connection: "connected", error: null });
+      await this.maybeReportReady();
       context.signal.addEventListener("abort", () => { if (revision === this.activationRevision) void this.deactivate(false); }, { once: true });
     } catch (error) {
       this.closeTransport();
@@ -299,6 +314,7 @@ export class SyncPlayService {
 
   async deactivate(leave = true): Promise<void> {
     this.activationRevision += 1;
+    this.cancelPreparation();
     if (leave && this.state.joinedGroup) {
       await this.api.syncPlayRequest("/SyncPlay/Leave", {}, "POST").catch(() => undefined);
     }
@@ -322,6 +338,8 @@ export class SyncPlayService {
     this.timeSyncReady = false;
     this.membershipRevision += 1;
     this.messageHistory = [];
+    this.preparationQueue = null;
+    this.latestCommandEmittedAt = 0;
     this.appliedMessageIds.clear();
     await this.telemetry.stop();
     await this.restoreNormalRate().catch(() => undefined);
@@ -350,7 +368,7 @@ export class SyncPlayService {
 
   async create(name: string): Promise<WatchPartyViewState> {
     this.requireAvailable();
-    const from = this.messageHistory.length;
+    const from = this.messageSequence;
     await this.api.syncPlayRequest("/SyncPlay/New", { GroupName: name }, "POST");
     await this.waitForGroupUpdate("GroupJoined", from);
     await this.refreshGroups();
@@ -359,7 +377,7 @@ export class SyncPlayService {
 
   async join(groupId: string): Promise<WatchPartyViewState> {
     this.requireAvailable();
-    const from = this.messageHistory.length;
+    const from = this.messageSequence;
     await this.api.syncPlayRequest("/SyncPlay/Join", { GroupId: groupId }, "POST");
     await this.waitForGroupUpdate("GroupJoined", from, groupId);
     await this.refreshGroups();
@@ -368,8 +386,9 @@ export class SyncPlayService {
 
   async leave(): Promise<WatchPartyViewState> {
     if (!this.state.joinedGroup) return this.getState();
+    this.cancelPreparation();
     this.rememberedGroupId = null;
-    const from = this.messageHistory.length;
+    const from = this.messageSequence;
     await this.api.syncPlayRequest("/SyncPlay/Leave", {}, "POST");
     await this.waitForGroupUpdate("GroupLeft", from).catch(() => undefined);
     this.clearJoinedGroup();
@@ -404,6 +423,7 @@ export class SyncPlayService {
 
   async requestPaused(paused: boolean): Promise<PlaybackState> {
     this.requireJoined();
+    if (paused) this.cancelScheduledCommand();
     if (!paused && this.isInitialStartGated()) {
       throw new AppError("SYNCPLAY_WAITING_FOR_PARTICIPANT", "Waiting for another participant. Leave the party to watch solo.", 409);
     }
@@ -417,26 +437,31 @@ export class SyncPlayService {
     }
     await this.preferences?.setWatchPartySyncOffset?.(offsetMilliseconds);
     this.localSyncOffsetMilliseconds = offsetMilliseconds;
+    this.localOffsetRevision += 1;
+    this.localOffsetPending = true;
     this.setPreparation({ localSyncOffsetMilliseconds: offsetMilliseconds });
-    await this.applyLocalSyncOffsetImmediately().catch((error) => this.handleBackgroundFailure(error));
+    await this.applyLocalSyncOffsetImmediately();
     await this.correctDrift().catch((error) => this.handleBackgroundFailure(error));
     return this.getState();
   }
 
   async requestSeek(positionTicks: number): Promise<PlaybackState> {
     this.requireJoined();
+    this.cancelScheduledCommand();
     await this.api.syncPlayRequest("/SyncPlay/Seek", { PositionTicks: positionTicks }, "POST");
     return this.player.getState();
   }
 
   async requestStop(): Promise<PlaybackState> {
     this.requireJoined();
+    this.cancelPreparation();
     await this.api.syncPlayRequest("/SyncPlay/Stop", {}, "POST");
     return this.player.getState();
   }
 
   async waitForAll(): Promise<WatchPartyViewState> {
     this.requireJoined();
+    this.cancelScheduledCommand();
     await this.telemetry.wait();
     return this.getState();
   }
@@ -473,7 +498,19 @@ export class SyncPlayService {
       return await operation;
     } finally {
       if (this.localResyncInFlight === operation) this.localResyncInFlight = null;
+      await this.applyLocalSyncOffsetImmediately();
     }
+  }
+
+  async retryPreparation(): Promise<WatchPartyViewState> {
+    this.requireJoined();
+    const queue = this.preparationQueue;
+    if (!queue || this.currentItemStarted || this.state.preparation.phase !== "error") {
+      throw new AppError("SYNCPLAY_RETRY_NOT_READY", "Preparation can be retried after a startup failure.", 409);
+    }
+    this.enqueuePreparation(queue);
+    await this.queueTask;
+    return this.getState();
   }
 
   private async performLocalResync(): Promise<PlaybackState> {
@@ -498,17 +535,29 @@ export class SyncPlayService {
       throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
     }
     const playbackId = state.playbackId;
-    const targetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
+    const isCurrent = () => membershipRevision === this.membershipRevision && this.syncAnchor === anchor
+      && this.player.getState().playbackId === playbackId;
+    const offsetRevision = this.localOffsetRevision;
+    const groupTargetTicks = this.authoritativeTargetTicks(anchor);
+    const targetTicks = this.currentItemStarted ? this.offsetTargetTicks(groupTargetTicks, state.durationTicks) : groupTargetTicks;
     if (this.player.getPlaybackRate() !== 1) state = await this.player.setPlaybackRate(playbackId, 1, context);
+    if (!isCurrent()) throw new AppError("SYNCPLAY_PREPARATION_CANCELLED", "The shared timeline changed.");
     if (!state.paused) state = await this.player.setPaused(playbackId, true, context);
+    if (!isCurrent()) throw new AppError("SYNCPLAY_PREPARATION_CANCELLED", "The shared timeline changed.");
     state = await this.player.seek(playbackId, targetTicks, context);
+    state = await this.waitForPlayerTarget(itemId, targetTicks, true, 15000, isCurrent);
+    this.appliedLocalOffsetTicks = targetTicks - groupTargetTicks;
+    if (this.currentItemStarted && offsetRevision === this.localOffsetRevision) this.localOffsetPending = false;
     if (anchor.playing) state = await this.player.setPaused(playbackId, false, context);
-    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) {
+    if (!isCurrent()) {
       throw new AppError("SYNCPLAY_GROUP_CHANGED", "The watch party changed while this computer was resyncing.", 409);
     }
-    state = await this.waitForPlayerTarget(itemId, targetTicks, !anchor.playing, 15000);
-    this.setSyncAnchor(targetTicks, anchor.playing);
-    await this.sendReady(anchor.playing);
+    // Keep Jellyfin's anchor separate from this computer's shifted target.
+    if (this.currentItemStarted) await this.sendReady(anchor.playing);
+    else {
+      this.localItemPrepared = true;
+      await this.maybeReportReady();
+    }
     this.setState({ ...this.state, error: null });
     return state;
   }
@@ -531,6 +580,7 @@ export class SyncPlayService {
     socket.on("close", () => {
       if (revision !== this.activationRevision || socket !== this.socket) return;
       this.socket = null;
+      this.cancelPreparation();
       this.stopPeriodicTasks();
       this.reconciling = true;
       this.timeSyncReady = false;
@@ -558,7 +608,7 @@ export class SyncPlayService {
     const envelope = envelopeSchema.safeParse(parsed);
     if (!envelope.success) return;
     if (this.appliedMessageIds.has(envelope.data.MessageId)) return;
-    this.messageHistory.push({ envelope: envelope.data, receivedAt: performance.now() });
+    this.messageHistory.push({ envelope: envelope.data, sequence: ++this.messageSequence });
     if (this.messageHistory.length > 200) this.messageHistory.splice(0, this.messageHistory.length - 200);
     if (envelope.data.MessageType === "SyncPlayGroupUpdate") {
       const update = groupUpdateSchema.safeParse(envelope.data.Data);
@@ -604,6 +654,8 @@ export class SyncPlayService {
       const participants = joined.participants.filter((name) => name !== update.Data);
       this.setJoined({ ...joined, participants, participantCount: participants.length });
       if (!this.currentItemStarted && participants.length < 2 && this.localItemPrepared) {
+        this.cancelScheduledCommand();
+        this.clearReadyRetry();
         this.readyReported = false;
         this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
         void this.sendBuffering(true).catch((error) => this.handleBackgroundFailure(error));
@@ -621,18 +673,38 @@ export class SyncPlayService {
         });
         return;
       }
-      const membershipRevision = this.membershipRevision;
-      this.queueTask = this.queueTask.then(() => this.applyPlayQueue(queue.data, membershipRevision)).catch((error) => {
-        this.logger.warn("SyncPlay queue application failed.", { code: error instanceof AppError ? error.code : "SYNCPLAY_QUEUE_FAILED" });
-        this.setPreparation({ phase: "error", scheduledStartAtUnixMs: null });
-        this.setState({ ...this.state, error: publicError(error) });
-      });
+      this.enqueuePreparation(queue.data);
     }
   }
 
-  private async applyPlayQueue(queue: z.infer<typeof playQueueSchema>, membershipRevision: number): Promise<void> {
+  private enqueuePreparation(queue: z.infer<typeof playQueueSchema>): void {
+    this.cancelPreparation();
+    this.preparationQueue = queue;
+    this.latestCommandEmittedAt = 0;
+    this.localItemPrepared = false;
+    this.readyReported = false;
+    this.readyAttempts = 0;
+    this.currentItemStarted = false;
+    this.appliedLocalOffsetTicks = 0;
+    const membershipRevision = this.membershipRevision;
+    const revision = this.preparationRevision;
+    this.setState({ ...this.state, error: null });
+    this.setPreparation({ phase: "preparing", scheduledStartAtUnixMs: null });
+    this.queueTask = this.queueTask.then(async () => {
+      if (revision !== this.preparationRevision) return;
+      await this.applyPlayQueue(queue, membershipRevision, revision);
+    }).catch((error) => {
+      if (revision !== this.preparationRevision) return;
+      this.logger.warn("SyncPlay queue application failed.", { code: error instanceof AppError ? error.code : "SYNCPLAY_QUEUE_FAILED" });
+      this.setPreparation({ phase: "error", scheduledStartAtUnixMs: null });
+      this.setState({ ...this.state, error: publicError(error) });
+    });
+  }
+
+  private async applyPlayQueue(queue: z.infer<typeof playQueueSchema>, membershipRevision: number, revision = this.preparationRevision): Promise<void> {
     const joined = this.state.joinedGroup;
-    if (!joined || membershipRevision !== this.membershipRevision) return;
+    const isCurrent = () => Boolean(this.state.joinedGroup && membershipRevision === this.membershipRevision && revision === this.preparationRevision);
+    if (!joined || !isCurrent()) return;
     const selected = queue.Playlist[queue.PlayingItemIndex];
     this.lastDriftTicks = null;
     this.driftMeasuredAtUnixMs = null;
@@ -651,14 +723,14 @@ export class SyncPlayService {
       monotonicTimestampMs: performance.now(),
     };
     const state = this.player.getState();
-    if (state.itemId !== selected.ItemId || !state.playbackId || state.diagnostics?.sourceKind === "downloading") {
+    if (state.itemId !== selected.ItemId || !state.playbackId || ["error", "stopped", "ended", "disconnected"].includes(state.phase) || state.diagnostics?.sourceKind === "downloading") {
       await this.player.loadItem(selected.ItemId, "start-over", {
         origin: "remote-sync",
         commandRevision: ++this.commandRevision,
         commandId: `queue:${selected.PlaylistItemId}`,
       });
     }
-    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) return;
+    if (!isCurrent()) return;
     let loaded = this.player.getState();
     if (loaded.playbackId && !loaded.paused) {
       loaded = await this.player.setPaused(loaded.playbackId, true, {
@@ -667,7 +739,7 @@ export class SyncPlayService {
         commandId: `queue-pause:${selected.PlaylistItemId}`,
       });
     }
-    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) return;
+    if (!isCurrent()) return;
     if (loaded.playbackId && Math.abs(loaded.positionTicks - queue.StartPositionTicks) > 1_000_000) {
       await this.player.seek(loaded.playbackId, queue.StartPositionTicks, {
         origin: "remote-sync",
@@ -675,9 +747,10 @@ export class SyncPlayService {
         commandId: `queue-seek:${selected.PlaylistItemId}`,
       });
     }
-    if (!this.state.joinedGroup || membershipRevision !== this.membershipRevision) return;
-    loaded = await this.waitForPlayerTarget(selected.ItemId, queue.StartPositionTicks, true, 15000);
-    if (!loaded.playbackId) return;
+    if (!isCurrent()) return;
+    this.setPreparation({ phase: "buffering" });
+    loaded = await this.waitForPlayerTarget(selected.ItemId, queue.StartPositionTicks, true, 30000, isCurrent);
+    if (!isCurrent() || !loaded.playbackId) return;
     this.localItemPrepared = true;
     await this.maybeReportReady();
   }
@@ -687,70 +760,122 @@ export class SyncPlayService {
     const joined = this.state.joinedGroup;
     if (!joined || command.GroupId !== joined.groupId) return;
     if (command.Command !== "Stop" && (!this.currentPlaylistItemId || command.PlaylistItemId !== this.currentPlaylistItemId)) return;
-    if (Date.parse(command.EmittedAt) < Date.parse(joined.lastUpdatedAt) - 1000) return;
+    const emittedAt = Date.parse(command.EmittedAt);
+    if (emittedAt < Date.parse(joined.lastUpdatedAt) - 1000 || emittedAt < this.latestCommandEmittedAt) return;
     const membershipRevision = this.membershipRevision;
     if (!this.timeSyncReady) return;
+    this.latestCommandEmittedAt = emittedAt;
+    this.cancelScheduledCommand();
+    const revision = this.scheduledCommandRevision;
+    const isCurrent = () => revision === this.scheduledCommandRevision
+      && membershipRevision === this.membershipRevision
+      && this.state.joinedGroup?.groupId === command.GroupId
+      && (command.Command === "Stop" || command.PlaylistItemId === this.currentPlaylistItemId);
     const localCommandTime = Date.parse(command.When) - this.serverTimeOffsetMs;
-    const delay = Math.max(0, Math.min(2000, localCommandTime - Date.now()));
+    const delay = Math.max(0, localCommandTime - Date.now());
     if (command.Command === "Unpause" && !this.currentItemStarted) {
-      if (this.isInitialStartGated()) {
+      if (this.isInitialStartGated() || !this.localItemPrepared || !this.isPlayerReady(this.player.getState())) {
         this.readyReported = false;
-        this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
+        if (this.isInitialStartGated()) this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
         await this.sendBuffering(true).catch(() => undefined);
         return;
       }
       this.setPreparation({ phase: "starting", scheduledStartAtUnixMs: Math.round(Date.now() + delay) });
+      this.clearReadyRetry();
+      this.readyAttempts = 0;
       const current = this.player.getState();
       if (current.playbackId) {
-        await this.player.showMessage(current.playbackId, "Starting…", Math.max(500, delay)).catch(() => undefined);
+        void this.player.showMessage(current.playbackId, "Starting…", Math.min(5000, Math.max(500, delay))).catch(() => undefined);
       }
     }
-    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-    if (!this.state.joinedGroup || this.state.joinedGroup.groupId !== command.GroupId || membershipRevision !== this.membershipRevision) return;
-    if (command.Command !== "Stop" && command.PlaylistItemId !== this.currentPlaylistItemId) return;
+    while (isCurrent() && Date.now() < localCommandTime) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          if (this.cancelCommandWait === finish) this.cancelCommandWait = null;
+          resolve();
+        };
+        const timer = setTimeout(finish, Math.min(2_147_483_647, Math.max(1, localCommandTime - Date.now())));
+        this.cancelCommandWait = finish;
+      });
+    }
+    if (!isCurrent()) return;
     const state = this.player.getState();
     if (!state.playbackId) return;
     const context = { origin: "remote-sync" as const, commandRevision: ++this.commandRevision, commandId: messageId };
-    if (command.Command === "Pause") {
-      const paused = await this.player.setPaused(state.playbackId, true, context);
-      const positionTicks = command.PositionTicks ?? paused.positionTicks;
-      if (Math.abs(paused.positionTicks - positionTicks) > DRIFT_TOLERANCE_TICKS) {
-        await this.player.seek(state.playbackId, positionTicks, context);
+    this.timelineCommandsInFlight += 1;
+    try {
+      if (command.Command === "Pause") {
+        const paused = await this.player.setPaused(state.playbackId, true, context);
+        if (!isCurrent()) return;
+        const positionTicks = command.PositionTicks ?? this.groupPositionTicks(paused);
+        const localTarget = this.currentItemStarted ? this.offsetTargetTicks(positionTicks, paused.durationTicks) : positionTicks;
+        if (Math.abs(paused.positionTicks - localTarget) > DRIFT_TOLERANCE_TICKS
+          || (this.currentItemStarted && this.localOffsetPending && paused.positionTicks !== localTarget)) {
+          await this.player.seek(state.playbackId, localTarget, context);
+        }
+        if (!isCurrent()) return;
+        this.appliedLocalOffsetTicks = localTarget - positionTicks;
+        this.setSyncAnchor(positionTicks, false);
+        if (!this.currentItemStarted && this.localItemPrepared) this.setPreparation({ phase: "ready", scheduledStartAtUnixMs: null });
+      } else if (command.Command === "Unpause") {
+        if (!this.isPlayerReady(state) || (!this.currentItemStarted && (this.isInitialStartGated() || !this.localItemPrepared))) {
+          this.readyReported = false;
+          this.setPreparation({ phase: "buffering", scheduledStartAtUnixMs: null });
+          await this.sendBuffering(true).catch(() => undefined);
+          return;
+        }
+        const basePosition = command.PositionTicks ?? this.groupPositionTicks(state);
+        const serverNow = Date.now() + this.serverTimeOffsetMs;
+        const elapsedTicks = Math.max(0, Math.min(5 * TICKS_PER_SECOND, (serverNow - Date.parse(command.When)) * 10_000));
+        const targetPosition = basePosition + elapsedTicks;
+        const startingAnchor: SyncAnchor = {
+          membershipRevision,
+          playlistItemId: command.PlaylistItemId,
+          positionTicks: targetPosition,
+          playing: true,
+          monotonicTimestampMs: performance.now(),
+        };
+        const localTargetPosition = this.localAuthoritativeTargetTicks(startingAnchor, state.durationTicks);
+        const offsetRevision = this.localOffsetRevision;
+        const needsOffsetCorrection = (this.localSyncOffsetMilliseconds !== 0 || this.appliedLocalOffsetTicks !== 0 || this.localOffsetPending)
+          && Math.abs(state.positionTicks - localTargetPosition) > 0;
+        if (needsOffsetCorrection || Math.abs(state.positionTicks - targetPosition) >= DRIFT_SEEK_TICKS) {
+          if (needsOffsetCorrection && Math.abs(state.positionTicks - targetPosition) < DRIFT_SEEK_TICKS) {
+            await this.player.adjustLocalTimeline(state.playbackId, localTargetPosition - state.positionTicks, context);
+          } else {
+            await this.player.seek(state.playbackId, localTargetPosition, context);
+          }
+        }
+        if (!isCurrent()) return;
+        await this.player.setPaused(state.playbackId, false, context);
+        if (!isCurrent()) return;
+        this.appliedLocalOffsetTicks = localTargetPosition - targetPosition;
+        if (offsetRevision === this.localOffsetRevision) this.localOffsetPending = false;
+        this.setSyncAnchor(targetPosition, true);
+        this.currentItemStarted = true;
+        this.setPreparation({ phase: "playing", scheduledStartAtUnixMs: null });
+        await this.correctDrift();
+      } else if (command.Command === "Seek" && command.PositionTicks !== null) {
+        const localTarget = this.currentItemStarted ? this.offsetTargetTicks(command.PositionTicks, state.durationTicks) : command.PositionTicks;
+        const sought = await this.player.seek(state.playbackId, localTarget, context);
+        if (!isCurrent()) return;
+        const settled = await this.waitForPlayerTarget(state.itemId!, localTarget, sought.paused, 15000, isCurrent);
+        if (!isCurrent()) return;
+        this.appliedLocalOffsetTicks = localTarget - command.PositionTicks;
+        this.setSyncAnchor(command.PositionTicks, !settled.paused);
+        if (this.currentItemStarted) await this.sendReady(!settled.paused);
+        else await this.maybeReportReady();
+      } else if (command.Command === "Stop") {
+        this.cancelPreparation();
+        this.syncAnchor = null;
+        this.lastDriftTicks = null;
+        this.driftMeasuredAtUnixMs = null;
+        await this.player.stop(state.playbackId, "stopped", context);
       }
-      this.setSyncAnchor(positionTicks, false);
-    } else if (command.Command === "Unpause") {
-      const basePosition = command.PositionTicks ?? state.positionTicks;
-      const serverNow = Date.now() + this.serverTimeOffsetMs;
-      const elapsedTicks = Math.max(0, Math.min(5 * TICKS_PER_SECOND, (serverNow - Date.parse(command.When)) * 10_000));
-      const targetPosition = basePosition + elapsedTicks;
-      const startingAnchor: SyncAnchor = {
-        membershipRevision,
-        playlistItemId: command.PlaylistItemId,
-        positionTicks: targetPosition,
-        playing: true,
-        monotonicTimestampMs: performance.now(),
-      };
-      const localTargetPosition = this.localAuthoritativeTargetTicks(startingAnchor, state.durationTicks);
-      const needsOffsetCorrection = this.localSyncOffsetMilliseconds !== 0
-        && Math.abs(state.positionTicks - localTargetPosition) > 0;
-      if (needsOffsetCorrection || Math.abs(state.positionTicks - targetPosition) >= DRIFT_SEEK_TICKS) {
-        await this.player.seek(state.playbackId, localTargetPosition, context);
-      }
-      await this.player.setPaused(state.playbackId, false, context);
-      this.setSyncAnchor(targetPosition, true);
-      this.currentItemStarted = true;
-      this.setPreparation({ phase: "playing", scheduledStartAtUnixMs: null });
-      await this.correctDrift();
-    } else if (command.Command === "Seek" && command.PositionTicks !== null) {
-      const sought = await this.player.seek(state.playbackId, command.PositionTicks, context);
-      const settled = await this.waitForPlayerTarget(state.itemId!, command.PositionTicks, sought.paused, 15000);
-      this.setSyncAnchor(command.PositionTicks, !settled.paused);
-      await this.sendReady(!settled.paused);
-    } else if (command.Command === "Stop") {
-      this.syncAnchor = null;
-      this.lastDriftTicks = null;
-      this.driftMeasuredAtUnixMs = null;
-      await this.player.stop(state.playbackId, "stopped", context);
+    } finally {
+      this.timelineCommandsInFlight -= 1;
+      await this.applyLocalSyncOffsetImmediately();
     }
   }
 
@@ -774,7 +899,18 @@ export class SyncPlayService {
     }
     if (!this.state.joinedGroup || !this.currentPlaylistItemId) return;
     if (event.action === "buffering") {
-      if (event.state.buffering) await this.restoreNormalRate().catch(() => undefined);
+      if (event.state.itemId !== this.state.joinedGroup.currentItemId || event.state.playbackId !== this.player.getState().playbackId) return;
+      if (event.state.buffering) {
+        if (!this.timelineCommandsInFlight && !this.localResyncInFlight && !this.localOffsetInFlight) this.cancelScheduledCommand();
+        this.clearReadyRetry();
+        this.readyReported = false;
+        if (!this.currentItemStarted && this.state.preparation.phase !== "error") this.setPreparation({ phase: "buffering", scheduledStartAtUnixMs: null });
+        await this.restoreNormalRate().catch(() => undefined);
+      } else if (!this.currentItemStarted) {
+        await this.maybeReportReady();
+        return;
+      }
+      if (!event.state.buffering) await this.applyLocalSyncOffsetImmediately();
       await this.sendBuffering(event.state.buffering).catch(() => undefined);
       return;
     }
@@ -783,13 +919,23 @@ export class SyncPlayService {
       return;
     }
     if (event.action === "error") {
+      this.cancelScheduledCommand();
+      this.clearReadyRetry();
+      if (!this.currentItemStarted) this.setPreparation({ phase: "error", scheduledStartAtUnixMs: null });
       await this.restoreNormalRate().catch(() => undefined);
       this.setState({ ...this.state, error: { code: "SYNCPLAY_PLAYBACK_FAILED", message: event.state.error || "This item could not be played on this computer." } });
       await this.sendBuffering(true).catch(() => undefined);
       return;
     }
+    if (["state", "ready", "load-item"].includes(event.action)) {
+      if (!this.currentItemStarted) await this.maybeReportReady();
+      else await this.applyLocalSyncOffsetImmediately();
+    }
     if (event.origin !== "local-user") return;
-    if (event.action === "pause") await this.api.syncPlayRequest("/SyncPlay/Pause", {}, "POST");
+    if (event.action === "pause") {
+      this.cancelScheduledCommand();
+      await this.api.syncPlayRequest("/SyncPlay/Pause", {}, "POST");
+    }
     else if (event.action === "play") {
       if (this.isInitialStartGated()) {
         if (event.state.playbackId && !event.state.paused) {
@@ -801,8 +947,14 @@ export class SyncPlayService {
       }
       await this.api.syncPlayRequest("/SyncPlay/Unpause", {}, "POST");
     }
-    else if (event.action === "seek") await this.api.syncPlayRequest("/SyncPlay/Seek", { PositionTicks: event.state.positionTicks }, "POST");
-    else if (event.action === "stop") await this.api.syncPlayRequest("/SyncPlay/Stop", {}, "POST");
+    else if (event.action === "seek") {
+      this.cancelScheduledCommand();
+      await this.api.syncPlayRequest("/SyncPlay/Seek", { PositionTicks: event.state.positionTicks }, "POST");
+    }
+    else if (event.action === "stop") {
+      this.cancelPreparation();
+      await this.api.syncPlayRequest("/SyncPlay/Stop", {}, "POST");
+    }
   }
 
   private async sendReady(isPlaying: boolean): Promise<void> {
@@ -810,7 +962,7 @@ export class SyncPlayService {
     if (!this.currentPlaylistItemId) return;
     await this.api.syncPlayRequest("/SyncPlay/Ready", {
       When: this.serverNowIso(),
-      PositionTicks: state.positionTicks,
+      PositionTicks: this.groupPositionTicks(state),
       IsPlaying: isPlaying,
       PlaylistItemId: this.currentPlaylistItemId,
     }, "POST");
@@ -818,28 +970,87 @@ export class SyncPlayService {
 
   private async maybeReportReady(): Promise<void> {
     const joined = this.state.joinedGroup;
-    if (!joined || !this.currentPlaylistItemId || !this.localItemPrepared || this.currentItemStarted) return;
+    if (this.reconciling || this.state.connection !== "connected"
+      || !joined || !this.currentPlaylistItemId || !this.localItemPrepared || this.currentItemStarted) return;
+    const state = this.player.getState();
+    if (!this.isPlayerReady(state) || state.itemId !== joined.currentItemId || !state.paused) return;
+    if (this.state.preparation.phase === "error" || this.readyRetryTimer) return;
     if (joined.participantCount < 2) {
       this.setPreparation({ phase: "waiting-for-participant", scheduledStartAtUnixMs: null });
       return;
     }
-    this.setPreparation({ phase: "ready", scheduledStartAtUnixMs: null });
     if (this.readyReported) return;
+    this.setPreparation({ phase: "ready", scheduledStartAtUnixMs: null });
     this.readyReported = true;
+    this.readyAttempts += 1;
+    const revision = this.readyReportRevision;
     try {
       await this.sendReady(false);
+      if (revision !== this.readyReportRevision) return;
+      this.readyAttempts = 0;
+      this.setState({ ...this.state, error: null });
     } catch (error) {
+      if (revision !== this.readyReportRevision) return;
       this.readyReported = false;
-      throw error;
+      const status = error instanceof AppError ? error.status : undefined;
+      const retryable = !(status && status >= 400 && status < 500 && status !== 408 && status !== 429)
+        && !(error instanceof AppError && ["SESSION_EXPIRED", "NOT_AUTHENTICATED", "SESSION_CHANGED"].includes(error.code));
+      if (!retryable || this.readyAttempts >= 5) {
+        this.setPreparation({ phase: "error", scheduledStartAtUnixMs: null });
+        this.setState({ ...this.state, error: {
+          code: "SYNCPLAY_READY_FAILED",
+          message: "This computer could not confirm readiness. Retry preparation to try again.",
+        } });
+        if (error instanceof AppError && ["SESSION_EXPIRED", "NOT_AUTHENTICATED", "SESSION_CHANGED"].includes(error.code)) {
+          this.handleBackgroundFailure(error);
+        }
+        return;
+      }
+      this.setPreparation({ phase: "retrying", scheduledStartAtUnixMs: null });
+      this.readyRetryTimer = setTimeout(() => {
+        this.readyRetryTimer = null;
+        if (revision === this.readyReportRevision) void this.maybeReportReady().catch((failure) => this.handleBackgroundFailure(failure));
+      }, 500 * 2 ** (this.readyAttempts - 1));
     }
+  }
+
+  private isPlayerReady(state: PlaybackState): boolean {
+    return Boolean(state.playbackId && !state.buffering && !state.seeking && ["ready", "paused", "playing"].includes(state.phase));
+  }
+
+  private clearReadyRetry(): void {
+    this.readyReportRevision += 1;
+    if (this.readyRetryTimer) clearTimeout(this.readyRetryTimer);
+    this.readyRetryTimer = null;
+  }
+
+  private cancelScheduledCommand(): void {
+    this.scheduledCommandRevision += 1;
+    this.cancelCommandWait?.();
+    this.cancelCommandWait = null;
+    if (this.state.preparation.phase === "starting") {
+      this.setPreparation({ phase: this.localItemPrepared ? "ready" : "preparing", scheduledStartAtUnixMs: null });
+    }
+  }
+
+  private cancelPreparation(): void {
+    this.preparationRevision += 1;
+    this.localOffsetRevision += 1;
+    this.localOffsetPending = false;
+    this.appliedLocalOffsetTicks = 0;
+    this.cancelScheduledCommand();
+    this.clearReadyRetry();
+    this.localItemPrepared = false;
+    this.readyReported = false;
   }
 
   private async sendBuffering(buffering: boolean): Promise<void> {
     const state = this.player.getState();
     if (!this.currentPlaylistItemId) return;
+    if (!buffering && !this.currentItemStarted) return this.maybeReportReady();
     await this.api.syncPlayRequest(buffering ? "/SyncPlay/Buffering" : "/SyncPlay/Ready", {
       When: this.serverNowIso(),
-      PositionTicks: state.positionTicks,
+      PositionTicks: this.groupPositionTicks(state),
       IsPlaying: !state.paused,
       PlaylistItemId: this.currentPlaylistItemId,
     }, "POST");
@@ -869,8 +1080,9 @@ export class SyncPlayService {
       availability: "available",
       groups,
       joinedGroup: matching && joined ? { ...joined, ...matching } : joined,
-      error: null,
+      error: this.state.preparation.phase === "error" ? this.state.error : null,
     });
+    await this.maybeReportReady();
   }
 
   private applyJoinedGroup(update: GroupUpdate): void {
@@ -890,6 +1102,9 @@ export class SyncPlayService {
       return;
     }
     this.membershipRevision += 1;
+    this.cancelPreparation();
+    this.latestCommandEmittedAt = 0;
+    this.preparationQueue = null;
     this.currentPlaylistItemId = null;
     this.lastPublishedTransitionItemId = null;
     this.syncAnchor = null;
@@ -899,11 +1114,14 @@ export class SyncPlayService {
   }
 
   private setJoined(group: JoinedWatchParty): void {
-    this.setState({ ...this.state, joinedGroup: group, error: null });
+    this.setState({ ...this.state, joinedGroup: group, error: this.state.preparation.phase === "error" ? this.state.error : null });
     this.updateTransitionAuthority();
   }
 
   private clearJoinedGroup(): void {
+    this.cancelPreparation();
+    this.preparationQueue = null;
+    this.latestCommandEmittedAt = 0;
     if (this.state.joinedGroup || this.currentPlaylistItemId) this.membershipRevision += 1;
     this.currentPlaylistItemId = null;
     this.rememberedGroupId = null;
@@ -951,11 +1169,23 @@ export class SyncPlayService {
    * the anchor itself. Positive offsets intentionally put this player ahead.
    */
   private localAuthoritativeTargetTicks(anchor: SyncAnchor, durationTicks: number): number {
+    return this.offsetTargetTicks(this.authoritativeTargetTicks(anchor), durationTicks);
+  }
+
+  private authoritativeTargetTicks(anchor: SyncAnchor): number {
     const elapsedTicks = anchor.playing ? Math.max(0, (performance.now() - anchor.monotonicTimestampMs) * 10_000) : 0;
+    return Math.min(MAX_PLAYBACK_TICKS, Math.max(0, Math.round(anchor.positionTicks + elapsedTicks)));
+  }
+
+  private offsetTargetTicks(groupPositionTicks: number, durationTicks: number): number {
     return Math.min(
       durationTicks || Number.MAX_SAFE_INTEGER,
-      Math.max(0, Math.round(anchor.positionTicks + elapsedTicks + this.localSyncOffsetMilliseconds * 10_000)),
+      Math.max(0, Math.round(groupPositionTicks + this.localSyncOffsetMilliseconds * 10_000)),
     );
+  }
+
+  private groupPositionTicks(state: PlaybackState): number {
+    return Math.max(0, Math.round(state.positionTicks - this.appliedLocalOffsetTicks));
   }
 
   /** Applies a timing preference to this player only; it never sends a SyncPlay command. */
@@ -964,33 +1194,59 @@ export class SyncPlayService {
     const joined = this.state.joinedGroup;
     const state = this.player.getState();
     if (
-      !this.hasAuthoritativeTimeline()
+      !this.localOffsetPending || this.localOffsetInFlight || this.timelineCommandsInFlight
+      || this.localResyncInFlight || this.driftCorrectionInFlight || !this.currentItemStarted
+      || !this.hasAuthoritativeTimeline()
       || !anchor
       || !joined
       || !state.playbackId
       || state.itemId !== joined.currentItemId
-      || state.buffering
+      || !this.isPlayerReady(state)
       || (anchor.playing && state.paused)
     ) return;
 
     const membershipRevision = this.membershipRevision;
+    const revision = this.localOffsetRevision;
+    const commandRevision = this.scheduledCommandRevision;
+    const isCurrent = () => membershipRevision === this.membershipRevision && anchor === this.syncAnchor
+      && commandRevision === this.scheduledCommandRevision && this.hasAuthoritativeTimeline()
+      && state.playbackId === this.player.getState().playbackId;
     const context = {
       origin: "remote-sync" as const,
       commandRevision: ++this.commandRevision,
       commandId: `local-offset:${anchor.playlistItemId}:${this.commandRevision}`,
     };
-    const targetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
-    if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
-    if (membershipRevision !== this.membershipRevision || !this.hasAuthoritativeTimeline()) return;
-    await this.player.seek(state.playbackId, targetTicks, context);
+    this.localOffsetInFlight = true;
+    try {
+      if (this.player.getPlaybackRate() !== 1) await this.player.setPlaybackRate(state.playbackId, 1, context);
+      if (!isCurrent()) return;
+      const current = this.player.getState();
+      if (!this.isPlayerReady(current)) return;
+      const groupTarget = this.authoritativeTargetTicks(anchor);
+      const targetTicks = this.offsetTargetTicks(groupTarget, current.durationTicks);
+      const delta = targetTicks - current.positionTicks;
+      if (Math.abs(delta) > 20 * TICKS_PER_SECOND) await this.player.seek(state.playbackId, targetTicks, context);
+      else if (delta !== 0) await this.player.adjustLocalTimeline(state.playbackId, delta, context);
+      if (!isCurrent()) return;
+      this.appliedLocalOffsetTicks = targetTicks - groupTarget;
+      if (revision === this.localOffsetRevision) this.localOffsetPending = false;
+    } catch (error) {
+      if (revision === this.localOffsetRevision) this.localOffsetPending = false;
+      throw error;
+    } finally {
+      this.localOffsetInFlight = false;
+      if (revision !== this.localOffsetRevision && this.localOffsetPending) await this.applyLocalSyncOffsetImmediately();
+    }
   }
 
   private async correctDrift(): Promise<void> {
-    if (this.driftCorrectionInFlight) return;
+    if (this.driftCorrectionInFlight || this.localOffsetInFlight || this.timelineCommandsInFlight || this.localResyncInFlight) return;
+    await this.applyLocalSyncOffsetImmediately();
+    if (this.driftCorrectionInFlight || this.localOffsetInFlight || this.timelineCommandsInFlight || this.localResyncInFlight) return;
     const anchor = this.syncAnchor;
     const joined = this.state.joinedGroup;
     const state = this.player.getState();
-    if (!this.hasAuthoritativeTimeline() || !anchor || !joined || !state.playbackId || state.buffering || state.paused || !anchor.playing) return;
+    if (!this.hasAuthoritativeTimeline() || !anchor || !joined || !state.playbackId || !this.isPlayerReady(state) || state.paused || !anchor.playing) return;
     if (anchor.membershipRevision !== this.membershipRevision || anchor.playlistItemId !== this.currentPlaylistItemId) return;
     const localTargetTicks = this.localAuthoritativeTargetTicks(anchor, state.durationTicks);
     const driftTicks = localTargetTicks - state.positionTicks;
@@ -1079,6 +1335,7 @@ export class SyncPlayService {
   }
 
   private closeTransport(): void {
+    this.cancelPreparation();
     this.stopPeriodicTasks();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -1138,7 +1395,7 @@ export class SyncPlayService {
       const rememberedGroupId = this.rememberedGroupId;
       if (rememberedGroupId) {
         if (this.state.groups.some((group) => group.groupId === rememberedGroupId)) {
-          const from = this.messageHistory.length;
+          const from = this.messageSequence;
           await this.api.syncPlayRequest("/SyncPlay/Join", { GroupId: rememberedGroupId }, "POST");
           await this.waitForGroupUpdate("GroupJoined", from, rememberedGroupId);
         } else {
@@ -1151,6 +1408,7 @@ export class SyncPlayService {
       this.reconnectAttempt = 0;
       this.startPeriodicTasks();
       this.setState({ ...this.state, availability: "available", connection: "connected", error: reconciliationError });
+      await this.maybeReportReady();
       this.updateTransitionAuthority();
     } catch (error) {
       const socket = this.socket;
@@ -1192,6 +1450,7 @@ export class SyncPlayService {
   }
 
   private handleBackgroundFailure(error: unknown): void {
+    if (error instanceof AppError && error.code === "SYNCPLAY_PREPARATION_CANCELLED") return;
     if (error instanceof AppError && (error.code === "SESSION_EXPIRED" || error.code === "NOT_AUTHENTICATED" || error.code === "SESSION_CHANGED")) {
       void this.deactivate(false);
       return;
@@ -1264,8 +1523,11 @@ export class SyncPlayService {
 
   private async waitForMessage<T>(predicate: (envelope: Envelope) => T | null, from: number, timeoutMs: number): Promise<T> {
     const deadline = Date.now() + timeoutMs;
+    const revision = this.activationRevision;
     while (Date.now() < deadline) {
-      for (const entry of this.messageHistory.slice(from)) {
+      if (revision !== this.activationRevision) throw new AppError("SESSION_CHANGED", "The Jellyfin session changed.");
+      for (const entry of this.messageHistory) {
+        if (entry.sequence <= from) continue;
         const value = predicate(entry.envelope);
         if (value !== null) return value;
       }
@@ -1290,15 +1552,17 @@ export class SyncPlayService {
     positionTicks: number,
     paused: boolean,
     timeoutMs: number,
+    isCurrent: () => boolean = () => true,
   ): Promise<PlaybackState> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (!isCurrent()) throw new AppError("SYNCPLAY_PREPARATION_CANCELLED", "The watch-party playback request was replaced.");
       const state = this.player.getState();
-      if (state.itemId === itemId && state.playbackId && state.paused === paused
-        && Math.abs(state.positionTicks - positionTicks) <= DRIFT_TOLERANCE_TICKS) return state;
       if (state.itemId === itemId && state.phase === "error") {
         throw new AppError("SYNCPLAY_PLAYBACK_FAILED", state.error || "The shared position could not be applied.");
       }
+      if (state.itemId === itemId && this.isPlayerReady(state) && state.paused === paused
+        && Math.abs(state.positionTicks - positionTicks) <= DRIFT_TOLERANCE_TICKS) return state;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     throw new AppError("SYNCPLAY_PLAYER_NOT_READY", "The player did not reach the shared position in time.", 504);

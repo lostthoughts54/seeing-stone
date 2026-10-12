@@ -1,9 +1,10 @@
-import { mkdir, open, rename, rm, stat, statfs } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { lstat, mkdir, open, realpath, rename, rm, stat, statfs } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DownloadBulkResult, DownloadStorageSummary, DownloadSummary, MediaItem, MediaSourceCapabilities, OfflinePlayableSummary, PlaybackDiagnostics } from "../../shared/contracts";
 import { materializeCachedMediaItem } from "./cachedMedia";
 import { formatMediaVersionLabel } from "../../shared/mediaVersions";
 import { AppError, toPublicError } from "./errors";
+import { cacheDownloadSubtitles } from "./downloadSubtitles";
 import type { AuthenticatedContext, JellyfinApi } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { MediaProbeService } from "./mediaProbe";
@@ -18,7 +19,7 @@ import {
 
 type DownloadApi = Pick<JellyfinApi,
   "getAuthenticatedContext" | "getDetails" | "getMediaSourceCapabilities" | "fetchStaticStream"
->;
+> & Partial<Pick<JellyfinApi, "fetchExternalSubtitle" | "getConnectionDiagnostics" | "onConnectionDiagnostics">>;
 
 type StopIntent = "pause" | "cancel" | "session" | "shutdown";
 
@@ -143,6 +144,12 @@ export class DownloadManager implements ProgressiveDownloadProvider {
   private readonly transferBytes = new Map<string, number>();
   private readonly authorizedRoots = new Map<string, string>();
   private storageRoot: string;
+  private subtitleRepair: Promise<void> | null = null;
+  private subtitleRepairController: AbortController | null = null;
+  private activeSubtitleRepair: { downloadId: string; controller: AbortController; promise: Promise<void> } | null = null;
+  private readonly excludedSubtitleRepairs = new Set<string>();
+  private subtitleRepairTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly unsubscribeConnection: () => void;
 
   constructor(
     private readonly api: DownloadApi,
@@ -163,6 +170,14 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       const available = value.bavail * value.bsize;
       return available > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(available);
     });
+    let previousConnection = api.getConnectionDiagnostics?.().state;
+    this.unsubscribeConnection = api.onConnectionDiagnostics?.((diagnostics) => {
+      const previous = previousConnection;
+      previousConnection = diagnostics.state;
+      if (diagnostics.state === "connected" && (previous === "offline" || previous === "reconnecting")) {
+        void this.repairDownloadedSubtitles();
+      }
+    }) ?? (() => undefined);
   }
 
   setStorageRoot(storageRoot: string): void {
@@ -189,9 +204,10 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     const changed = !this.identity
       || this.identity.serverId !== identity.serverId
       || this.identity.userId !== identity.userId;
-    if (changed && this.transfers.size) await this.deactivate("session");
+    if (changed && (this.transfers.size || this.subtitleRepair)) await this.deactivate("session");
     this.identity = identity;
     this.revision += 1;
+    this.excludedSubtitleRepairs.clear();
     await this.persistence.upsertCatalogIdentity({
       serverId: identity.serverId,
       serverAddress: identity.serverAddress,
@@ -201,11 +217,19 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     });
     await this.notify();
     this.pump();
+    void this.repairDownloadedSubtitles();
+    if (!this.subtitleRepairTimer) {
+      this.subtitleRepairTimer = setInterval(() => { void this.repairDownloadedSubtitles(); }, 5 * 60_000);
+      this.subtitleRepairTimer.unref?.();
+    }
   }
 
   async deactivate(intent: "session" | "shutdown" = "session"): Promise<void> {
     this.revision += 1;
     this.identity = null;
+    if (this.subtitleRepairTimer) clearInterval(this.subtitleRepairTimer);
+    this.subtitleRepairTimer = null;
+    this.subtitleRepairController?.abort();
     await this.invalidateAllLeases(intent === "shutdown" ? "shutdown" : "session-changed");
     const pending: Promise<void>[] = [];
     for (const [downloadId, transfer] of this.transfers) {
@@ -214,12 +238,14 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       pending.push(transfer.promise);
     }
     await Promise.allSettled(pending);
+    await this.subtitleRepair;
   }
 
   async shutdown(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     await this.deactivate("shutdown");
+    this.unsubscribeConnection();
     this.listeners.clear();
   }
 
@@ -323,6 +349,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       versionLabel: mediaSource?.diagnostics?.versionLabel ?? null,
     };
     let lease!: ActiveProgressiveDownloadLease;
+    await this.assertPhysicalPath(local.storageRoot, partialPath);
     lease = new ActiveProgressiveDownloadLease({
       descriptor: {
         item,
@@ -503,6 +530,11 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     if (bundle.job.state !== "completed" || !bundle.localVersion) {
       throw new AppError("DOWNLOAD_NOT_DELETABLE", "Only completed downloaded copies can be deleted.", 409);
     }
+    this.excludedSubtitleRepairs.add(downloadId);
+    if (this.activeSubtitleRepair?.downloadId === downloadId) {
+      this.activeSubtitleRepair.controller.abort();
+      await this.activeSubtitleRepair.promise;
+    }
     await this.invalidateLeases(downloadId, "deleted");
     await this.cleanup(bundle.localVersion);
     const localVersion = await this.persistence.updateLocalVersion({
@@ -534,6 +566,53 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     if (this.identity) await this.notify();
   }
 
+  /** Backfill existing videos and retry unavailable sidecars without downloading video again. */
+  repairDownloadedSubtitles(): Promise<void> {
+    if (this.subtitleRepair) return this.subtitleRepair;
+    const identity = this.identity;
+    const connection = this.api.getConnectionDiagnostics?.().state;
+    if (!identity || this.stopped || !this.api.fetchExternalSubtitle || connection === "offline" || connection === "reconnecting") return Promise.resolve();
+    const controller = new AbortController();
+    this.subtitleRepairController = controller;
+    const revision = this.revision;
+    this.subtitleRepair = (async () => {
+      const bundles = await this.persistence.listDownloadBundles(identity.serverId, identity.userId);
+      for (const bundle of bundles) {
+        if (controller.signal.aborted || revision !== this.revision) break;
+        const local = bundle.localVersion;
+        if (bundle.job.state !== "completed" || local?.fileState !== "finalized" || local.probeState !== "valid"
+          || this.excludedSubtitleRepairs.has(bundle.job.downloadId)) continue;
+        const requestController = new AbortController();
+        const promise = this.cacheSubtitles(local, AbortSignal.any([controller.signal, requestController.signal])).catch(() => undefined);
+        this.activeSubtitleRepair = { downloadId: bundle.job.downloadId, controller: requestController, promise };
+        await promise;
+        this.activeSubtitleRepair = null;
+      }
+    })().catch((error) => {
+      if (!controller.signal.aborted) this.logger.warn("Downloaded subtitle repair could not finish.", error);
+    }).finally(() => {
+      this.subtitleRepair = null;
+      this.subtitleRepairController = null;
+      this.activeSubtitleRepair = null;
+    });
+    return this.subtitleRepair;
+  }
+
+  private async cacheSubtitles(local: LocalVersionRecord, signal: AbortSignal): Promise<void> {
+    if (!this.api.fetchExternalSubtitle) return;
+    try {
+      this.authorizedPath(local.storageRoot, local.localPath);
+      await this.assertPhysicalPath(local.storageRoot, local.localPath);
+      await cacheDownloadSubtitles({
+        getMediaSourceCapabilities: (itemId, requestSignal) => this.api.getMediaSourceCapabilities(itemId, requestSignal),
+        fetchExternalSubtitle: (...args) => this.api.fetchExternalSubtitle!(...args),
+      }, local, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      this.logger.warn("Some downloaded subtitles are unavailable; a background check will retry them.", { itemId: local.itemId, error });
+    }
+  }
+
   private requireIdentity(): AuthenticatedContext {
     if (!this.identity) throw new AppError("NOT_AUTHENTICATED", "Sign in to Jellyfin first.", 401);
     return this.identity;
@@ -551,7 +630,11 @@ export class DownloadManager implements ProgressiveDownloadProvider {
   private pump(): void {
     if (this.pumping || this.stopped || !this.identity) return;
     this.pumping = true;
-    void this.pumpNow().finally(() => { this.pumping = false; });
+    void this.pumpNow()
+      .catch((error) => {
+        this.logger.error("Download queue could not be loaded. A later download action can retry it.", { error });
+      })
+      .finally(() => { this.pumping = false; });
   }
 
   private async pumpNow(): Promise<void> {
@@ -585,7 +668,11 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       const finalPath = this.authorizedPath(storageRoot, local.localPath);
       const folder = dirname(finalPath);
       const partialPath = this.authorizedPath(storageRoot, join(folder, "media.part"));
+      await mkdir(storageRoot, { recursive: true });
+      await this.assertPhysicalPath(storageRoot, folder, true);
       await mkdir(folder, { recursive: true });
+      await this.assertPhysicalPath(storageRoot, finalPath, true);
+      await this.assertPhysicalPath(storageRoot, partialPath, true);
 
       const finalFile = await stat(finalPath).catch(() => null);
       if (finalFile?.isFile()) {
@@ -599,10 +686,12 @@ export class DownloadManager implements ProgressiveDownloadProvider {
             probeState: "valid",
             actualSize: result.actualSize,
           });
+          await this.cacheSubtitles(local, signal);
           await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
           this.completeLeases(downloadId, finalPath);
           return;
         }
+        await this.assertPhysicalPath(storageRoot, finalPath);
         await rm(finalPath, { force: true });
       }
 
@@ -610,6 +699,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       let offset = partial?.isFile() ? partial.size : 0;
       this.transferBytes.set(downloadId, offset);
       if (initial.job.expectedSize !== null && offset > initial.job.expectedSize) {
+        await this.assertPhysicalPath(storageRoot, partialPath);
         await rm(partialPath, { force: true });
         offset = 0;
         this.transferBytes.set(downloadId, offset);
@@ -618,6 +708,8 @@ export class DownloadManager implements ProgressiveDownloadProvider {
         await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: offset });
         await this.beginLeaseFinalization(downloadId);
         try {
+          await this.assertPhysicalPath(storageRoot, partialPath);
+          await this.assertPhysicalPath(storageRoot, finalPath, true);
           await rename(partialPath, finalPath);
           this.publishLeaseRenamed(downloadId, finalPath);
         } catch (error) {
@@ -631,6 +723,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
           probeState: "valid",
           actualSize: result.actualSize,
         });
+        await this.cacheSubtitles(local, signal);
         await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
         this.completeLeases(downloadId, finalPath);
         return;
@@ -665,6 +758,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: offset });
       await this.notify();
 
+      await this.assertPhysicalPath(storageRoot, partialPath, true);
       const handle = await open(partialPath, offset > 0 ? "a" : "w");
       let bytes = offset;
       let lastSaved = Date.now();
@@ -698,6 +792,8 @@ export class DownloadManager implements ProgressiveDownloadProvider {
       await this.persistence.transitionDownload({ downloadId, state: "downloading", bytesDownloaded: bytes });
       await this.beginLeaseFinalization(downloadId);
       try {
+        await this.assertPhysicalPath(storageRoot, partialPath);
+        await this.assertPhysicalPath(storageRoot, finalPath, true);
         await rename(partialPath, finalPath);
         this.publishLeaseRenamed(downloadId, finalPath);
       } catch (error) {
@@ -712,6 +808,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
         probeState: "valid",
         actualSize: result.actualSize,
       });
+      await this.cacheSubtitles(local, signal);
       await this.persistence.transitionDownload({ downloadId, state: "completed", bytesDownloaded: result.actualSize });
       this.completeLeases(downloadId, finalPath);
     } catch (error) {
@@ -813,7 +910,43 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     const target = this.authorizedPath(local.storageRoot, local.localPath);
     const folder = dirname(target);
     this.authorizedPath(local.storageRoot, folder);
+    await this.assertPhysicalPath(local.storageRoot, folder, true);
     await rm(folder, { recursive: true, force: true });
+  }
+
+  private async assertPhysicalPath(storageRoot: string, candidate: string, allowMissing = false): Promise<void> {
+    const target = this.authorizedPath(storageRoot, candidate);
+    const root = resolve(storageRoot);
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = await realpath(root);
+    } catch (error) {
+      if (allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    let existing = root;
+    for (const part of relative(root, target).split(sep)) {
+      const next = join(existing, part);
+      let entry: Awaited<ReturnType<typeof lstat>>;
+      try {
+        entry = await lstat(next);
+      } catch (error) {
+        if (allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") break;
+        throw error;
+      }
+      // The selected root itself may be a mounted/custom location. Individual
+      // download folders and files must not redirect to another copy or share
+      // writable file contents through a hard link.
+      if (entry.isSymbolicLink() || (entry.isFile() && entry.nlink > 1)) {
+        throw new AppError("INVALID_LOCAL_PATH", "A download path failed its storage-boundary check.", 400);
+      }
+      existing = next;
+    }
+    const canonical = await realpath(existing);
+    const child = relative(canonicalRoot, canonical);
+    if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+      throw new AppError("INVALID_LOCAL_PATH", "A download path failed its storage-boundary check.", 400);
+    }
   }
 
   private partialPath(local: LocalVersionRecord): string {
@@ -837,6 +970,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     let partialPath: string;
     try {
       partialPath = this.partialPath(local);
+      await this.assertPhysicalPath(local.storageRoot, partialPath);
     } catch {
       return null;
     }
@@ -899,6 +1033,7 @@ export class DownloadManager implements ProgressiveDownloadProvider {
     let file: Awaited<ReturnType<typeof stat>> | null = null;
     let invalidPath = false;
     try {
+      await this.assertPhysicalPath(local.storageRoot, local.localPath);
       file = await stat(this.authorizedPath(local.storageRoot, local.localPath));
     } catch (error) {
       invalidPath = error instanceof AppError && error.code === "INVALID_LOCAL_PATH";

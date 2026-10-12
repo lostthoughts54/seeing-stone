@@ -1,0 +1,20 @@
+.player-mini-guide[data-mode="iptv"] { grid-template-rows: auto auto minmax(0, 1fr) auto; max-height: 48%; }
+#playerMiniGuide[data-mode="iptv"] > header { grid-template-columns: auto minmax(8rem, 1fr) auto auto; gap: .6rem; }
+#playerMiniGuide[data-mode="iptv"] > header button, #playerMiniGuide[data-mode="iptv"] > footer button { display: block; width: auto; text-align: center; }
+.player-mini-guide[data-mode="iptv"] input { width: 100%; min-width: 0; }
+.iptv-mini-status { padding: .3rem 1rem; color: var(--muted); font-size: .85rem; }
+.iptv-mini-channels { overflow: auto; min-height: 0; }
+#playerMiniGuide .iptv-mini-channel { display: grid; grid-template-columns: minmax(10rem, 1fr) 2fr; gap: 1rem; width: 100%; text-align: left; padding: .8rem 1rem; border-radius: 0; }
+#playerMiniGuide .iptv-mini-channel span { white-space: normal; }
+.iptv-mini-channel[aria-current="true"] { background: #a75cff26; border-color: var(--accent); }
+#playerMiniGuide[data-mode="iptv"] button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+#playerMiniGuide[data-mode="iptv"] [hidden] { display: none !important; }
+.iptv-mini-channel span { opacity: .8; }
+.player-mini-guide[data-mode="iptv"] > footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem 1rem; }
+@media (max-width: 700px) {
+  .player-mini-guide[data-mode="iptv"] { max-height: 70%; }
+  #playerMiniGuide[data-mode="iptv"] > header { grid-template-columns: minmax(0, 1fr) auto; }
+  #playerMiniGuide[data-mode="iptv"] > header strong, #playerMiniGuide[data-mode="iptv"] > header input { grid-column: 1 / -1; }
+  #playerMiniGuide .iptv-mini-channel { grid-template-columns: 1fr; gap: .2rem; }
+  .player-mini-guide[data-mode="iptv"] > footer span { display: none; }
+}

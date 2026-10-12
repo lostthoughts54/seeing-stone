@@ -2,10 +2,23 @@
 
 A Windows-first Jellyfin desktop client.
 
-**[⬇ Download Seeing Stone for Windows](https://github.com/lostthoughts54/seeing-stone/releases/download/Seeing.Stone.beta.2.v.0.7.0/Seeing-Stone-Setup-0.7.0-x64.exe)**
+**[⬇ Download Seeing Stone for Windows](https://github.com/lostthoughts54/seeing-stone/releases/latest)**
 
 > Beta software. Windows 10/11 x64.
-Current application version: `0.7.0 Beta`.
+Current application version: `0.7.2`.
+
+## One local application
+
+Use **Launch Seeing Stone.cmd** (or the **Seeing Stone** desktop shortcut).
+Jellyfin, IPTV, YouTube rooms, downloads and the phone remote are in this one app,
+using `%APPDATA%\Seeing Stone` for saved settings and data.
+
+The maintained local binary is `.runtime/release/win-unpacked/Seeing Stone.exe`.
+Use `pnpm run package:windows:dir` to rebuild it from all current source changes.
+Future local updates replace this same build; feature work must not introduce
+another launcher, profile or hotfix output directory. Older test packages are
+historical artifacts, not launch targets. `pnpm start` remains a source development
+command, and the libmpv acceptance package remains a developer test fixture.
 
 Seeing Stone is a Windows-first, local-first Jellyfin client. This repository
 contains the Electron client built from the accepted `0.3.0` interface baseline.
@@ -84,7 +97,7 @@ Build the current unsigned Windows installer:
 pnpm package:windows
 ```
 
-The installer is written to `.runtime\release\LocalFirst-Jellyfin-Setup-0.4.3-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
+The installer is written to `.runtime\release\Seeing-Stone-Setup-0.7.1-x64.exe`. It is currently an internal acceptance artifact; Windows may show a SmartScreen warning because no signing certificate is configured. See [WINDOWS_PACKAGING.md](WINDOWS_PACKAGING.md) before sharing it.
 
 Example server URLs:
 

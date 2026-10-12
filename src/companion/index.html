@@ -18,7 +18,12 @@
       <div><p class="eyebrow">Seeing Stone</p><h1>Companion Remote <span>Beta</span></h1></div>
       <output id="connection" class="connection" aria-live="polite">Connecting…</output>
     </header>
-    <main id="main">
+    <main id="main" tabindex="-1">
+      <section id="connectionRecovery" class="panel hidden" aria-labelledby="connectionRecoveryTitle">
+        <h2 id="connectionRecoveryTitle">Connecting to your desktop</h2>
+        <p id="connectionRecoveryMessage" role="status">Keep Seeing Stone open and connect this phone to the same private network.</p>
+        <button id="retryConnection" type="button">Try again</button>
+      </section>
       <section id="pairing" class="panel hidden" aria-labelledby="pairingTitle">
         <h2 id="pairingTitle">Pair this phone</h2>
         <p>On the desktop, open Companion Remote (Beta) and choose <strong>Pair a phone</strong>.</p>
@@ -27,7 +32,7 @@
           <input id="deviceName" name="name" maxlength="40" autocomplete="name" value="iPhone" required>
           <label for="pairCode">8-digit code</label>
           <input id="pairCode" name="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code">
-          <button type="submit">Pair securely</button>
+          <button id="pairSubmit" type="submit">Pair phone</button>
         </form>
         <output id="pairError" class="error" aria-live="assertive"></output>
       </section>
@@ -36,12 +41,17 @@
           <button data-view="player" aria-current="page">Now Playing</button>
           <button data-view="queue">Up Next</button>
           <button data-view="browse">Browse</button>
+          <button data-view="youtube">YouTube</button>
           <button data-view="liveTv">Live TV</button>
           <button data-view="settings">Settings</button>
         </nav>
+        <p id="commandStatus" class="error" role="status"></p>
+        <fieldset id="remoteControls" class="remote-controls">
+          <legend class="sr-only">Phone remote controls</legend>
         <section id="playerView" class="view panel" aria-labelledby="nowPlayingTitle">
           <p class="eyebrow">Now Playing</p><h2 id="nowPlayingTitle">Nothing playing</h2>
           <p id="mediaDetail" class="muted"></p>
+          <p id="playbackStatus" class="muted" role="status"></p>
           <div class="progress-wrap">
             <label class="sr-only" for="seek">Playback position</label>
             <input id="seek" type="range" min="0" max="1000" value="0">
@@ -83,7 +93,7 @@
           <form id="searchForm" role="search"><label class="sr-only" for="search">Search your Jellyfin library</label>
             <input id="search" type="search" maxlength="100" placeholder="Search all libraries"></form>
           <div id="browseControls" class="browse-controls">
-            <div id="libraryTabs" class="library-tabs" role="tablist" aria-label="Media libraries"></div>
+            <div id="libraryTabs" class="library-tabs" role="group" aria-label="Media libraries"></div>
             <label class="sort-control" for="browseSort"><span>Sort</span>
               <select id="browseSort">
                 <option value="recently-added">Recently Added</option>
@@ -95,6 +105,33 @@
           <div class="browse-heading"><button id="browseBack" class="hidden" type="button">Back to library</button><p id="browseStatus" class="muted" aria-live="polite"></p></div>
           <div id="browseList" class="media-grid" aria-live="polite"></div>
           <button id="browseMore" class="browse-more hidden" type="button">Load more</button>
+        </section>
+        <section id="youtubeView" class="view panel hidden" aria-labelledby="youtubeTitle">
+          <div class="section-heading"><h2 id="youtubeTitle">YouTube</h2><button id="youtubeRefresh" type="button">Refresh queue</button></div>
+          <p id="youtubeRoom" class="muted" aria-live="polite"></p>
+          <section id="youtubeTransport" class="youtube-transport" aria-label="YouTube playback controls">
+            <strong id="youtubeNowPlaying">Nothing playing</strong>
+            <p id="youtubePlaybackStatus" class="muted"></p>
+            <div class="transport"><button id="youtubeBack" type="button" aria-label="Back 10 seconds">−10</button><button id="youtubePlayPause" class="primary" type="button">Play</button><button id="youtubeForward" type="button" aria-label="Forward 30 seconds">+30</button></div>
+            <div class="youtube-form"><button id="youtubeRestart" type="button">Restart video</button><button id="youtubeNext" type="button">Next video</button></div>
+          </section>
+          <form id="youtubeSearchForm" class="youtube-form" role="search">
+            <label class="sr-only" for="youtubeSearch">Search YouTube videos</label>
+            <input id="youtubeSearch" type="search" maxlength="100" placeholder="Search YouTube">
+            <button type="submit">Search</button><button id="youtubePopular" type="button">Popular</button>
+          </form>
+          <p id="youtubeSetup" class="muted hidden">On the desktop, open Phone Remote → YouTube search to save your API key. Video links and playback controls work without a key.</p>
+          <form id="youtubeLinkForm" class="youtube-form">
+            <label class="sr-only" for="youtubeLink">YouTube video link</label>
+            <input id="youtubeLink" type="url" maxlength="2048" placeholder="Paste a YouTube video link" required>
+            <button type="submit">Add to queue</button>
+            <button id="youtubeLinkPlay" type="button">Play now</button>
+          </form>
+          <p id="youtubeActionStatus" role="status"></p>
+          <p id="youtubeBrowseStatus" class="muted" role="status"></p>
+          <div id="youtubeResults" class="media-grid youtube-results"></div>
+          <button id="youtubeMore" class="browse-more hidden" type="button">Load more</button>
+          <details><summary>YouTube room queue</summary><ol id="youtubeQueue" class="media-list"></ol></details>
         </section>
         <section id="liveTvView" class="view panel hidden" aria-labelledby="liveTvTitle">
           <div class="section-heading"><div><p class="eyebrow">On this computer</p><h2 id="liveTvTitle">Live TV Guide</h2></div><button id="refreshLiveTv" type="button">Refresh</button></div>
@@ -112,6 +149,7 @@
           <p>Controls use touch targets of at least 44×44 CSS pixels and support VoiceOver, text zoom, and reduced motion.</p>
           <p class="warning">This Beta uses HTTP on your private network. A hostile device on the same network could observe or alter traffic.</p>
         </section>
+        </fieldset>
       </div>
     </main>
     <script type="module" src="/app.ts"></script>

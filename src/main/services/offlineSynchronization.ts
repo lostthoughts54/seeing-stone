@@ -1,5 +1,6 @@
 import type { JellyfinConnectionDiagnostics, MediaItem, WatchedStateResult } from "../../shared/contracts";
 import { AppError } from "./errors";
+import { materializeCachedMediaItem } from "./cachedMedia";
 import type { AuthenticatedContext } from "./jellyfinApi";
 import type { AppLogger } from "./logger";
 import type { SqlitePersistenceService } from "./persistence";
@@ -126,11 +127,52 @@ export class OfflineSynchronizationService {
     });
   }
 
+  /** Cache main-authorized season results so later watched actions can be queued offline. */
+  async cacheEpisodes(seriesId: string, seasonId: string, episodes: MediaItem[]): Promise<MediaItem[]> {
+    const identity = this.api.getAuthenticatedContext();
+    const revision = this.sessionRevision;
+    const result: MediaItem[] = [];
+    for (const episode of episodes) {
+      this.assertIdentity(identity, revision);
+      // Jellyfin may include Season 0 specials at their airing position in a
+      // regular season. Preserve their real parent so bulk watched actions
+      // still apply only to episodes belonging to the selected season.
+      const interleavedSpecial = episode.parentIndexNumber === 0 && Boolean(episode.seasonId);
+      if (episode.type !== "Episode" || (episode.seriesId && episode.seriesId !== seriesId)
+        || (episode.seasonId && episode.seasonId !== seasonId && !interleavedSpecial)) {
+        throw new AppError("MEDIA_IDENTITY_MISMATCH", "Jellyfin returned an episode from a different season.", 502);
+      }
+      const item = { ...episode, seriesId, seasonId: episode.seasonId ?? seasonId };
+      await this.persistence.upsertMediaItem({
+        serverId: identity.serverId, userId: identity.userId,
+        itemId: item.id, itemType: "Episode", name: item.name, seriesId, seasonId: item.seasonId,
+        runTimeTicks: Math.max(0, Math.floor(item.runTimeTicks)), metadata: item,
+      });
+      const [record, head] = await Promise.all([
+        this.persistence.getMediaItem(identity.serverId, identity.userId, item.id),
+        this.persistence.getPlaybackHead(identity.serverId, identity.userId, item.id),
+      ]);
+      result.push(record ? materializeCachedMediaItem(record, head) : item);
+    }
+    this.assertIdentity(identity, revision);
+    return result;
+  }
+
+  private assertIdentity(identity: AuthenticatedContext, revision: number): void {
+    const current = this.api.getAuthenticatedContext();
+    if (revision !== this.sessionRevision || current.serverId !== identity.serverId || current.userId !== identity.userId) {
+      throw new AppError("SESSION_CHANGED", "The Jellyfin session changed while this request was running.", 409);
+    }
+  }
+
   async setWatched(itemId: string, watched: boolean): Promise<WatchedStateResult> {
     const identity = this.api.getAuthenticatedContext();
+    const sessionRevision = this.sessionRevision;
     const existing = await this.persistence.getMediaItem(identity.serverId, identity.userId, itemId);
+    this.assertIdentity(identity, sessionRevision);
     if (!existing) {
       const item = await this.api.getDetails(itemId);
+      this.assertIdentity(identity, sessionRevision);
       if (item.id !== itemId) {
         throw new AppError("MEDIA_IDENTITY_MISMATCH", "Jellyfin returned a different media item.", 502);
       }
@@ -152,6 +194,7 @@ export class OfflineSynchronizationService {
         metadata: item,
       });
     }
+    this.assertIdentity(identity, sessionRevision);
     const revision = await this.capture({
       itemId,
       actionKind: watched ? "mark_watched" : "mark_unwatched",

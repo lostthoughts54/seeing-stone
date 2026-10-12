@@ -96,7 +96,7 @@ function resolveFfmpeg(configuredPath) {
 }
 
 function createLiveTvTestServer(options = {}) {
-  const port = Number(options.port || 9876);
+  const port = Number(options.port ?? 9876);
   const bind = options.bind || "0.0.0.0";
   const publicBase = String(options.publicBase || `http://127.0.0.1:${port}`).replace(/\/$/, "");
   const ffmpegPath = resolveFfmpeg(options.ffmpegPath);
@@ -107,6 +107,46 @@ function createLiveTvTestServer(options = {}) {
   }));
   const server = http.createServer((request, response) => {
     const url = new URL(request.url || "/", publicBase);
+    if (url.pathname === "/xmltv.php") {
+      const start = Math.floor(Date.now() / 1800000) * 1800000;
+      const stamp = time => new Date(time).toISOString().replace(/[-:]/g, "").replace("T", "").slice(0, 14) + " +0000";
+      response.writeHead(200, { "Content-Type": "application/xml" });
+      response.end(`<tv><programme channel="${channels[0].id}" start="${stamp(start)}" stop="${stamp(start + 10800000)}"><title>College Football</title><desc>Fixture guide search match</desc></programme></tv>`); return;
+    }
+    if (url.pathname === "/fixture-poster.png") {
+      response.writeHead(200, { "Content-Type": "image/png" });
+      response.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII=", "base64")); return;
+    }
+    if (url.pathname === "/player_api.php") {
+      response.setHeader("Content-Type", "application/json; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      const action = url.searchParams.get("action");
+      const username = url.searchParams.get("username");
+      if (url.searchParams.get("password") !== "fixture-password" || !["viewer", "expired"].includes(username)) {
+        response.end(JSON.stringify({ user_info: { auth: 0, status: "Disabled" } })); return;
+      }
+      if (!action) {
+        response.end(JSON.stringify({ user_info: { auth: 1, status: username === "expired" ? "Expired" : "Active", exp_date: "4102444800" } })); return;
+      }
+      if (options.providerState?.failAction === action) { response.statusCode = 503; response.end("Synthetic refresh failure"); return; }
+      const send = (value) => response.end(JSON.stringify(value));
+      if (action === "get_vod_info" || action === "get_series_info") { send({ info: { cover: `http://${request.headers.host}/fixture-poster.png` } }); return; }
+      if (action === "get_simple_data_table") {
+        const start = Math.floor(Date.now() / 1800000) * 1800;
+        send({ epg_listings: Array.from({ length: 12 }, (_, index) => ({ id: index + 1, title: Buffer.from(index === 0 ? "日本語 · Current programme" : `Programme ${index + 1}`).toString("base64"), description: Buffer.from("Fixture schedule description.").toString("base64"), start_timestamp: String(start + index * 1800), stop_timestamp: String(start + (index + 1) * 1800) })) }); return;
+      }
+      if (action.endsWith("_categories")) { send([{ category_id: "1", category_name: "International" }, { category_id: "2", category_name: "Entertainment" }]); return; }
+      if (action === "get_live_streams") {
+        const count = options.catalogueSize ?? channels.length;
+        const names = ["日本語 ニュース", "Café français", "الأخبار", "Duplicate News", "Duplicate News"];
+        send(Array.from({ length: count }, (_, index) => ({ stream_id: index + 1, num: index + 101, name: names[index] ?? `Fixture Channel ${index + 1}`, category_id: index % 2 ? "2" : "1", epg_channel_id: channels[index % channels.length].id,
+          stream_icon: `${publicBase}/private/fixture-password/icon.png`, direct_source: `${publicBase}/private/fixture-password/stream` })));
+        return;
+      }
+      if (action === "get_vod_streams") { send([{ stream_id: 1, name: "Fixture Movie", category_id: "2", container_extension: "mp4" }]); return; }
+      if (action === "get_series") { send([{ series_id: 1, name: "Fixture Series", category_id: "2" }]); return; }
+      send([]); return;
+    }
     if (url.pathname === "/health") {
       response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       response.end(JSON.stringify({ ready: true, channels: channels.length }));
@@ -122,7 +162,8 @@ function createLiveTvTestServer(options = {}) {
       response.end(guideXml());
       return;
     }
-    const match = /^\/channel\/(101|102|103)$/.exec(url.pathname);
+    const iptvMatch = /^\/live\/viewer\/fixture-password\/(\d+)\.ts$/.exec(url.pathname);
+    const match = iptvMatch ? [iptvMatch[0], String(101 + (Number(iptvMatch[1]) - 1) % 3)] : /^\/channel\/(101|102|103)$/.exec(url.pathname);
     const sourcePath = match ? sources.get(match[1]) : null;
     if (!sourcePath) {
       response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });

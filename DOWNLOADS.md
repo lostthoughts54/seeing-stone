@@ -31,6 +31,16 @@ The queue reserves free space before a transfer. If capacity is insufficient or 
 
 Startup converts an interrupted Downloading job to Paused. A finalized file left by a crash is rechecked and can complete without downloading again. Missing or size-mismatched finalized files are reported as Missing.
 
+## Downloaded subtitles
+
+Embedded subtitles stay inside the original video file. External text subtitles advertised by Jellyfin for the selected media source are also saved alongside the video (SRT, ASS, SSA, and WebVTT), with their language, title, default, and forced flags. Each download has an identity-scoped `subtitles.json` manifest and content-hashed subtitle files. Local paths remain in Electron main and are never exposed to the renderer or Companion.
+
+Playback prefers verified local subtitle files, including when Jellyfin is offline. Missing or damaged sidecars may fall back to Jellyfin while connected; they never prevent the video from playing. Selecting a downloaded version preserves its media-source identity for both video and subtitles.
+
+Existing completed downloads receive subtitles in the background after activation and when Jellyfin reconnects. A five-minute background pass also retries missing or failed subtitle downloads, reusing valid saved files and leaving the video untouched. A failed subtitle request is logged and does not invalidate a verified video. Each file is limited to 16 MiB, each request to 15 seconds, and each video's subtitle pass to 60 seconds. Subtitles become available to the player on the next playback start after repair finishes.
+
+Deleting a downloaded copy cancels any subtitle repair for that copy and removes its subtitle files with the video. Session changes and shutdown cancel in-flight subtitle work.
+
 ## User actions
 
 - Download is available on movie details and individual episode rows. A season view can select all or any subset of its episodes and queues each selection through the same validated item-ID-only action.

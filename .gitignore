@@ -1,4 +1,5 @@
 node_modules/
+/artifacts/
 .pnpm-store/
 .dotnet-install.ps1
 .dotnet9-portable/
@@ -13,6 +14,11 @@ dist/
 coverage/
 plugins/*/bin/
 plugins/*/obj/
+/artifacts/player-features-ui/electron-profile/
+/artifacts/player-features-ui/fixture.js
+/artifacts/player-features-ui/fixture.html
 *.log
 *.tsbuildinfo
+/dist-iptv-guide/
+/artifacts/iptv-guide-build/
 /scripts/recent-jellyfin-live-tv-error.cjs

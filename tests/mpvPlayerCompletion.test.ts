@@ -1,11 +1,36 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { embeddedRenderProfileArgs, embeddedVideoWindowArgs, MpvPlayerService } from "../src/main/services/mpvPlayer";
+import {
+  embeddedRenderProfileArgs,
+  embeddedVideoWindowArgs,
+  libMpvStartupTimeoutMilliseconds,
+  MpvPlayerService,
+  shouldStartPlaybackPaused,
+} from "../src/main/services/mpvPlayer";
 import { PlaybackCompletionCoordinator } from "../src/main/services/playbackCompletion";
 import { AppError } from "../src/main/services/errors";
 import type { ResolvedPlaybackSource } from "../src/main/services/playbackSession";
 
 const ticks = 10_000_000;
+
+describe("libmpv startup timing", () => {
+  it("allows simultaneous watch-party preparation to wait for a cold stream", () => {
+    expect(libMpvStartupTimeoutMilliseconds("on-demand", "remote-sync")).toBe(30_000);
+    expect(libMpvStartupTimeoutMilliseconds("live-tv", "remote-sync")).toBe(30_000);
+  });
+
+  it("keeps the existing live-TV allowance and default solo behavior", () => {
+    expect(libMpvStartupTimeoutMilliseconds("live-tv", "local-user")).toBe(25_000);
+    expect(libMpvStartupTimeoutMilliseconds("on-demand", "local-user")).toBeUndefined();
+  });
+
+  it("preloads watch-party media paused while solo playback starts normally", () => {
+    expect(shouldStartPlaybackPaused("direct-play", "remote-sync")).toBe(true);
+    expect(shouldStartPlaybackPaused("transcode", "remote-sync")).toBe(true);
+    expect(shouldStartPlaybackPaused("direct-play", "local-user")).toBe(false);
+    expect(shouldStartPlaybackPaused("downloading", "local-user")).toBe(true);
+  });
+});
 
 function source(
   itemId: string,
@@ -194,6 +219,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("MpvPlayerService natural completion", () => {
+  it("keeps a commanded seek unready until position and engine seek status settle", async () => {
+    const h = harness();
+    const receive = (h.internals as any).handleMessage.bind(h.player);
+    await h.player.seek(h.current.playbackId, 10 * ticks, { origin: "remote-sync" });
+    expect(h.player.getState()).toMatchObject({ positionTicks: 10 * ticks, seeking: true });
+    receive({ event: "property-change", name: "seeking", data: true });
+    receive({ event: "property-change", name: "time-pos", data: 10 });
+    expect(h.player.getState().seeking).toBe(true);
+    receive({ event: "property-change", name: "seeking", data: false });
+    expect(h.player.getState().seeking).toBe(false);
+  });
   it("uses kiosk fullscreen for Companion playback and restores the Windows window on exit", async () => {
     const h = harness({ embedded: true });
     await h.player.setFullscreen(h.current.playbackId, true, { origin: "companion" });
@@ -376,6 +412,126 @@ describe("MpvPlayerService natural completion", () => {
     expect(accepted).toEqual(["start", "stop"]);
     expect(h.player.getState()).toMatchObject({ playbackId: null, itemId: null, phase: "stopped" });
     expect(h.internals.reportingActive).toBe(false);
+  });
+
+  it("does not resolve a source after clear cancels a pending preference read", async () => {
+    const h = harness();
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    let finishPreferences!: (value: { windowMaximized: boolean }) => void;
+    h.internals.preferences = { get: () => new Promise((resolve) => { finishPreferences = resolve; }) };
+    const starting = h.player.start("episode-1", "resume");
+    const cancelled = expect(starting).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await h.player.clear();
+    finishPreferences({ windowMaximized: true });
+    await cancelled;
+    expect(h.playback.start).not.toHaveBeenCalled();
+    expect(h.player.getState().phase).toBe("idle");
+  });
+
+  it("waits for the old session to finish stopping before adopting the latest replacement", async () => {
+    const h = harness();
+    let finishReport!: () => void;
+    const report = vi.fn(async (event: { kind: string }) => {
+      if (event.kind === "stop") await new Promise<void>((resolve) => { finishReport = resolve; });
+    });
+    h.internals.reporting = { acceptAuthoritativeEvent: report };
+    h.internals.openPlaybackTarget = vi.fn(async () => ({ media: "fixture", subtitles: [] }));
+    h.internals.launchProcess = vi.fn(async () => undefined);
+    const first = h.player.start("superseded", "resume");
+    const cancelled = expect(first).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await waitFor(() => report.mock.calls.length > 0);
+    const second = h.player.start("episode-2", "resume");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.playback.start).not.toHaveBeenCalled();
+    finishReport();
+    await cancelled;
+    await expect(second).resolves.toMatchObject({ playbackId: "playback-2" });
+    expect(h.playback.start).toHaveBeenCalledOnce();
+    expect(h.playback.start.mock.calls[0][0]).toBe("episode-2");
+    expect(h.player.getState()).toMatchObject({ itemId: "episode-2", phase: "playing" });
+    h.internals.reporting = { acceptAuthoritativeEvent: vi.fn(async () => undefined) };
+    await h.player.clear();
+  });
+
+  it("cancels a replacement waiting for the previous stop when clear is requested", async () => {
+    const h = harness();
+    let finishReport!: () => void;
+    const report = vi.fn(() => new Promise<void>((resolve) => { finishReport = resolve; }));
+    h.internals.reporting = { acceptAuthoritativeEvent: report };
+    const starting = h.player.start("episode-2", "resume");
+    const cancelled = expect(starting).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await waitFor(() => report.mock.calls.length > 0);
+    const clearing = h.player.clear();
+    finishReport();
+    await clearing;
+    await cancelled;
+    expect(h.playback.start).not.toHaveBeenCalled();
+    expect(h.player.getState()).toMatchObject({ playbackId: null, phase: "stopped" });
+  });
+
+  it("does not launch media after stop cancels a pending playback target", async () => {
+    const h = harness();
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    const candidate = source("episode-1", "cancelled-target");
+    h.playback.start.mockResolvedValue(candidate);
+    let finishTarget!: (value: { media: string; subtitles: [] }) => void;
+    const openPlaybackTarget = vi.fn(() => new Promise((resolve) => { finishTarget = resolve; }));
+    const launchProcess = vi.fn();
+    h.internals.openPlaybackTarget = openPlaybackTarget;
+    h.internals.launchProcess = launchProcess;
+    const starting = h.player.start("episode-1", "resume");
+    const cancelled = expect(starting).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await waitFor(() => openPlaybackTarget.mock.calls.length > 0);
+    await h.player.stop(candidate.playbackId);
+    finishTarget({ media: candidate.mediaUrl, subtitles: [] });
+    await cancelled;
+    expect(launchProcess).not.toHaveBeenCalled();
+    expect(h.player.getState()).toMatchObject({ playbackId: null, phase: "stopped" });
+  });
+
+  it("does not let an older launch failure stop or overwrite a newer item", async () => {
+    const h = harness();
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    const first = source("episode-1", "first-launch");
+    const second = source("episode-2", "second-launch");
+    h.playback.start.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    h.internals.openPlaybackTarget = vi.fn(async (candidate: ResolvedPlaybackSource) => ({ media: candidate.mediaUrl, subtitles: [] }));
+    let rejectFirst!: (reason: Error) => void;
+    const launchProcess = vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
+      .mockResolvedValueOnce(undefined);
+    h.internals.launchProcess = launchProcess;
+    const firstStart = h.player.start("episode-1", "resume");
+    const cancelled = expect(firstStart).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await waitFor(() => launchProcess.mock.calls.length > 0);
+    await h.player.start("episode-2", "resume");
+    rejectFirst(new Error("The first launch failed late."));
+    await cancelled;
+    expect(h.player.getState()).toMatchObject({ playbackId: second.playbackId, itemId: second.itemId, phase: "playing" });
+    expect(h.playback.stop).not.toHaveBeenCalledWith(second.playbackId);
+    await h.player.clear();
+  });
+
+  it("leaves loading state when the user chooses to wait for a progressive download", async () => {
+    const h = harness();
+    h.internals.source = null;
+    h.internals.reportingActive = false;
+    const candidate: ResolvedPlaybackSource = {
+      ...source("episode-1", "progressive-launch"),
+      source: "local",
+      sourceKind: "downloading",
+      progressiveLease: { endMetadataAllowance: vi.fn(), onEvent: () => () => undefined } as never,
+    };
+    h.playback.start.mockResolvedValue(candidate);
+    h.internals.openPlaybackTarget = vi.fn(async () => ({ media: candidate.mediaUrl, subtitles: [] }));
+    h.internals.launchProcess = vi.fn(async () => { throw new Error("Not enough media available."); });
+    h.player.setProgressiveFallbackDecider(async () => "wait");
+    await expect(h.player.start("episode-1", "resume")).rejects.toMatchObject({ code: "PROGRESSIVE_PLAYBACK_WAITING" });
+    expect(h.playback.stop).toHaveBeenCalledWith(candidate.playbackId);
+    expect(h.player.getState()).toMatchObject({ playbackId: null, phase: "error", error: "Playback will be available when more of the download is ready." });
   });
 
   it("does not loop when the server launch also fails after local fallback", async () => {
@@ -618,6 +774,18 @@ describe("MpvPlayerService natural completion", () => {
       positionTicks: 52 * ticks,
       diagnostics: { bufferAheadTicks: 5 * ticks },
     });
+  });
+
+  it("updates frame rates and clears unavailable or invalid player estimates", () => {
+    const h = harness();
+    const receive = (h.player as never as { handleMessage(message: unknown): void }).handleMessage.bind(h.player);
+    receive({ event: "property-change", name: "container-fps", data: 29.970029 });
+    receive({ event: "property-change", name: "estimated-vf-fps", data: 59.940059 });
+    expect(h.player.getState().diagnostics).toMatchObject({ sourceFps: 29.97, estimatedFps: 59.94 });
+    for (const data of [null, 0, -1, NaN, Infinity, "60"]) {
+      receive({ event: "property-change", name: "estimated-vf-fps", data });
+      expect(h.player.getState().diagnostics).toMatchObject({ sourceFps: 29.97, estimatedFps: null });
+    }
   });
 
   it("reports a forced playback-engine exit as a system error, never completion", async () => {

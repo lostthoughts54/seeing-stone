@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer, sharedTexture, type SharedTextureImported } from "electron";
+import { featureIpc, type FeatureInput, type FeatureState } from "../shared/playerFeatures";
+import { IPTV_IPC, type IptvAccountBridge } from "../shared/iptv";
 import {
   IPC,
   type ArtworkInput,
@@ -20,6 +22,8 @@ import {
   type ItemIdInput,
   type JellyfinBridge,
   type LibraryItemsInput,
+  type LibraryFilterOptionsInput,
+  type FilterChoicePage,
   type LibrarySummary,
   type LiveTvCancelScheduleInput,
   type LiveTvCreateRecordingInput,
@@ -126,6 +130,7 @@ const bridge: JellyfinBridge = {
   libraries: {
     list: () => invoke<LibrarySummary[]>(IPC.librariesList),
     getItems: (input: LibraryItemsInput) => invoke<MediaItem[]>(IPC.librariesGetItems, input),
+    getFilterOptions: (input: LibraryFilterOptionsInput) => invoke<FilterChoicePage>(IPC.librariesGetFilterOptions, input),
   },
   browse: { get: (input: BrowseInput) => invoke<BrowsePage>(IPC.browseGet, input) },
   people: { getResults: (input: ItemIdInput) => invoke<PersonMediaResult[]>(IPC.peopleGetResults, input) },
@@ -248,6 +253,8 @@ const bridge: JellyfinBridge = {
     saveCleanMachine: () => invoke<CleanMachineDiagnosticActionResult>(IPC.diagnosticsSaveCleanMachine),
   },
   companion: {
+    getYouTubeSearchSettings: () => invoke(IPC.companionYouTubeSettings),
+    setYouTubeApiKey: (input) => invoke(IPC.companionYouTubeSetKey, input),
     getStatus: () => invoke<CompanionSettingsState>(IPC.companionGetStatus),
     setEnabled: (input) => invoke<CompanionSettingsState>(IPC.companionSetEnabled, input),
     selectNetwork: (input) => invoke<CompanionSettingsState>(IPC.companionSelectNetwork, input),
@@ -271,6 +278,7 @@ const bridge: JellyfinBridge = {
     wait: () => invoke<WatchPartyViewState>(IPC.watchPartiesWait),
     continue: () => invoke<WatchPartyViewState>(IPC.watchPartiesContinue),
     resync: () => invoke<WatchPartyViewState>(IPC.watchPartiesResync),
+    retryPreparation: () => invoke<WatchPartyViewState>(IPC.watchPartiesRetryPreparation),
     setLocalSyncOffset: (input: WatchPartySyncOffsetInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetLocalSyncOffset, input),
     setBufferingPolicy: (input: BufferingPolicyPreferenceInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetBufferingPolicy, input),
     setVisible: (input: WatchPartyVisibilityInput) => invoke<WatchPartyViewState>(IPC.watchPartiesSetVisible, input),
@@ -278,6 +286,14 @@ const bridge: JellyfinBridge = {
       const receive = (_event: Electron.IpcRendererEvent, state: WatchPartyViewState) => listener(state);
       ipcRenderer.on(IPC.watchPartiesChanged, receive);
       return () => ipcRenderer.removeListener(IPC.watchPartiesChanged, receive);
+    },
+  },
+  playerFeatures: {
+    command: (input: FeatureInput) => invoke<FeatureState>(featureIpc.command, input),
+    subscribe: (listener: (state: FeatureState) => void) => {
+      const receive = (_event: Electron.IpcRendererEvent, state: FeatureState) => listener(state);
+      ipcRenderer.on(featureIpc.changed, receive);
+      return () => ipcRenderer.removeListener(featureIpc.changed, receive);
     },
   },
   youtubeRooms: {
@@ -306,6 +322,13 @@ for (const value of Object.values(bridge)) Object.freeze(value);
 Object.freeze(bridge);
 
 contextBridge.exposeInMainWorld("jellyfin", bridge);
+const iptvBridge: IptvAccountBridge = {
+  play: (input) => invoke(IPTV_IPC.play, input), schedule: (input) => invoke(IPTV_IPC.schedule, input), poster: (input) => invoke(IPTV_IPC.poster, input), favourite: (input) => invoke(IPTV_IPC.favourite, input),
+  setup: (input) => invoke(IPTV_IPC.setup, input), list: () => invoke(IPTV_IPC.list),
+  remove: (input) => invoke(IPTV_IPC.remove, input), refresh: (input) => invoke(IPTV_IPC.refresh, input),
+  catalogue: (input) => invoke(IPTV_IPC.catalogue, input), groups: (input) => invoke(IPTV_IPC.groups, input),
+};
+contextBridge.exposeInMainWorld("iptv", iptvBridge);
 
 // Private libmpv presentation transport. Nothing from this receiver is exposed
 // through contextBridge: native handles, frames, paths, and source details stay
@@ -328,6 +351,7 @@ let libmpvSurfaceContext: ImageBitmapRenderingContext | null = null;
 let libmpvCpuSurfaceContext: CanvasRenderingContext2D | null = null;
 let libmpvCpuSourceSurface: HTMLCanvasElement | null = null;
 let libmpvCpuSourceContext: CanvasRenderingContext2D | null = null;
+let libmpvCpuImageData: ImageData | null = null;
 let libmpvBackSurface: HTMLCanvasElement | null = null;
 let libmpvBackSurfaceContext: ImageBitmapRenderingContext | null = null;
 interface LibMpvRetainedTexture {
@@ -361,7 +385,7 @@ function reportLibMpvTextureLifecycle(
   texture: Pick<LibMpvRetainedTexture, "imported" | "sequence" | "surfaceGeneration">,
   details: Record<string, unknown> = {},
 ): void {
-  if (!libmpvTextureLifecycleLogging && phase !== "renderer-gpu-release-complete") return;
+  if (!libmpvTextureLifecycleLogging) return;
   ipcRenderer.send(libmpvPresenterIpc.textureLifecycle, {
     phase,
     sequence: texture.sequence,
@@ -375,18 +399,10 @@ function releaseLibMpvTexture(texture: LibMpvRetainedTexture, reason: string): v
   if (texture.released) throw new Error(`LIBMPV_RENDERER_TEXTURE_RELEASED_TWICE:${texture.sequence}`);
   texture.released = true;
   reportLibMpvTextureLifecycle("renderer-release-requested", texture, { reason });
-  const release = texture.imported.subtle?.release;
-  if (typeof release !== "function") {
-    texture.imported.release();
-    ipcRenderer.send(libmpvPresenterIpc.error, {
-      surfaceGeneration: texture.surfaceGeneration,
-      code: "LIBMPV_GPU_RELEASE_CALLBACK_UNAVAILABLE",
-    });
-    return;
-  }
-  release.call(texture.imported.subtle, () => {
-    reportLibMpvTextureLifecycle("renderer-gpu-release-complete", texture, { reason });
-  });
+  // The managed release also removes Electron's main-process reference. Calling
+  // subtle.release directly bypasses that bookkeeping and leaks every imported
+  // shared texture, even when its renderer GPU completion callback fires.
+  texture.imported.release();
 }
 
 async function playerViewport(): Promise<HTMLElement> {
@@ -404,11 +420,17 @@ function stopLibMpvPresenter(): void {
   libmpvLastAcceptedSequence = 0;
   libmpvResizeObserver?.disconnect();
   libmpvResizeObserver = null;
+  // Detach bitmap references before releasing their imports, including when a
+  // fullscreen transition replaces these canvases without overwriting them.
+  for (const context of [libmpvSurfaceContext, libmpvBackSurfaceContext]) {
+    try { context?.transferFromImageBitmap(null); } catch { /* A lost canvas must not prevent texture cleanup. */ }
+  }
   for (const texture of libmpvSurfaceTextures.values()) releaseLibMpvTexture(texture, "presenter-stop");
   libmpvSurfaceTextures.clear();
   libmpvSurfaceContext = null;
   libmpvCpuSurfaceContext = null;
   libmpvCpuSourceContext = null;
+  libmpvCpuImageData = null;
   libmpvBackSurfaceContext = null;
   libmpvSurface?.remove();
   libmpvBackSurface?.remove();
@@ -596,9 +618,11 @@ ipcRenderer.on(libmpvPresenterIpc.cpuFrame, (_event, input: unknown) => {
     libmpvLastAcceptedSequence = acceptedSequence;
     if (libmpvCpuSourceSurface.width !== sourceWidth) libmpvCpuSourceSurface.width = sourceWidth;
     if (libmpvCpuSourceSurface.height !== sourceHeight) libmpvCpuSourceSurface.height = sourceHeight;
-    const rgba = new Uint8ClampedArray(expectedBytes);
-    rgba.set(pixels);
-    libmpvCpuSourceContext.putImageData(new ImageData(rgba, sourceWidth, sourceHeight), 0, 0);
+    if (!libmpvCpuImageData || libmpvCpuImageData.width !== sourceWidth || libmpvCpuImageData.height !== sourceHeight) {
+      libmpvCpuImageData = libmpvCpuSourceContext.createImageData(sourceWidth, sourceHeight);
+    }
+    libmpvCpuImageData.data.set(pixels);
+    libmpvCpuSourceContext.putImageData(libmpvCpuImageData, 0, 0);
 
     const outputWidth = libmpvSurface.width;
     const outputHeight = libmpvSurface.height;

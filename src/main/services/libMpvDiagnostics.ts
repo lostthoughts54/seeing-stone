@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { redactText, sanitizeLogValue } from "./logger";
 
@@ -52,7 +52,8 @@ export function resolveLibMpvDiagnosticSettings(
     ? rawPresentationMode as LibMpvPresentationMode
     : "shared-texture";
   return {
-    enabled: environment.SEEING_STONE_MPV_DIAGNOSTICS === "1" || Boolean(rawMode) || Boolean(rawPresentationMode),
+    enabled: environment.SEEING_STONE_MPV_DIAGNOSTICS !== "0"
+      && (environment.SEEING_STONE_MPV_DIAGNOSTICS === "1" || Boolean(rawMode) || Boolean(rawPresentationMode)),
     decoderMode,
     requestedDecoderMode,
     hwdec,
@@ -64,27 +65,117 @@ export function resolveLibMpvDiagnosticSettings(
   };
 }
 
-export class LibMpvDiagnosticLog {
-  private writes = Promise.resolve();
+interface DiagnosticLogLimits {
+  maxFileBytes: number;
+  maxBufferedBytes: number;
+  flushIntervalMilliseconds: number;
+}
 
-  constructor(private readonly settings: LibMpvDiagnosticSettings) {}
+export class LibMpvDiagnosticLog {
+  private pending: string[] = [];
+  private bufferedBytes = 0;
+  private droppedEvents = 0;
+  private fileBytes: number | null = null;
+  private writer: Promise<void> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly settings: LibMpvDiagnosticSettings,
+    private readonly limits: DiagnosticLogLimits = {
+      maxFileBytes: 8 * 1024 * 1024,
+      maxBufferedBytes: 512 * 1024,
+      flushIntervalMilliseconds: 250,
+    },
+  ) {}
 
   write(event: string, details: unknown): void {
     if (!this.settings.enabled) return;
-    const line = `${JSON.stringify({
+    const line = this.line(event, details);
+    const bytes = Buffer.byteLength(line);
+    if (this.bufferedBytes + bytes > Math.min(this.limits.maxBufferedBytes, this.limits.maxFileBytes)) {
+      // Diagnostics must never build an unbounded queue behind playback.
+      this.droppedEvents += 1;
+    } else {
+      this.pending.push(line);
+      this.bufferedBytes += bytes;
+    }
+    if (this.bufferedBytes >= 64 * 1024) this.startDrain();
+    else this.scheduleDrain();
+  }
+
+  private line(event: string, details: unknown): string {
+    return `${JSON.stringify({
       timestamp: new Date().toISOString(),
       event: redactText(event),
       details: sanitizeLogValue(details),
     })}\n`;
-    this.writes = this.writes
-      .then(async () => {
-        await mkdir(dirname(this.settings.logFilePath), { recursive: true });
-        await appendFile(this.settings.logFilePath, line, "utf8");
-      })
-      .catch(() => undefined);
+  }
+
+  private scheduleDrain(): void {
+    if (this.timer || this.writer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.startDrain();
+    }, this.limits.flushIntervalMilliseconds);
+    this.timer.unref();
+  }
+
+  private startDrain(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.writer || (!this.pending.length && !this.droppedEvents)) return;
+    this.writer = this.drain().catch(() => {
+      // Logging failure must not block playback; retry directory setup later.
+      this.fileBytes = null;
+      this.pending = [];
+      this.bufferedBytes = 0;
+      this.droppedEvents = 0;
+    }).finally(() => {
+      this.writer = null;
+      if (this.pending.length || this.droppedEvents) this.scheduleDrain();
+    });
+  }
+
+  private async drain(): Promise<void> {
+    if (this.fileBytes === null) {
+      await mkdir(dirname(this.settings.logFilePath), { recursive: true });
+      this.fileBytes = await stat(this.settings.logFilePath).then((info) => info.size, (error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+        return 0;
+      });
+    }
+    while (this.pending.length || this.droppedEvents) {
+      let batch = this.pending.join("");
+      this.pending = [];
+      this.bufferedBytes = 0;
+      if (this.droppedEvents) {
+        const notice = this.line("diagnostic-events-dropped", { count: this.droppedEvents });
+        if (Buffer.byteLength(batch + notice) <= this.limits.maxFileBytes) batch += notice;
+        else {
+          this.pending.push(notice);
+          this.bufferedBytes = Buffer.byteLength(notice);
+        }
+        this.droppedEvents = 0;
+      }
+      const bytes = Buffer.byteLength(batch);
+      if (this.fileBytes + bytes > this.limits.maxFileBytes) {
+        const backup = `${this.settings.logFilePath}.1`;
+        await rm(backup, { force: true });
+        if (this.fileBytes > this.limits.maxFileBytes) {
+          // Discard legacy oversized logs rather than retaining a huge backup.
+          await rm(this.settings.logFilePath, { force: true });
+        } else if (this.fileBytes > 0) await rename(this.settings.logFilePath, backup);
+        this.fileBytes = 0;
+      }
+      await appendFile(this.settings.logFilePath, batch, "utf8");
+      this.fileBytes += bytes;
+    }
   }
 
   async flush(): Promise<void> {
-    await this.writes;
+    while (this.writer || this.pending.length || this.droppedEvents) {
+      this.startDrain();
+      await this.writer;
+    }
   }
 }

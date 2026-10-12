@@ -9,7 +9,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.7.1",
+      "version": "0.7.2",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "redistributionStatus": "source-only"
@@ -2008,6 +2008,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "saxes",
+      "version": "6.0.0",
+      "license": "ISC",
+      "projectUrl": "https://github.com/lddubeau/saxes",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "semver-compare",
       "version": "1.0.0",
       "license": "MIT",
@@ -2452,6 +2460,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "15.1.1",
       "license": "MIT",
       "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "xmlchars",
+      "version": "2.2.0",
+      "license": "MIT",
+      "projectUrl": "https://github.com/lddubeau/xmlchars",
       "redistributionStatus": "source-and-binary"
     },
     {

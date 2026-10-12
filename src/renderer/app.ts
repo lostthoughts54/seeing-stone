@@ -1,3 +1,9 @@
+import { mountPlayerFeatures } from "./playerFeatures";
+import { mountIptv } from "./iptv";
+import { mountIptvMiniGuide } from "./iptvMiniGuide";
+import { mountYouTubeSettings } from "./youtubeSettings";
+import { isEditableTarget, restoreVisibleFocus, trapDialogFocus } from "./focus";
+import { createLibraryFilterChoices, type FilterChoice } from "./libraryFilterChoices";
 import type {
   CleanMachineDiagnostics,
   BrowseSort,
@@ -37,6 +43,7 @@ import type {
 } from "../shared/contracts";
 import type { CompanionSettingsState } from "../shared/companionContracts";
 import { BRANDING } from "../shared/branding";
+import { markSeasonEpisodesWatched, unwatchedSeasonEpisodes } from "./seasonWatched";
 import {
   connectionStatePresentation,
   formatBitrate,
@@ -82,7 +89,7 @@ const DOWNLOADED_LIBRARY: LibrarySummary = {
   name: "Downloaded",
   collectionType: "downloaded",
 };
-type Route = "home" | "library" | "search" | "details" | "watch-parties" | "live-tv" | "downloads";
+type Route = "home" | "library" | "search" | "details" | "watch-parties" | "live-tv" | "downloads" | "iptv";
 type LiveTvTab = "guide" | "recordings" | "scheduled";
 type MediaRow = {
   title: string;
@@ -150,6 +157,7 @@ const libraryView = byId<HTMLElement>("libraryView");
 const searchView = byId<HTMLElement>("searchView");
 const detailsView = byId<HTMLElement>("detailsView");
 const watchPartiesView = byId<HTMLElement>("watchPartiesView");
+mountPlayerFeatures(watchPartiesView);
 const liveTvView = byId<HTMLElement>("liveTvView");
 const downloadsView = byId<HTMLElement>("downloadsView");
 const liveTvStatus = byId<HTMLElement>("liveTvStatus");
@@ -265,6 +273,12 @@ const detailSmartDownloadsButton = byId<HTMLButtonElement>("detailSmartDownloads
 const detailSmartDownloadsLabel = byId<HTMLElement>("detailSmartDownloadsLabel");
 const episodeSection = byId<HTMLElement>("episodeSection");
 const seasonSelect = byId<HTMLSelectElement>("seasonSelect");
+const markSeasonWatchedButton = byId<HTMLButtonElement>("markSeasonWatchedButton");
+const seasonWatchedStatus = byId<HTMLElement>("seasonWatchedStatus");
+let episodeLoadRequestId = 0;
+let loadedEpisodeSeason: { seriesId: string; seasonId: string } | null = null;
+let seasonWatchedBusy = false;
+let watchedSessionRevision = 0;
 const selectSeasonEpisodes = byId<HTMLInputElement>("selectSeasonEpisodes");
 const downloadSelectedEpisodes = byId<HTMLButtonElement>("downloadSelectedEpisodes");
 const episodeList = byId<HTMLOListElement>("episodeList");
@@ -306,6 +320,7 @@ const playerLiveControls = byId<HTMLElement>("playerLiveControls");
 const playerPreviousChannelButton = byId<HTMLButtonElement>("playerPreviousChannelButton");
 const playerGoLiveButton = byId<HTMLButtonElement>("playerGoLiveButton");
 const playerMiniGuideButton = byId<HTMLButtonElement>("playerMiniGuideButton");
+const playerLastChannelButton = byId<HTMLButtonElement>("playerLastChannelButton");
 const playerNextChannelButton = byId<HTMLButtonElement>("playerNextChannelButton");
 const playerMiniGuide = byId<HTMLElement>("playerMiniGuide");
 const playerTimeline = byId<HTMLInputElement>("playerTimeline");
@@ -587,6 +602,9 @@ let connectionRetryInFlight = false;
 let companionPairingExpiresAt = 0;
 let watchPartiesVisible = false;
 let youtubeFrameVideoId: string | null = null;
+let youtubeFrameQueueId: string | null = null;
+let youtubeLastSeekAt = 0;
+let youtubeLastControlAt = 0;
 let youtubePlayerReady = false;
 let youtubePlayerState = -1;
 let youtubeLocalPosition = 0;
@@ -614,9 +632,12 @@ let volumeUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAudibleVolume = 100;
 let soloDiagnosticsRefreshedAt = 0;
 let licensesLastFocus: HTMLElement | null = null;
+let companionLastFocus: HTMLElement | null = null;
 let cleanMachineDiagnosticsLastFocus: HTMLElement | null = null;
 let playerSettingsLastFocus: HTMLElement | null = null;
 let playerStructuralRenderKey = "";
+let desiredWatchPartySyncOffsetMilliseconds: number | null = null;
+let watchPartySyncOffsetSaveInFlight = false;
 let playerDrawerMode = window.matchMedia("(max-width: 1120px)").matches;
 let offlinePlayableRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let playerAdapterPreference: PlaybackAdapterPreference | null = null;
@@ -695,8 +716,10 @@ async function discoverServers(): Promise<void> {
   try {
     state.discoveredServers = await window.jellyfin.server.discover();
     renderDiscoveredServers();
-    if (state.discoveredServers.length === 1) {
+    if (state.discoveredServers.length === 1 && !serverUrlInput.value.trim()) {
       selectDiscoveredServer(state.discoveredServers[0]);
+    } else if (state.discoveredServers.length === 1) {
+      setDiscoveryMessage("Found a Jellyfin server. Select it to use its address.", "found");
     } else if (state.discoveredServers.length > 1) {
       setDiscoveryMessage(`Found ${state.discoveredServers.length} Jellyfin servers. Choose one.`, "found");
     } else {
@@ -924,6 +947,7 @@ function metadataParts(item: MediaItem): string[] {
 }
 
 function showLogin(message = ""): void {
+  iptvPanel.setVisible(false);
   loginView.classList.remove("is-hidden");
   mainView.classList.add("is-hidden");
   playerView.classList.add("is-hidden");
@@ -932,9 +956,20 @@ function showLogin(message = ""): void {
 }
 
 function showMain(): void {
-  if (!state.session?.authenticated || !state.session.user || !state.session.server) return;
+  const authenticated = Boolean(state.session?.authenticated && state.session.user && state.session.server);
+  for (const button of [navHomeButton, navLiveTvButton, navDownloadsButton, navWatchPartiesButton, navCompanionButton,
+    mobileHomeButton, mobileSearchButton, mobileLibraryButton, mobileLiveTvButton, mobileWatchPartiesButton]) button.disabled = !authenticated;
+  for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-player-route]")) {
+    button.disabled = !authenticated && !["iptv", "now-playing"].includes(button.dataset.playerRoute ?? "");
+  }
+  byId<HTMLButtonElement>("jellyfinSignInButton").classList.toggle("is-hidden", authenticated);
+  byId<HTMLButtonElement>("headerJellyfinSignInButton").classList.toggle("is-hidden", authenticated);
+  profileButton.classList.toggle("is-hidden", !authenticated);
+  searchInput.disabled = !authenticated;
+  searchInput.placeholder = "Search Jellyfin";
   loginView.classList.add("is-hidden");
   mainView.classList.remove("is-hidden");
+  if (!state.session?.authenticated || !state.session.user || !state.session.server) return;
   userLabel.textContent = state.session.user.name;
   serverLabel.textContent = `${state.session.server.name} - ${state.session.server.address}`;
   profileInitial.textContent = (state.session.user.name || "J")[0].toUpperCase();
@@ -951,8 +986,17 @@ function setButtonActive(button: HTMLButtonElement, active: boolean): void {
 }
 
 function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?: number } = {}): void {
-  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView, "live-tv": liveTvView, downloads: downloadsView };
+  if (state.currentRoute === "details" && route !== "details") state.detailsRequestId += 1;
+  if (!options.preserveScroll || route !== state.currentRoute) {
+    if (state.searchTimer) { clearTimeout(state.searchTimer); state.searchTimer = null; }
+    if (route !== "search") state.searchRequestId++;
+    profileMenu.classList.add("is-hidden");
+    profileButton.setAttribute("aria-expanded", "false");
+    closeLibraryFilterDrawer(false);
+  }
+  const views = { home: homeView, library: libraryView, search: searchView, details: detailsView, "watch-parties": watchPartiesView, "live-tv": liveTvView, downloads: downloadsView, iptv: iptvPanel.element };
   for (const [name, element] of Object.entries(views)) element.classList.toggle("is-hidden", name !== route);
+  iptvPanel.setVisible(route === "iptv" && playerView.classList.contains("is-hidden") && !mainView.classList.contains("is-hidden"));
   state.currentRoute = route;
   const nextWatchPartiesVisible = route === "watch-parties";
   if (nextWatchPartiesVisible !== watchPartiesVisible) {
@@ -963,11 +1007,13 @@ function setRoute(route: Route, options: { preserveScroll?: boolean; scrollTop?:
 
   const desktopRoute = route === "details" ? state.returnRoute : route;
   setButtonActive(navHomeButton, desktopRoute === "home");
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-library-id]")) {
+  for (const button of mainLibraryNavigation.querySelectorAll<HTMLButtonElement>("[data-library-id]")) {
     setButtonActive(button, desktopRoute === "library" && button.dataset.libraryId === state.selectedLibraryId);
   }
   setButtonActive(navWatchPartiesButton, desktopRoute === "watch-parties");
   setButtonActive(navLiveTvButton, desktopRoute === "live-tv");
+  setButtonActive(byId<HTMLButtonElement>("navIptvButton"), desktopRoute === "iptv");
+  setButtonActive(byId<HTMLButtonElement>("mobileIptvButton"), desktopRoute === "iptv");
   setButtonActive(navDownloadsButton, desktopRoute === "downloads");
   setButtonActive(mobileHomeButton, desktopRoute === "home");
   setButtonActive(mobileSearchButton, desktopRoute === "search");
@@ -994,7 +1040,9 @@ function watchPartyStateLabel(value: string): string {
 
 function watchPartyPreparationLabel(phase: NonNullable<typeof state.watchParties>["preparation"]["phase"]): string {
   if (phase === "waiting-for-participant") return "Waiting for another participant";
-  if (phase === "preparing") return "Preparing this computer";
+  if (phase === "preparing") return "Loading video on this computer";
+  if (phase === "buffering") return "Buffering video on this computer";
+  if (phase === "retrying") return "Retrying readiness confirmation";
   if (phase === "ready") return "This computer is ready—waiting for everyone";
   if (phase === "starting") return "Starting…";
   if (phase === "playing") return "Playing together";
@@ -1053,6 +1101,7 @@ function renderWatchParties(): void {
     copy.append(eyebrow, name, metadata);
     actions.className = "watch-party-actions";
     actions.append(resync, leave);
+    if (value.preparation.phase === "error" && group.currentItemId) actions.prepend(createPreparationRetryButton(available));
     heading.append(copy, actions);
     const participants = document.createElement("p");
     participants.textContent = group.participants.length ? `Watching with: ${group.participants.join(", ")}` : "Waiting for participants";
@@ -1069,7 +1118,10 @@ function renderWatchParties(): void {
     const resyncAccess = document.createElement("p");
     resyncAccess.className = "watch-party-delivery-note";
     resyncAccess.textContent = "During playback, restore Seeing Stone from the taskbar or press Ctrl+R in the player to resync this computer.";
-    joinedWatchParty.append(heading, participants, shared, delivery, resyncAccess);
+    const preparation = document.createElement("p");
+    preparation.setAttribute("role", "status");
+    preparation.textContent = watchPartyPreparationLabel(value.preparation.phase);
+    joinedWatchParty.append(heading, preparation, participants, shared, delivery, resyncAccess);
   }
 
   if (!available) {
@@ -1123,6 +1175,8 @@ function resetYouTubeFrame(videoId: string | null): void {
   youtubeDurationStableSamples = 0;
   youtubeLastDuration = 0;
   youtubeLastAppliedVersion = -1;
+  youtubeLastSeekAt = 0;
+  youtubeLastControlAt = 0;
   youtubeAdvanceRequestedFor = "";
   if (videoId) youtubeRoomFrame.src = youtubeEmbedUrl(videoId);
   else youtubeRoomFrame.removeAttribute("src");
@@ -1137,14 +1191,56 @@ function youtubeClock(value: number): string {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
 
+const youtubeRenderedRegions = new WeakMap<HTMLElement, { signature: string; children: ChildNode[] }>();
+
+function restoreYouTubeControlFocus(container: HTMLElement, focused: HTMLElement, oldIndex: number, fallback: HTMLElement): void {
+  const controls = [...container.querySelectorAll<HTMLButtonElement>("[data-youtube-focus-key]")].filter(button => !button.disabled);
+  const target = controls.find(button => button.dataset.youtubeFocusKey === focused.dataset.youtubeFocusKey)
+    ?? controls.find(button => button.dataset.youtubeFocusGroup === focused.dataset.youtubeFocusGroup)
+    ?? controls[Math.min(Math.max(oldIndex, 0), controls.length - 1)] ?? fallback;
+  if (!target.matches(":disabled") && !target.closest(".is-hidden, [hidden], [inert]")) target.focus({ preventScroll: true });
+}
+
+async function preserveYouTubeActionFocus(container: HTMLElement, button: HTMLButtonElement, fallback: HTMLElement, action: () => Promise<void>): Promise<void> {
+  const wasFocused = document.activeElement === button;
+  const index = [...container.querySelectorAll("[data-youtube-focus-key]")].indexOf(button);
+  try { await action(); }
+  finally {
+    // Disabling a button during IPC blurs it before the next render. Recover only
+    // if the user has not focused another control or navigated away meanwhile.
+    if (wasFocused && document.activeElement === document.body && !container.closest(".is-hidden, [hidden], [inert]")) {
+      restoreYouTubeControlFocus(container, button, index, fallback);
+    }
+  }
+}
+
+function renderYouTubeRegion(container: HTMLElement, values: unknown, build: () => Node[], fallback: HTMLElement): void {
+  const signature = JSON.stringify(values);
+  const previous = youtubeRenderedRegions.get(container);
+  if (previous?.signature === signature && previous.children.length === container.childNodes.length
+    && previous.children.every((child, index) => child === container.childNodes[index])) return;
+
+  const focused = document.activeElement instanceof HTMLElement && container.contains(document.activeElement)
+    ? document.activeElement : null;
+  const oldControls = [...container.querySelectorAll<HTMLButtonElement>("[data-youtube-focus-key]")];
+  const oldIndex = focused ? oldControls.indexOf(focused as HTMLButtonElement) : -1;
+  container.replaceChildren(...build());
+  youtubeRenderedRegions.set(container, { signature, children: [...container.childNodes] });
+  if (focused) restoreYouTubeControlFocus(container, focused, oldIndex, fallback);
+}
+
 function renderYouTubeRoom(): void {
   const value = state.youtubeRooms;
   const room = value?.room ?? null;
+  const leavingFocusedRoom = !room && youtubeRoomPanel.contains(document.activeElement);
   youtubeCreateButton.disabled = value?.connection === "checking";
   youtubeRefreshButton.disabled = value?.connection === "checking";
   youtubeRoomPanel.classList.toggle("is-hidden", !room);
 
-  const roomCards: HTMLElement[] = (value?.openRooms ?? []).map((openRoom) => {
+  const openRooms = value?.openRooms ?? [];
+  renderYouTubeRegion(youtubeRoomList, [room?.inviteToken, value?.connection === "checking",
+    openRooms.map(openRoom => [openRoom.roomId, openRoom.name, openRoom.connectedMemberCount, openRoom.memberCount])], () => {
+  const roomCards: HTMLElement[] = openRooms.map((openRoom) => {
     const card = document.createElement("article");
     const copy = document.createElement("div");
     const name = document.createElement("strong");
@@ -1156,9 +1252,11 @@ function renderYouTubeRoom(): void {
     details.textContent = `${openRoom.connectedMemberCount} connected · ${openRoom.memberCount} member${openRoom.memberCount === 1 ? "" : "s"}`;
     copy.append(name, details);
     join.type = "button";
+    join.dataset.youtubeFocusKey = `room:${openRoom.roomId}`;
+    join.dataset.youtubeFocusGroup = openRoom.roomId;
     join.textContent = joined ? "Joined" : "Join";
     join.disabled = Boolean(room) || value?.connection === "checking";
-    join.addEventListener("click", () => { void joinYouTubeRoom(openRoom.roomId, join); });
+    join.addEventListener("click", () => { void preserveYouTubeActionFocus(youtubeRoomList, join, youtubeRefreshButton, () => joinYouTubeRoom(openRoom.roomId, join)); });
     card.append(copy, join);
     return card;
   });
@@ -1168,49 +1266,59 @@ function renderYouTubeRoom(): void {
     empty.textContent = "No open YouTube rooms yet.";
     roomCards.push(empty);
   }
-  youtubeRoomList.replaceChildren(...roomCards);
+  return roomCards;
+  }, youtubeRefreshButton);
 
-  if (!value || value.connection === "checking") youtubeRoomStatus.textContent = "Checking the YouTube Rooms plugin on this Jellyfin server…";
-  else if (value.connection === "plugin-missing") youtubeRoomStatus.textContent = value.error?.message || "Install the YouTube Rooms plugin on this Jellyfin server.";
-  else if (value.connection === "reconnecting") youtubeRoomStatus.textContent = "Reconnecting through Jellyfin… playback will catch up automatically.";
-  else if (room) youtubeRoomStatus.textContent = `Connected to ${room.name} through your Jellyfin server.`;
-  else youtubeRoomStatus.textContent = "Create a room or join any open room on this Jellyfin server.";
+  const status = !value || value.connection === "checking" ? "Checking the YouTube Rooms plugin on this Jellyfin server…"
+    : value.connection === "plugin-missing" ? value.error?.message || "Install the YouTube Rooms plugin on this Jellyfin server."
+    : value.connection === "reconnecting" ? "Reconnecting through Jellyfin… playback will catch up automatically."
+    : room ? `Connected to ${room.name} through your Jellyfin server.`
+    : "Create a room or join any open room on this Jellyfin server.";
+  if (youtubeRoomStatus.textContent !== status) youtubeRoomStatus.textContent = status;
 
   if (!room) {
     if (youtubeFrameVideoId) resetYouTubeFrame(null);
-    youtubeQueue.replaceChildren();
-    youtubeHandoffPanel.replaceChildren();
+    renderYouTubeRegion(youtubeQueue, null, () => [], youtubeCreateButton);
+    renderYouTubeRegion(youtubeHandoffPanel, null, () => [], youtubeCreateButton);
     youtubeHandoffPanel.classList.add("is-hidden");
+    if (leavingFocusedRoom) youtubeCreateButton.focus({ preventScroll: true });
     return;
   }
 
-  youtubeInviteToken.value = room.inviteToken;
-  youtubeJoinedName.textContent = room.name;
-  youtubeMembers.replaceChildren(...room.members.map((member) => {
+  if (youtubeInviteToken.value !== room.inviteToken) youtubeInviteToken.value = room.inviteToken;
+  if (youtubeJoinedName.textContent !== room.name) youtubeJoinedName.textContent = room.name;
+  renderYouTubeRegion(youtubeMembers, room.members.map(member => [member.displayName, member.connected, member.connected ? member.status : null]), () => room.members.map((member) => {
     const entry = document.createElement("span");
     entry.className = `youtube-member${member.connected ? "" : " is-away"}`;
     entry.textContent = `${member.displayName} · ${member.connected ? member.status : "disconnected"}`;
     return entry;
-  }));
+  }), youtubeLeaveButton);
   const transition = room.transition;
   const joinedTransition = Boolean(transition && state.watchParties?.joinedGroup?.groupId.toLowerCase() === transition.groupId.toLowerCase());
   youtubeHandoffButton.classList.toggle("is-hidden", Boolean(transition));
-  youtubeHandoffPanel.classList.toggle("is-hidden", !transition);
+  renderYouTubeRegion(youtubeHandoffPanel, transition
+    ? [room.inviteToken, transition.groupId, transition.groupName, transition.announcedBy, joinedTransition] : null, () => {
   if (transition) {
     const message = document.createElement("p");
     const action = document.createElement("button");
     message.textContent = `${transition.announcedBy} moved this room to the Jellyfin party “${transition.groupName}”.`;
     action.type = "button";
+    action.dataset.youtubeFocusKey = `handoff:${transition.groupId}`;
+    action.dataset.youtubeFocusGroup = transition.groupId;
     action.className = "primary";
     action.textContent = joinedTransition ? "Browse Jellyfin library" : "Join Jellyfin party";
     action.addEventListener("click", () => {
       if (joinedTransition) openHome();
-      else void joinYouTubeHandoff(transition.groupId, action);
+      else void preserveYouTubeActionFocus(youtubeHandoffPanel, action, youtubeHandoffButton, () => joinYouTubeHandoff(transition.groupId, action));
     });
-    youtubeHandoffPanel.replaceChildren(message, action);
-  } else youtubeHandoffPanel.replaceChildren();
+    return [message, action];
+  }
+  return [];
+  }, youtubeHandoffButton);
+  youtubeHandoffPanel.classList.toggle("is-hidden", !transition);
 
-  youtubeQueue.replaceChildren(...room.queue.map((item, index) => {
+  renderYouTubeRegion(youtubeQueue, [room.inviteToken, room.queue.map(item => [item.queueItemId, item.videoId, item.addedBy])], () => {
+  const entries = room.queue.map((item, index) => {
     const entry = document.createElement("article");
     const copy = document.createElement("div");
     const title = document.createElement(index === 0 ? "strong" : "span");
@@ -1223,9 +1331,12 @@ function renderYouTubeRoom(): void {
     const addAction = (label: string, actionName: "play" | "remove" | "move-up" | "move-down", disabled = false) => {
       const button = document.createElement("button");
       button.type = "button";
+      button.dataset.youtubeFocusKey = `queue:${item.queueItemId}:${actionName}`;
+      button.dataset.youtubeFocusGroup = item.queueItemId;
       button.textContent = label;
+      button.setAttribute("aria-label", `${actionName === "move-up" ? "Move up" : actionName === "move-down" ? "Move down" : label}: ${item.videoId}`);
       button.disabled = disabled;
-      button.addEventListener("click", () => { void updateYouTubeQueue(item.queueItemId, actionName, button); });
+      button.addEventListener("click", () => { void preserveYouTubeActionFocus(youtubeQueue, button, youtubeVideoUrlInput, () => updateYouTubeQueue(item.queueItemId, actionName, button)); });
       actions.append(button);
     };
     if (index > 0) addAction("Play now", "play");
@@ -1234,25 +1345,30 @@ function renderYouTubeRoom(): void {
     addAction("Remove", "remove");
     entry.append(copy, actions);
     return entry;
-  }));
+  });
   if (room.queue.length === 0) {
     const empty = document.createElement("p");
     empty.className = "youtube-room-list-empty";
     empty.textContent = "The queue is empty. Add a YouTube video above.";
-    youtubeQueue.replaceChildren(empty);
+    entries.push(empty);
   }
+  return entries;
+  }, youtubeVideoUrlInput);
   youtubeNextButton.disabled = room.queue.length === 0;
 
   const videoId = joinedTransition ? null : room.timeline.videoId;
-  if (videoId !== youtubeFrameVideoId) resetYouTubeFrame(videoId);
+  const queueId = room.queue[0]?.queueItemId ?? null;
+  if (videoId !== youtubeFrameVideoId || queueId !== youtubeFrameQueueId) { youtubeFrameQueueId = queueId; resetYouTubeFrame(videoId); }
   youtubePlayerShell.classList.toggle("is-hidden", !videoId);
   youtubeControls.classList.toggle("is-hidden", !videoId);
-  youtubePlayPauseButton.textContent = room.timeline.playing ? "Pause" : "Play";
+  const playPauseLabel = room.timeline.playing ? "Pause" : "Play";
+  if (youtubePlayPauseButton.textContent !== playPauseLabel) youtubePlayPauseButton.textContent = playPauseLabel;
 }
 
 function reconcileYouTubePlayer(): void {
   const timeline = state.youtubeRooms?.room?.timeline;
   if (!timeline?.videoId || timeline.videoId !== youtubeFrameVideoId) return;
+  if (state.youtubeRooms?.connection !== "connected") { if (youtubePlayerReady) youtubeCommand("pauseVideo"); return; }
   const contentIdentityMatches = youtubeReportedVideoId === timeline.videoId;
   const durationStable = youtubeDurationStableSamples >= 2;
   const safeToControl = youtubePlayerReady && contentIdentityMatches && durationStable;
@@ -1263,9 +1379,13 @@ function reconcileYouTubePlayer(): void {
       playerReady: youtubePlayerReady,
       contentIdentityMatches,
       durationStable,
-    })) youtubeCommand("seekTo", [Math.min(youtubeDuration || 86400, authoritativeYouTubePosition(timeline)), true]);
-    if (timeline.playing && youtubePlayerState !== 1 && youtubePlayerState !== 3) youtubeCommand("playVideo");
-    if (!timeline.playing && youtubePlayerState !== 2) youtubeCommand("pauseVideo");
+    }) && (timeline.version !== youtubeLastAppliedVersion || Date.now() - youtubeLastSeekAt > 4000) && youtubePlayerState !== 3) {
+      youtubeCommand("seekTo", [Math.min(youtubeDuration || 86400, authoritativeYouTubePosition(timeline)), true]); youtubeLastSeekAt = Date.now();
+    }
+    if (Date.now() - youtubeLastControlAt > 1000) {
+      if (timeline.playing && youtubePlayerState !== 1 && youtubePlayerState !== 3) { youtubeCommand("playVideo"); youtubeLastControlAt = Date.now(); }
+      if (!timeline.playing && youtubePlayerState !== 2) { youtubeCommand("pauseVideo"); youtubeLastControlAt = Date.now(); }
+    }
     youtubeLastAppliedVersion = timeline.version;
   }
 
@@ -1280,7 +1400,7 @@ function reconcileYouTubePlayer(): void {
   const nextPresence: YouTubeRoomPlaybackStatus = !safeToControl
     ? "recovering"
     : youtubePlayerState === 3 ? "buffering"
-      : timeline.playing ? "playing" : "paused";
+      : youtubePlayerState === 1 ? "playing" : youtubePlayerState === 2 ? "paused" : "recovering";
   if (nextPresence !== youtubePresence) {
     youtubePresence = nextPresence;
     void window.jellyfin.youtubeRooms.presence({ status: nextPresence }).catch(() => undefined);
@@ -1481,6 +1601,7 @@ async function watchLive(channelId: string): Promise<void> {
 }
 
 async function changeLiveChannel(offset: number): Promise<void> {
+  if (playbackForPlayer()?.iptvIdentity) { iptvPanel.changeChannel(offset); return; }
   const channels = state.liveTvGuide?.channels || [];
   const currentId = state.playbackItem?.type === "TvChannel" ? state.playbackItem.id : "";
   const currentIndex = channels.findIndex((channel) => channel.id === currentId);
@@ -1560,6 +1681,7 @@ function createLiveTvChannelIdentity(channel: LiveTvGuide["channels"][number], c
 
 function closePlayerMiniGuide(restoreFocus = false): void {
   if (playerMiniGuide.classList.contains("is-hidden")) return;
+  iptvMiniGuide.close();
   playerMiniGuide.classList.add("is-hidden");
   playerMiniGuideButton.setAttribute("aria-expanded", "false");
   if (restoreFocus) playerMiniGuideButton.focus({ preventScroll: true });
@@ -1592,6 +1714,7 @@ function miniGuideChannels(guide: LiveTvGuide): LiveTvGuide["channels"] {
 }
 
 function renderPlayerMiniGuide(): void {
+  if (iptvMiniGuide.isOpen()) return;
   const guide = state.liveTvGuide;
   if (!guide || guide.status.availability !== "available") return;
   const searchWasFocused = document.activeElement instanceof HTMLInputElement && document.activeElement.classList.contains("mini-guide-search-input");
@@ -1718,6 +1841,16 @@ function renderPlayerMiniGuide(): void {
 }
 
 function togglePlayerMiniGuide(): void {
+  if (playbackForPlayer()?.iptvIdentity) {
+    if (!playerMiniGuide.classList.contains("is-hidden")) { closePlayerMiniGuide(true); return; }
+    const channel = iptvPanel.currentChannel();
+    if (!channel) return;
+    playerMiniGuide.classList.remove("is-hidden");
+    playerMiniGuideButton.setAttribute("aria-expanded", "true");
+    keepPlayerControlsVisible();
+    iptvMiniGuide.open(channel);
+    return;
+  }
   const livePlayback = state.playbackItem?.type === "TvChannel" || playbackForPlayer()?.contentKind === "live-tv";
   if (!livePlayback) { showToast("Mini Guide is available while watching Live TV."); return; }
   if (!playerMiniGuide.classList.contains("is-hidden")) { closePlayerMiniGuide(true); return; }
@@ -1738,6 +1871,7 @@ function togglePlayerMiniGuide(): void {
 
 function handlePlayerMiniGuideKey(event: KeyboardEvent): boolean {
   if (playerMiniGuide.classList.contains("is-hidden")) return false;
+  if (iptvMiniGuide.isOpen()) return iptvMiniGuide.handleKey(event);
   const guide = state.liveTvGuide;
   if (!guide || !guide.channels.length) return false;
   const target = event.target instanceof Element ? event.target : null;
@@ -2038,7 +2172,7 @@ function renderLiveTvSearchResults(): void {
   appendSection("Upcoming", search.programs.filter((entry) => Date.parse(entry.program.startUtc) > now).map(createLiveTvSearchProgramResult));
 }
 
-function appendGlobalLiveTvSearchResults(search: LiveTvProgramSearch): void {
+function appendGlobalLiveTvSearchResults(search: LiveTvProgramSearch, container: HTMLElement): void {
   const now = Date.now();
   const appendSection = (title: string, entries: HTMLElement[]): void => {
     if (!entries.length) return;
@@ -2050,7 +2184,7 @@ function appendGlobalLiveTvSearchResults(search: LiveTvProgramSearch): void {
     list.className = "live-tv-search-list";
     list.append(...entries);
     section.append(heading, list);
-    searchRows.append(section);
+    container.append(section);
   };
   appendSection("Channels", search.channels.map((channel) => createLiveTvChannelIdentity(channel)));
   appendSection("Live Now", search.programs.filter((entry) => isCurrentProgram(entry.program, now)).map(createLiveTvSearchProgramResult));
@@ -2411,18 +2545,58 @@ async function resyncWatchParty(button: HTMLButtonElement): Promise<void> {
   }
 }
 
-async function setWatchPartySyncOffset(offsetMilliseconds: number, button: HTMLButtonElement): Promise<void> {
-  button.disabled = true;
+function createPreparationRetryButton(available: boolean): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Retry preparation";
+  button.dataset.sessionAction = "retry-preparation";
+  button.disabled = !available;
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    void window.jellyfin.watchParties.retryPreparation().then((value) => {
+      state.watchParties = value;
+      renderWatchParties();
+      renderPlayerState();
+    }).catch((error) => {
+      button.disabled = false;
+      showToast(errorMessage(error, "Playback preparation could not be retried."));
+    });
+  });
+  return button;
+}
+
+function queueWatchPartySyncOffset(offsetMilliseconds: number): void {
+  desiredWatchPartySyncOffsetMilliseconds = Math.max(-2000, Math.min(2000, offsetMilliseconds));
+  if (!playerView.classList.contains("is-hidden")) renderSessionPanel();
+  void saveQueuedWatchPartySyncOffset();
+}
+
+async function saveQueuedWatchPartySyncOffset(): Promise<void> {
+  if (watchPartySyncOffsetSaveInFlight) return;
+  watchPartySyncOffsetSaveInFlight = true;
+  let appliedOffsetMilliseconds: number | null = null;
   try {
-    state.watchParties = await window.jellyfin.watchParties.setLocalSyncOffset({ offsetMilliseconds });
-    renderWatchParties();
-    if (!playerView.classList.contains("is-hidden")) renderPlayerState(true);
-    showToast(offsetMilliseconds === 0
+    while (desiredWatchPartySyncOffsetMilliseconds !== null) {
+      const offsetMilliseconds = desiredWatchPartySyncOffsetMilliseconds;
+      state.watchParties = await window.jellyfin.watchParties.setLocalSyncOffset({ offsetMilliseconds });
+      appliedOffsetMilliseconds = offsetMilliseconds;
+      if (desiredWatchPartySyncOffsetMilliseconds === offsetMilliseconds) {
+        desiredWatchPartySyncOffsetMilliseconds = null;
+      }
+      if (state.currentRoute === "watch-parties") renderWatchParties();
+      if (!playerView.classList.contains("is-hidden")) renderSessionPanel();
+    }
+    if (appliedOffsetMilliseconds === null) return;
+    showToast(appliedOffsetMilliseconds === 0
       ? "This computer’s timing adjustment was reset."
-      : `This computer will play ${watchPartyOffsetLabel(offsetMilliseconds)}.`);
+      : `This computer will play ${watchPartyOffsetLabel(appliedOffsetMilliseconds)}.`);
   } catch (error) {
-    button.disabled = false;
+    desiredWatchPartySyncOffsetMilliseconds = null;
+    if (!playerView.classList.contains("is-hidden")) renderSessionPanel();
     showToast(errorMessage(error, "The timing adjustment could not be saved."));
+  } finally {
+    watchPartySyncOffsetSaveInFlight = false;
+    if (desiredWatchPartySyncOffsetMilliseconds !== null) void saveQueuedWatchPartySyncOffset();
   }
 }
 
@@ -2622,7 +2796,7 @@ async function loadInitialData(): Promise<void> {
   try {
     await Promise.all([loadHome(requestId), downloadsRequest]);
     if (requestId !== state.homeRequestId) return;
-    setRoute("home");
+    // Loading the home rows must not pull the user away from another page.
   } catch (error) {
     await downloadsRequest;
     if (requestId !== state.homeRequestId) return;
@@ -2676,7 +2850,6 @@ function renderConnectionFailure(): void {
       if (local) void playOfflineItem(local);
     }, "Play offline", false));
   }
-  setRoute("home");
 }
 
 async function retryConnection(trigger?: HTMLButtonElement): Promise<void> {
@@ -3032,7 +3205,7 @@ function closeTrailer(): void {
   trailerPanel.classList.add("is-hidden");
   activeTrailerItemId = null;
   openTrailerBrowserButton.classList.remove("is-hidden");
-  trailerLastFocus?.focus();
+  restoreVisibleFocus(trailerLastFocus, detailsBackButton);
   trailerLastFocus = null;
 }
 
@@ -3080,6 +3253,7 @@ function applyKnownWatchedState(itemId: string, watched: boolean): void {
 }
 
 async function setWatchedState(item: MediaItem, watched: boolean, button: HTMLButtonElement): Promise<void> {
+  if (seasonWatchedBusy) return;
   button.disabled = true;
   try {
     const result = await window.jellyfin.items.setWatched({ itemId: item.id, watched });
@@ -3105,6 +3279,59 @@ async function setWatchedState(item: MediaItem, watched: boolean, button: HTMLBu
   }
 }
 
+function updateSeasonWatchedButton(): void {
+  const scope = loadedEpisodeSeason;
+  const current = scope && state.detailItem?.id === scope.seriesId && seasonSelect.value === scope.seasonId;
+  const pending = current ? unwatchedSeasonEpisodes(state.episodes, scope.seriesId, scope.seasonId).length : 0;
+  markSeasonWatchedButton.disabled = seasonWatchedBusy || !current || pending === 0;
+  markSeasonWatchedButton.textContent = seasonWatchedBusy ? "Marking season…"
+    : current && state.episodes.length > 0 && pending === 0 ? "Season watched" : "Mark season as watched";
+}
+
+async function markSelectedSeasonWatched(): Promise<void> {
+  const scope = loadedEpisodeSeason;
+  if (seasonWatchedBusy || !scope || state.detailItem?.id !== scope.seriesId || seasonSelect.value !== scope.seasonId) return;
+  const episodes = [...state.episodes];
+  const seasonName = state.seasons.find((season) => season.id === scope.seasonId)?.name ?? "Season";
+  const revision = watchedSessionRevision;
+  const currentView = () => loadedEpisodeSeason?.seriesId === scope.seriesId && loadedEpisodeSeason.seasonId === scope.seasonId;
+  seasonWatchedBusy = true;
+  updateSeasonWatchedButton();
+  renderEpisodes();
+  seasonWatchedStatus.textContent = `Marking ${seasonName} as watched…`;
+  try {
+    const result = await markSeasonEpisodesWatched(episodes, scope.seriesId, scope.seasonId, {
+      setWatched: (itemId) => window.jellyfin.items.setWatched({ itemId, watched: true }),
+      isSessionCurrent: () => watchedSessionRevision === revision,
+      onMarked: (itemId) => {
+        applyKnownWatchedState(itemId, true);
+        if (state.detailItem?.id === itemId) renderDetails(state.detailItem);
+      },
+      onProgress: (completed, total) => {
+        if (currentView()) seasonWatchedStatus.textContent = `${seasonName}: ${completed} of ${total} episodes processed.`;
+      },
+    });
+    if (result.cancelled) return;
+    const message = result.failed
+      ? `${seasonName}: marked ${result.marked} episodes watched; ${result.failed} could not be marked. Try again to retry them.`
+      : `${seasonName} marked as watched.`;
+    const notice = message + (result.queued ? ` ${result.queued} will sync when Jellyfin is available.` : "");
+    if (currentView()) seasonWatchedStatus.textContent = notice;
+    showToast(notice);
+    if (result.marked > result.queued) void loadHome().catch(() => undefined);
+  } finally {
+    seasonWatchedBusy = false;
+    if (revision === watchedSessionRevision) {
+      if (currentView()) {
+        state.detailPlayItem = state.episodes.find((episode) => !episode.userData.played) || state.episodes[0] || null;
+        updateDetailPlayButton();
+      }
+      renderEpisodes();
+      updateSeasonWatchedButton();
+    }
+  }
+}
+
 function updateDetailPlayButton(): void {
   const item = state.detailPlayItem;
   detailPlayButton.disabled = !item;
@@ -3120,17 +3347,33 @@ function updateDetailPlayButton(): void {
 interface OpenDetailsOptions {
   alreadyLoaded?: boolean;
   preferredSeasonId?: string | null;
+  restoringHistory?: boolean;
 }
+
+const detailHistory: { item: MediaItem; seasonId: string; scrollTop: number; focus: HTMLElement | null }[] = [];
+let detailsReturnFocus: HTMLElement | null = null;
 
 async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): Promise<void> {
   if (!item?.id) return;
-  state.returnRoute = state.currentRoute === "details" ? "home" : state.currentRoute;
-  state.returnScrollTop = contentScroller.scrollTop;
+  if (!options.restoringHistory) {
+    const focus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (state.currentRoute === "details" && state.detailItem) {
+      detailHistory.push({ item: state.detailItem, seasonId: seasonSelect.value, scrollTop: contentScroller.scrollTop, focus });
+    } else {
+      detailHistory.length = 0;
+      state.returnRoute = state.currentRoute;
+      state.returnScrollTop = contentScroller.scrollTop;
+      detailsReturnFocus = focus;
+    }
+  }
   state.detailsRequestId += 1;
   const requestId = state.detailsRequestId;
   state.seasons = [];
   state.episodes = [];
   state.detailVersions = [];
+  loadedEpisodeSeason = null;
+  seasonWatchedStatus.textContent = "";
+  updateSeasonWatchedButton();
   detailVersionSelect.value = "auto";
   episodeSection.classList.add("is-hidden");
   renderDetails(item);
@@ -3149,23 +3392,28 @@ async function openDetails(item: MediaItem, options: OpenDetailsOptions = {}): P
     renderDetails({ ...fullItem, mediaVersions: versions });
     if (fullItem.type === "Series") await loadSeriesSeasons(fullItem, requestId, options.preferredSeasonId);
   } catch (error) {
+    if (requestId !== state.detailsRequestId) return;
     showToast(errorMessage(error, "Details could not be loaded."));
   }
 }
 
 async function openEpisodeSeriesFromCard(episode: MediaItem, trigger: HTMLButtonElement): Promise<void> {
   if (episode.type !== "Episode" || !episode.seriesId) return;
+  const originRoute = state.currentRoute;
+  const originRequestId = state.detailsRequestId;
   trigger.disabled = true;
   try {
     const series = await window.jellyfin.items.getDetails({ itemId: episode.seriesId });
+    if (state.currentRoute !== originRoute || originRequestId !== state.detailsRequestId || !trigger.isConnected) return;
     if (series.type !== "Series") throw new Error("The parent series could not be found.");
     await openDetails(series, {
       alreadyLoaded: true,
       preferredSeasonId: episode.seasonId,
     });
   } catch (error) {
-    trigger.disabled = false;
     showToast(errorMessage(error, "The series could not be opened."));
+  } finally {
+    trigger.disabled = false;
   }
 }
 
@@ -3192,12 +3440,36 @@ async function openSeriesFromEpisode(episode: MediaItem): Promise<void> {
 }
 
 function returnFromDetails(): void {
+  const previous = detailHistory.pop();
+  if (previous) {
+    void openDetails(previous.item, { alreadyLoaded: true, preferredSeasonId: previous.seasonId, restoringHistory: true }).then(() => {
+      if (state.currentRoute !== "details" || state.detailItem?.id !== previous.item.id) return;
+      contentScroller.scrollTop = previous.scrollTop;
+      restoreVisibleFocus(previous.focus, detailsBackButton);
+    });
+    return;
+  }
   const route = state.returnRoute || "home";
   const scrollTop = state.returnScrollTop || 0;
   setRoute(route, { scrollTop });
   requestAnimationFrame(() => {
+    if (state.currentRoute !== route) return;
     contentScroller.scrollTop = scrollTop;
+    restoreVisibleFocus(detailsReturnFocus);
   });
+}
+
+function renderEpisodeFailure(message: string, retry: () => Promise<void>): void {
+  const row = document.createElement("li");
+  row.className = "empty-state retry-state";
+  const copy = document.createElement("p");
+  copy.textContent = message;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Try again";
+  button.addEventListener("click", () => { button.disabled = true; void retry(); });
+  row.append(copy, button);
+  episodeList.replaceChildren(row);
 }
 
 async function loadSeriesSeasons(series: MediaItem, requestId: number, preferredSeasonId?: string | null): Promise<void> {
@@ -3206,7 +3478,14 @@ async function loadSeriesSeasons(series: MediaItem, requestId: number, preferred
   updateEpisodeSelectionControls();
   seasonSelect.disabled = true;
   episodeList.innerHTML = '<li class="empty-state">Loading episodes...</li>';
-  const result = await window.jellyfin.shows.getSeasons({ itemId: series.id });
+  let result: MediaItem[];
+  try {
+    result = await window.jellyfin.shows.getSeasons({ itemId: series.id });
+  } catch (error) {
+    if (requestId !== state.detailsRequestId) return;
+    renderEpisodeFailure(errorMessage(error, "Seasons could not be loaded."), () => loadSeriesSeasons(series, requestId, preferredSeasonId));
+    return;
+  }
   if (requestId !== state.detailsRequestId) return;
   state.seasons = result;
   seasonSelect.innerHTML = "";
@@ -3230,12 +3509,27 @@ async function loadSeriesSeasons(series: MediaItem, requestId: number, preferred
 }
 
 async function loadEpisodes(seriesId: string, seasonId: string, requestId = state.detailsRequestId): Promise<void> {
+  const loadId = ++episodeLoadRequestId;
+  loadedEpisodeSeason = null;
+  state.episodes = [];
+  state.detailPlayItem = null;
+  updateDetailPlayButton();
+  seasonWatchedStatus.textContent = "";
+  updateSeasonWatchedButton();
   state.selectedEpisodeIds.clear();
   updateEpisodeSelectionControls();
   episodeList.innerHTML = '<li class="empty-state">Loading episodes...</li>';
-  const result = await window.jellyfin.shows.getEpisodes({ seriesId, seasonId });
-  if (requestId !== state.detailsRequestId) return;
+  let result: MediaItem[];
+  try {
+    result = await window.jellyfin.shows.getEpisodes({ seriesId, seasonId });
+  } catch (error) {
+    if (loadId !== episodeLoadRequestId || requestId !== state.detailsRequestId) return;
+    renderEpisodeFailure(errorMessage(error, "Episodes could not be loaded."), () => loadEpisodes(seriesId, seasonId, requestId));
+    return;
+  }
+  if (loadId !== episodeLoadRequestId || requestId !== state.detailsRequestId || seasonSelect.value !== seasonId) return;
   state.episodes = result;
+  loadedEpisodeSeason = { seriesId, seasonId };
   const nextForSeries = state.nextUpItems.find((entry) => entry.seriesId === seriesId && entry.seasonId === seasonId);
   state.detailPlayItem = nextForSeries
     || state.episodes.find((episode) => !episode.userData?.played)
@@ -3246,6 +3540,7 @@ async function loadEpisodes(seriesId: string, seasonId: string, requestId = stat
 }
 
 function renderEpisodes(): void {
+  updateSeasonWatchedButton();
   episodeList.innerHTML = "";
   if (!state.episodes.length) {
     const empty = document.createElement("li");
@@ -3321,6 +3616,7 @@ function renderEpisodes(): void {
     download.textContent = "Download";
     download.addEventListener("click", () => startDownload(episode));
     watched.type = "button";
+    watched.disabled = seasonWatchedBusy;
     watched.textContent = episode.userData?.played ? "Mark Unwatched" : "Mark Watched";
     watched.addEventListener("click", () => setWatchedState(episode, !episode.userData.played, watched));
     actions.append(play, download, watched);
@@ -3428,7 +3724,43 @@ function updateLibraryFilterPresentation(): void {
   clearLibraryFiltersButton.disabled = count === 0;
 }
 
+const libraryChoiceLabels = new Map<string, { genres: Map<string, FilterChoice>; people: Map<string, FilterChoice> }>();
+const libraryChoiceControls = new Map<string, ReturnType<typeof createLibraryFilterChoices>>();
+
+function disposeLibraryChoiceControls(): void {
+  for (const control of libraryChoiceControls.values()) control.dispose();
+  libraryChoiceControls.clear();
+}
+
+function activateLibraryChoiceControls(): void {
+  for (const [section, control] of libraryChoiceControls) {
+    if (state.expandedLibraryFilterSections.has(section)) control.activate();
+  }
+}
+
+function createRemoteLibraryChoices(kind: "genres" | "people", filter: MultiValueFilter): HTMLElement {
+  const libraryId = state.selectedLibraryId!;
+  const library = supportedLibraries().find(entry => entry.id === libraryId);
+  let known = libraryChoiceLabels.get(libraryId);
+  if (!known) {
+    known = { genres: new Map(), people: new Map() };
+    libraryChoiceLabels.set(libraryId, known);
+  }
+  const control = createLibraryFilterChoices({
+    label: kind === "genres" ? "Genres" : "People",
+    selected: () => filter.included,
+    known: known[kind],
+    load: (query, startIndex) => window.jellyfin.libraries.getFilterOptions({
+      libraryId, type: library ? libraryItemType(library) ?? "Mixed" : "Mixed", kind, query, startIndex, limit: 50,
+    }),
+    change: (value, checked) => toggleFilterValue(filter, value, checked),
+  });
+  libraryChoiceControls.set(kind, control);
+  return control.element;
+}
+
 function closeLibraryFilterDrawer(restoreFocus = true): void {
+  disposeLibraryChoiceControls();
   if (libraryFilterDrawer.classList.contains("is-hidden")) return;
   state.libraryFilterDrawerScrollTop = libraryFilterSections.scrollTop;
   libraryFilterDrawer.classList.add("is-hidden");
@@ -3443,6 +3775,7 @@ function openLibraryFilterDrawer(): void {
   libraryFilterDrawer.classList.remove("is-hidden");
   libraryFilterScrim.classList.remove("is-hidden");
   libraryFiltersButton.setAttribute("aria-expanded", "true");
+  activateLibraryChoiceControls();
   requestAnimationFrame(() => {
     libraryFilterSections.scrollTop = state.libraryFilterDrawerScrollTop;
     (libraryFilterDrawer.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled)"))?.focus();
@@ -3484,6 +3817,7 @@ function createOptionList(filter: MultiValueFilter, options: LibraryFilterOption
       const count = document.createElement("span");
       label.className = "filter-option";
       checkbox.type = "checkbox";
+      checkbox.dataset.filterValue = option.value;
       checkbox.checked = filter.included.includes(option.value);
       checkbox.addEventListener("change", () => {
         if (exclusive && checkbox.checked) {
@@ -3502,6 +3836,7 @@ function createOptionList(filter: MultiValueFilter, options: LibraryFilterOption
       }
       count.className = "filter-option-count";
       count.textContent = String(option.count);
+      count.title = "Matching titles on the current page";
       label.append(checkbox, copy, count);
       return label;
     }));
@@ -3532,6 +3867,7 @@ function createRangeControl(
   bounds: { min?: number; max?: number; step?: number } = {},
 ): HTMLElement {
   const row = document.createElement("div");
+  const libraryId = state.selectedLibraryId;
   row.className = "filter-range";
   const inputs = labels.map((placeholder, index) => {
     const input = document.createElement("input");
@@ -3546,6 +3882,7 @@ function createRangeControl(
     input.addEventListener("input", () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
+        if (!input.isConnected || !input.validity.valid || state.currentRoute !== "library" || state.selectedLibraryId !== libraryId) return;
         const value = input.value === "" ? null : Number(input.value);
         if (index === 0) range.min = Number.isFinite(value) ? value : null;
         else range.max = Number.isFinite(value) ? value : null;
@@ -3579,6 +3916,7 @@ function appendFilterSection(id: string, title: string, content: HTMLElement): v
     else state.expandedLibraryFilterSections.delete(id);
     toggle.setAttribute("aria-expanded", String(next));
     content.hidden = !next;
+    if (next) libraryChoiceControls.get(id)?.activate();
   };
   toggle.addEventListener("click", () => setExpanded(toggle.getAttribute("aria-expanded") !== "true"));
   toggle.addEventListener("keydown", (event) => {
@@ -3589,24 +3927,37 @@ function appendFilterSection(id: string, title: string, content: HTMLElement): v
   libraryFilterSections.append(section);
 }
 
-function renderLibraryFilterDrawer(): void {
-  const scrollTop = libraryFilterSections.scrollTop || state.libraryFilterDrawerScrollTop;
-  const filters = currentAdvancedLibraryFilters();
+function quickLibraryFilterOptions(): LibraryFilterOption[] {
   const sourceItems = currentLibraryItems();
-  const options = currentLibraryFilterOptions();
-  libraryFilterSections.replaceChildren();
-
   const recentCutoff = Date.now() - 30 * 86_400_000;
-  const quickOptions: LibraryFilterOption[] = [
+  return [
     { value: "unplayed", label: "Unplayed", count: sourceItems.filter((item) => !item.userData.played).length },
     { value: "in-progress", label: "In progress", count: sourceItems.filter((item) => !item.userData.played && item.userData.playbackPositionTicks > 0).length },
     { value: "played", label: "Played", count: sourceItems.filter((item) => item.userData.played).length },
     { value: "favorite", label: "Favorites", count: sourceItems.filter((item) => item.userData.favorite).length },
     { value: "recently-added", label: "Added in the last 30 days", count: sourceItems.filter((item) => item.dateCreated && Date.parse(item.dateCreated) >= recentCutoff).length },
   ];
-  appendFilterSection("quick", "Quick Filters", createOptionList(filters.quick,
-    quickOptions.filter((option) => option.count > 0 || filters.quick.included.some((value) => value === option.value)), false, true));
-  appendFilterSection("genres", "Genres", createOptionList(filters.genres, options.genres));
+}
+
+function updateQuickLibraryFilterCounts(): void {
+  const counts = new Map(quickLibraryFilterOptions().map((option) => [option.value, option.count]));
+  for (const option of libraryFilterSections.querySelectorAll<HTMLElement>("#filter-section-quick .filter-option")) {
+    const value = option.querySelector<HTMLInputElement>("input")?.dataset.filterValue;
+    const count = option.querySelector<HTMLElement>(".filter-option-count");
+    if (value && count) count.textContent = String(counts.get(value) ?? 0);
+  }
+}
+
+function renderLibraryFilterDrawer(): void {
+  disposeLibraryChoiceControls();
+  const scrollTop = libraryFilterSections.scrollTop || state.libraryFilterDrawerScrollTop;
+  const filters = currentAdvancedLibraryFilters();
+  const options = currentLibraryFilterOptions();
+  libraryFilterSections.replaceChildren();
+
+  // A filtered page cannot tell us which choices exist elsewhere in the library.
+  appendFilterSection("quick", "Quick Filters", createOptionList(filters.quick, quickLibraryFilterOptions(), false, true));
+  appendFilterSection("genres", "Genres", createRemoteLibraryChoices("genres", filters.genres));
   appendFilterSection("release", "Release / Premiere Date", createRangeControl(filters.premiereYear, ["Year from", "Year to"], { min: 1870, max: 2200 }));
 
   const ratings = document.createElement("div");
@@ -3616,13 +3967,17 @@ function renderLibraryFilterDrawer(): void {
   ratings.append(ratingLabel, createRangeControl(filters.communityRating, ["Minimum", "Maximum"], { min: 0, max: 10, step: .1 }));
   if (options.officialRatings.length) ratings.append(createOptionList(filters.officialRatings, options.officialRatings, options.officialRatings.length > 12));
   appendFilterSection("ratings", "Ratings", ratings);
-  appendFilterSection("people", "People", createOptionList(filters.people, options.people, true));
+  appendFilterSection("people", "People", createRemoteLibraryChoices("people", filters.people));
   appendFilterSection("runtime", "Runtime", createRangeControl(filters.runtimeMinutes, ["Minutes from", "Minutes to"], { min: 0, max: 1000 }));
   if (options.technical.length) appendFilterSection("technical", "Video / Technical", createOptionList(filters.technical, options.technical));
+  if (!libraryFilterDrawer.classList.contains("is-hidden")) activateLibraryChoiceControls();
   requestAnimationFrame(() => { libraryFilterSections.scrollTop = scrollTop; });
 }
 
 function renderLibraryFilterChips(): void {
+  const oldChips = Array.from(libraryFilterChips.querySelectorAll<HTMLButtonElement>("button"));
+  const focusedIndex = oldChips.indexOf(document.activeElement as HTMLButtonElement);
+  const focusedLabel = oldChips[focusedIndex]?.getAttribute("aria-label");
   libraryFilterChips.replaceChildren();
   if (state.selectedLibraryId === DOWNLOADED_LIBRARY_ID) return;
   const filters = currentAdvancedLibraryFilters();
@@ -3634,6 +3989,8 @@ function renderLibraryFilterChips(): void {
     ...options.people.map((option) => [option.value, option.label] as const),
     ...options.officialRatings.map((option) => [option.value, option.label] as const),
     ...options.technical.map((option) => [option.value, option.label] as const),
+    ...[...(libraryChoiceLabels.get(state.selectedLibraryId ?? "")?.genres.values() ?? []),
+      ...(libraryChoiceLabels.get(state.selectedLibraryId ?? "")?.people.values() ?? [])].map((option) => [option.value, option.label] as const),
   ]);
   const add = (text: string, remove: () => void) => {
     const chip = document.createElement("button");
@@ -3659,6 +4016,11 @@ function renderLibraryFilterChips(): void {
   addRange("Year", filters.premiereYear);
   addRange("Rating", filters.communityRating);
   addRange("Runtime", filters.runtimeMinutes, " min");
+  if (focusedIndex >= 0) {
+    const chips = Array.from(libraryFilterChips.querySelectorAll<HTMLButtonElement>("button"));
+    (chips.find((chip) => chip.getAttribute("aria-label") === focusedLabel)
+      ?? chips[Math.min(focusedIndex, chips.length - 1)] ?? libraryFiltersButton).focus({ preventScroll: true });
+  }
 }
 
 function renderLibraryPagination(): void {
@@ -3805,6 +4167,7 @@ async function refreshLibrary(
     state.libraryCache.set(library.id, items);
     state.libraryLoadedPage = state.libraryPage;
     state.libraryLoading = false;
+    updateQuickLibraryFilterCounts();
     libraryGrid.classList.remove("library-grid-stale");
     if ((itemsChanged || pageChanged || showLoading) && state.currentRoute === "library" && state.selectedLibraryId === library.id) renderLibraryGrid(items);
     else renderLibraryPagination();
@@ -3921,8 +4284,14 @@ async function refreshVisibleCatalog(): Promise<void> {
 }
 
 function openHome(): void {
+  if (!state.session?.authenticated) { showLogin(); return; }
   setRoute("home");
   void refreshVisibleCatalog();
+}
+
+function openIptv(): void {
+  showMain();
+  setRoute("iptv", { preserveScroll: state.currentRoute === "iptv" });
 }
 
 function selectableDownloadForItem(itemId: string): DownloadSummary | undefined {
@@ -3988,7 +4357,15 @@ function renderDownloadedLibraryExtras(): void {
 function toggleDownloadedSelection(downloadId: string): void {
   if (state.selectedDownloadIds.has(downloadId)) state.selectedDownloadIds.delete(downloadId);
   else state.selectedDownloadIds.add(downloadId);
-  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+  syncDownloadedSelection();
+}
+
+function syncDownloadedSelection(): void {
+  for (const checkbox of libraryGrid.querySelectorAll<HTMLInputElement>("[data-download-select]")) {
+    checkbox.checked = state.selectedDownloadIds.has(checkbox.dataset.downloadSelect ?? "");
+    checkbox.closest(".media-card-shell")?.classList.toggle("is-download-selected", checkbox.checked);
+  }
+  updateDownloadedSelectionActions();
 }
 
 async function deleteSelectedDownloads(): Promise<void> {
@@ -4045,12 +4422,26 @@ function createDownloadedRecordRow(download: DownloadSummary, compact = false): 
   if (download.smartManaged) { const badge = document.createElement("em"); badge.className = "smart-download-badge"; badge.textContent = "SMART"; copy.append(badge); }
   const actions = document.createElement("div"); actions.className = "downloaded-record-actions";
   const play = document.createElement("button"); play.type = "button"; play.className = "primary"; play.textContent = "Play"; play.addEventListener("click", () => { void playDownloadedItem(download); });
-  const keep = document.createElement("button"); keep.type = "button"; keep.textContent = download.keepDownloaded ? "Unkeep" : "Keep"; keep.addEventListener("click", async () => { await window.jellyfin.downloads.setKeep({ downloadId: download.downloadId, keepDownloaded: !download.keepDownloaded }); await refreshDownloads(); });
+  const keep = document.createElement("button");
+  keep.type = "button";
+  keep.textContent = "Keep downloaded";
+  keep.setAttribute("aria-pressed", String(download.keepDownloaded));
+  keep.addEventListener("click", async () => {
+    keep.disabled = true;
+    try {
+      await window.jellyfin.downloads.setKeep({ downloadId: download.downloadId, keepDownloaded: !download.keepDownloaded });
+      await refreshDownloads();
+    } catch (error) {
+      showToast(errorMessage(error, "Keep downloaded could not be changed."));
+    } finally { keep.disabled = false; }
+  });
   const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Delete"; remove.addEventListener("click", () => { void performDownloadAction(download, "delete"); });
   actions.append(play, keep, remove);
   row.append(image, copy, actions);
   if (state.downloadedSelectionMode) {
     const select = document.createElement("input"); select.type = "checkbox"; select.className = "downloaded-record-select"; select.checked = state.selectedDownloadIds.has(download.downloadId); select.dataset.downloadSelect = download.downloadId;
+    select.disabled = !download.canDelete;
+    select.setAttribute("aria-label", `Select ${itemCardTitle(download.item)}${download.versionLabel ? `, ${download.versionLabel}` : ""}`);
     select.addEventListener("change", () => toggleDownloadedSelection(download.downloadId)); row.append(select);
   }
   return row;
@@ -4071,7 +4462,7 @@ function renderDownloadedGroups(): void {
     toggle.append(image, copy, chevron); toggle.addEventListener("click", () => { if (state.expandedDownloadedSeriesIds.has(group.seriesId)) state.expandedDownloadedSeriesIds.delete(group.seriesId); else state.expandedDownloadedSeriesIds.add(group.seriesId); renderLibraryGrid([]); });
     stack.append(toggle);
     if (state.downloadedSelectionMode) {
-      const selectAll = document.createElement("button"); selectAll.type = "button"; selectAll.className = "downloaded-series-select"; selectAll.textContent = "Select episodes"; selectAll.addEventListener("click", () => { for (const download of group.downloads) state.selectedDownloadIds.add(download.downloadId); renderLibraryGrid([]); }); stack.append(selectAll);
+      const selectAll = document.createElement("button"); selectAll.type = "button"; selectAll.className = "downloaded-series-select"; selectAll.textContent = "Select episodes"; selectAll.addEventListener("click", () => { for (const download of group.downloads) { if (download.canDelete) state.selectedDownloadIds.add(download.downloadId); } syncDownloadedSelection(); }); stack.append(selectAll);
     }
     if (state.expandedDownloadedSeriesIds.has(group.seriesId)) { const entries = document.createElement("div"); entries.className = "downloaded-series-entries"; for (const download of group.downloads) entries.append(createDownloadedRecordRow(download, true)); stack.append(entries); }
     libraryGrid.append(stack);
@@ -4154,32 +4545,74 @@ async function runSearch(query: string): Promise<void> {
   }
   searchTitle.textContent = `Results for "${trimmed}"`;
   setRoute("search");
-  renderLoadingRows(searchRows);
+  const mediaResults = document.createElement("div");
+  const televisionResults = document.createElement("div");
+  mediaResults.className = "search-source";
+  televisionResults.className = "search-source";
+  mediaResults.dataset.searchSource = "library";
+  televisionResults.dataset.searchSource = "live-tv";
+  searchRows.replaceChildren(mediaResults, televisionResults);
+  renderLoadingRows(mediaResults);
+  renderMessage(televisionResults, "Searching Live TV…");
+  const isCurrent = () => requestId === state.searchRequestId && state.currentRoute === "search";
 
-  try {
-    const liveTvPromise = state.liveTvGuide?.status.availability === "available"
-      ? Promise.resolve(localLiveTvSearch(trimmed, state.liveTvGuide))
-      : window.jellyfin.liveTv.searchPrograms({ query: trimmed }).catch(() => null);
-    const [items, liveTvResults] = await Promise.all([
-      window.jellyfin.search.query({ query: trimmed }),
-      liveTvPromise,
-    ]);
-    if (requestId !== state.searchRequestId) return;
-    const allRows: MediaRow[] = [
-      { title: "Movies", items: items.filter((item) => item.type === "Movie"), shape: "poster" },
-      { title: "Shows", items: items.filter((item) => item.type === "Series"), shape: "poster" },
-      { title: "Episodes", items: items.filter((item) => item.type === "Episode"), shape: "landscape" },
-    ];
-    const rows = allRows.filter((row) => row.items.length);
-    renderMediaRows(searchRows, rows);
-    if (liveTvResults && (liveTvResults.channels.length || liveTvResults.programs.length)) {
-      if (!rows.length) searchRows.replaceChildren();
-      appendGlobalLiveTvSearchResults(liveTvResults);
+  const loadResults = async (container: HTMLElement, label: string, load: () => Promise<() => void>, requestedFocus = false): Promise<void> => {
+    if (!isCurrent() || container.getAttribute("aria-busy") === "true") return;
+    container.setAttribute("aria-busy", "true");
+    let render: () => void;
+    try {
+      render = await load();
+    } catch (error) {
+      render = () => {
+        const panel = document.createElement("div");
+        const copy = document.createElement("p");
+        const retry = document.createElement("button");
+        panel.className = "retry-state";
+        copy.textContent = `${label} search could not be completed. ${errorMessage(error, "Please try again.")}`;
+        retry.type = "button";
+        retry.textContent = "Try again";
+        retry.setAttribute("aria-label", `Retry ${label} search`);
+        retry.addEventListener("click", () => {
+          const restoreFocus = document.activeElement === retry;
+          retry.disabled = true;
+          retry.textContent = "Retrying…";
+          void loadResults(container, label, load, restoreFocus);
+        });
+        panel.append(copy, retry);
+        container.replaceChildren(panel);
+      };
     }
-  } catch (error) {
-    if (requestId !== state.searchRequestId) return;
-    renderMessage(searchRows, errorMessage(error, "Search could not be completed."));
-  }
+    if (!isCurrent()) return;
+    const restoreFocus = container.contains(document.activeElement) || (requestedFocus && document.activeElement === document.body);
+    render();
+    container.setAttribute("aria-busy", "false");
+    if (restoreFocus) (container.querySelector<HTMLButtonElement>(".retry-state button") ?? searchInput).focus({ preventScroll: true });
+  };
+
+  await Promise.all([
+    loadResults(mediaResults, "Library", async () => {
+      const items = await window.jellyfin.search.query({ query: trimmed });
+      const allRows: MediaRow[] = [
+        { title: "Movies", items: items.filter((item) => item.type === "Movie"), shape: "poster" },
+        { title: "Shows", items: items.filter((item) => item.type === "Series"), shape: "poster" },
+        { title: "Episodes", items: items.filter((item) => item.type === "Episode"), shape: "landscape" },
+      ];
+      const rows = allRows.filter((row) => row.items.length);
+      return () => {
+        if (rows.length) renderMediaRows(mediaResults, rows);
+        else renderMessage(mediaResults, `No movies, shows, or episodes match "${trimmed}".`);
+      };
+    }),
+    loadResults(televisionResults, "Live TV", async () => {
+      const results = state.liveTvGuide?.status.availability === "available"
+        ? localLiveTvSearch(trimmed, state.liveTvGuide)
+        : await window.jellyfin.liveTv.searchPrograms({ query: trimmed });
+      return () => {
+        televisionResults.replaceChildren();
+        appendGlobalLiveTvSearchResults(results, televisionResults);
+      };
+    }),
+  ]);
 }
 
 async function openBrowse(title: string, input: Parameters<typeof window.jellyfin.browse.get>[0]): Promise<void> {
@@ -4420,6 +4853,8 @@ function updateCompanionPairingCountdown(): void {
 }
 
 async function openCompanion(): Promise<void> {
+  if (companionPanel.classList.contains("is-hidden")) companionLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  void youtubeSettings.load();
   profileMenu.classList.add("is-hidden");
   profileButton.setAttribute("aria-expanded", "false");
   companionScrim.classList.remove("is-hidden");
@@ -4430,8 +4865,12 @@ async function openCompanion(): Promise<void> {
 }
 
 function closeCompanion(): void {
+  if (companionPanel.classList.contains("is-hidden")) return;
+  youtubeSettings.clear();
   companionScrim.classList.add("is-hidden");
   companionPanel.classList.add("is-hidden");
+  restoreVisibleFocus(companionLastFocus, navCompanionButton);
+  companionLastFocus = null;
 }
 
 async function refreshDownloads(isCurrent: () => boolean = () => true): Promise<void> {
@@ -4668,10 +5107,12 @@ async function performDownloadAction(download: DownloadSummary, action: "pause" 
     else if (action === "resume") await window.jellyfin.downloads.resume({ downloadId: download.downloadId });
     else if (action === "retry") await window.jellyfin.downloads.retry({ downloadId: download.downloadId });
     else if (action === "cancel") await window.jellyfin.downloads.cancel({ downloadId: download.downloadId });
+    else if (download.smartManaged) state.smartDownloads = await window.jellyfin.smartDownloads.skip({ downloadId: download.downloadId });
     else await window.jellyfin.downloads.delete({ downloadId: download.downloadId });
     await refreshDownloads();
   } catch (error) {
-    showToast(errorMessage(error, `The download could not ${action}.`));
+    const actionPast = { pause: "paused", resume: "resumed", retry: "retried", cancel: "canceled", delete: "deleted" }[action];
+    showToast(errorMessage(error, `The download could not be ${actionPast}.`));
   }
 }
 
@@ -4703,9 +5144,32 @@ function downloadTransferPresentation(download: DownloadSummary): string | null 
   return `${speed} · ${eta >= 3600 ? `${Math.ceil(eta / 3600)}h remaining` : eta >= 60 ? `${Math.ceil(eta / 60)}m remaining` : `${eta}s remaining`}`;
 }
 
+const downloadCards = new Map<string, { signature: string; element: HTMLElement }>();
+
+function updateDownloadProgress(card: HTMLElement, download: DownloadSummary): void {
+  const progress = card.querySelector<HTMLProgressElement>("progress");
+  if (progress) {
+    progress.max = Math.max(1, download.expectedSize ?? 1);
+    progress.value = Math.min(progress.max, download.bytesDownloaded);
+    progress.setAttribute("aria-label", `${download.name}: ${download.progressPercent ?? 0} percent downloaded`);
+  }
+  const size = card.querySelector<HTMLElement>(".download-size");
+  if (size) size.textContent = download.expectedSize === null
+    ? formatBytes(download.bytesDownloaded)
+    : `${formatBytes(download.bytesDownloaded)} of ${formatBytes(download.expectedSize)}`;
+  const transfer = card.querySelector<HTMLElement>(".download-transfer");
+  if (transfer) {
+    const text = downloadTransferPresentation(download);
+    transfer.textContent = text ?? "";
+    transfer.hidden = !text;
+  }
+}
+
 function renderDownloads(): void {
-  downloadsList.replaceChildren();
-  const active = state.downloads.filter((entry) => entry.state === "downloading" || entry.state === "paused");
+  const ids = new Set(state.downloads.map((download) => download.downloadId));
+  for (const id of downloadCards.keys()) if (!ids.has(id)) downloadCards.delete(id);
+  for (const id of transferSamples.keys()) if (!ids.has(id)) transferSamples.delete(id);
+  const active = state.downloads.filter((entry) => entry.state === "downloading");
   const queued = state.downloads.filter((entry) => entry.state === "queued");
   const completed = state.downloads.filter((entry) => entry.state === "downloaded");
   downloadsActiveCount.textContent = String(active.length);
@@ -4717,23 +5181,37 @@ function renderDownloads(): void {
   pauseAllDownloadsButton.disabled = !state.downloads.some((entry) => entry.canPause);
   resumePausedDownloadsButton.disabled = !state.downloads.some((entry) => entry.canResume);
   deleteWatchedDownloadsButton.disabled = !completed.some((entry) => entry.item.userData.played && !entry.keepDownloaded);
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-filter]")) button.classList.toggle("is-active", button.dataset.downloadFilter === state.downloadsFilter);
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-download-filter]")) {
+    const selected = button.dataset.downloadFilter === state.downloadsFilter;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
   if (!state.downloads.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "No downloads yet. Choose Download on a movie or episode.";
-    downloadsList.append(empty);
+    downloadsList.replaceChildren(empty);
     return;
   }
   const visible = state.downloads.filter((download) => state.downloadsFilter === "all"
     || state.downloadsFilter === "active" && ["downloading", "paused", "queued"].includes(download.state)
     || state.downloadsFilter === "completed" && download.state === "downloaded"
-    || state.downloadsFilter === "failed" && download.state === "failed")
-    .sort((a, b) => state.downloadsSort === "name" ? a.name.localeCompare(b.name) : state.downloadsSort === "oldest" ? a.downloadId.localeCompare(b.downloadId) : b.downloadId.localeCompare(a.downloadId));
+    || state.downloadsFilter === "failed" && download.state === "failed");
+  // Main supplies creation order, newest first. UUIDs carry no chronology.
+  if (state.downloadsSort === "name") visible.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  else if (state.downloadsSort === "oldest") visible.reverse();
   if (!visible.length) {
-    const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "No downloads match this filter."; downloadsList.append(empty); return;
+    const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "No downloads match this filter."; downloadsList.replaceChildren(empty); return;
   }
+  const cards: HTMLElement[] = [];
   for (const download of visible) {
+    const signature = JSON.stringify({ ...download, bytesDownloaded: undefined, progressPercent: undefined });
+    const cached = downloadCards.get(download.downloadId);
+    if (cached?.signature === signature) {
+      updateDownloadProgress(cached.element, download);
+      cards.push(cached.element);
+      continue;
+    }
     const card = document.createElement("article");
     const heading = document.createElement("div");
     const copy = document.createElement("div");
@@ -4770,13 +5248,10 @@ function renderDownloads(): void {
       ? formatBytes(download.bytesDownloaded)
       : `${formatBytes(download.bytesDownloaded)} of ${formatBytes(download.expectedSize)}`;
     card.append(size);
-    const transfer = downloadTransferPresentation(download);
-    if (transfer) {
-      const details = document.createElement("span");
-      details.className = "download-transfer";
-      details.textContent = transfer;
-      card.append(details);
-    }
+    const transfer = document.createElement("span");
+    transfer.className = "download-transfer";
+    card.append(transfer);
+    updateDownloadProgress(card, download);
     if (download.error) {
       const error = document.createElement("p");
       error.className = "download-error";
@@ -4862,11 +5337,18 @@ function renderDownloads(): void {
     keep.append(checkbox, document.createTextNode("Keep downloaded"));
     controls.append(keep);
     card.append(controls);
-    downloadsList.append(card);
+    downloadCards.set(download.downloadId, { signature, element: card });
+    cards.push(card);
+  }
+  const retained = new Set(cards);
+  for (const child of Array.from(downloadsList.children)) if (!retained.has(child as HTMLElement)) child.remove();
+  for (const [index, card] of cards.entries()) {
+    if (downloadsList.children[index] !== card) downloadsList.insertBefore(card, downloadsList.children[index] ?? null);
   }
 }
 
 interface PlaybackPresentation {
+  iptvIdentity?: import("../shared/iptv").IptvPlayableIdentity;
   item: MediaItem | null;
   itemId: string;
   resumeMode: "resume" | "start-over";
@@ -4883,7 +5365,7 @@ let playerViewportRevision = 0;
 let playerViewportFrame: number | null = null;
 
 async function syncPlayerViewport(
-  visible = !playerView.classList.contains("is-hidden") && Boolean(state.playbackId || state.playbackItem),
+  visible = !playerView.classList.contains("is-hidden"),
 ): Promise<boolean> {
   const bounds = playerViewport.getBoundingClientRect();
   const scrollport = playerCenter.getBoundingClientRect();
@@ -5021,6 +5503,8 @@ function playerStructureKey(playback: PlaybackState | null): string {
       container: diagnostics?.container,
       resolution: diagnostics?.resolution,
       videoCodec: diagnostics?.videoCodec,
+      sourceFps: diagnostics?.sourceFps,
+      estimatedFps: diagnostics?.estimatedFps,
       audioCodec: diagnostics?.audioCodec,
       audioChannels: diagnostics?.audioChannels,
       bitrate: diagnostics?.bitrate,
@@ -5217,6 +5701,7 @@ function renderPlayerMetadata(): void {
     diagnostics?.resolution,
     diagnostics?.container?.toUpperCase() || null,
     diagnostics?.videoCodec?.toUpperCase() || null,
+    diagnostics?.estimatedFps || diagnostics?.sourceFps ? `${diagnostics.estimatedFps ?? diagnostics.sourceFps} FPS` : null,
     diagnostics?.audioCodec?.toUpperCase() || null,
     diagnostics?.audioChannels,
     diagnostics?.videoRange,
@@ -5412,7 +5897,7 @@ function renderPlayerState(forceStructure = false): void {
   const showPreparation = Boolean(
     joinedParty
     && preparation
-    && ["waiting-for-participant", "preparing", "ready", "starting", "error"].includes(preparation.phase),
+    && ["waiting-for-participant", "preparing", "buffering", "retrying", "ready", "starting", "error"].includes(preparation.phase),
   );
   watchPartyStartCue.classList.toggle("is-hidden", !showPreparation);
   if (showPreparation && preparation) watchPartyStartCue.textContent = watchPartyPreparationLabel(preparation.phase);
@@ -5424,7 +5909,7 @@ function renderPlayerState(forceStructure = false): void {
   const livePlayback = state.playbackItem?.type === "TvChannel" || playback?.contentKind === "live-tv";
   playerSourceBadge.textContent = livePlayback ? "LIVE" : sourceKindLabel(sourceKind);
   setTone(playerSourceBadge, sourceKind === "transcode" ? "amber" : sourceKind === "offline-local" ? "amber" : "violet");
-  playerConnectionBadge.textContent = connection.label;
+  playerConnectionBadge.textContent = playback?.iptvIdentity ? "IPTV provider" : connection.label;
   setTone(playerConnectionBadge, connection.tone);
   playerSyncBadge.textContent = joinedParty ? `${joinedParty.name} · ${joinedParty.participantCount}` : "Solo";
   setTone(playerSyncBadge, joinedParty ? "blue" : "neutral");
@@ -5441,6 +5926,10 @@ function renderPlayerState(forceStructure = false): void {
     : `${formatPlaybackTime(positionTicks)}; available through ${formatPlaybackTime(seekableUntilTicks)}`);
   playerTimeline.closest(".player-timeline-row")?.classList.toggle("is-hidden", livePlayback);
   playerLiveControls.classList.toggle("is-hidden", !livePlayback);
+  const previousChannel = iptvPanel.previousChannel();
+  playerLastChannelButton.classList.toggle("is-hidden", !playback?.iptvIdentity);
+  playerLastChannelButton.disabled = !previousChannel || playback?.phase === "resolving";
+  playerLastChannelButton.title = previousChannel ? `Back to ${previousChannel.name}` : "Watch another channel to enable Last channel";
   document.querySelector(".player-rate-control")?.classList.toggle("is-hidden", livePlayback);
   playerCurrentTime.textContent = formatPlaybackTime(positionTicks);
   playerDuration.textContent = playback?.fullscreen
@@ -5542,6 +6031,7 @@ function renderSoloSessionPanel(): void {
     ...(diagnostics?.container ? [{ label: "Container", value: diagnostics.container.toUpperCase() }] : []),
     ...(diagnostics?.resolution ? [{ label: "Resolution", value: diagnostics.resolution }] : []),
     ...(diagnostics?.videoCodec ? [{ label: "Video", value: diagnostics.videoCodec.toUpperCase() }] : []),
+    ...(diagnostics?.estimatedFps || diagnostics?.sourceFps ? [{ label: diagnostics.estimatedFps ? "FPS (estimated)" : "FPS (source)", value: String(diagnostics.estimatedFps ?? diagnostics.sourceFps) }] : []),
     ...(diagnostics?.audioCodec ? [{ label: "Audio", value: diagnostics.audioCodec.toUpperCase() }] : []),
     ...(diagnostics?.audioChannels ? [{ label: "Channels", value: diagnostics.audioChannels }] : []),
     ...(formatBitrate(diagnostics?.bitrate) ? [{ label: "Bitrate", value: formatBitrate(diagnostics?.bitrate) as string }] : []),
@@ -5659,25 +6149,27 @@ function renderWatchpartySessionPanel(): void {
   const earlier = document.createElement("button");
   const later = document.createElement("button");
   const reset = document.createElement("button");
-  const offset = value.preparation.localSyncOffsetMilliseconds;
+  const offset = desiredWatchPartySyncOffsetMilliseconds ?? value.preparation.localSyncOffsetMilliseconds;
   timing.className = "session-sync-adjustment";
   timingTitle.textContent = "This computer’s timing";
-  timingState.textContent = watchPartyPreparationLabel(value.preparation.phase);
+  timingState.textContent = value.preparation.phase === "error" && value.error?.message
+    ? value.error.message
+    : watchPartyPreparationLabel(value.preparation.phase);
   timingState.setAttribute("role", "status");
   timingValue.textContent = watchPartyOffsetLabel(offset);
   timingHelp.textContent = "If this computer sounds late, choose Earlier.";
   earlier.textContent = "Earlier 100 ms";
   earlier.disabled = offset >= 2000;
   earlier.dataset.sessionAction = "sync-earlier";
-  earlier.addEventListener("click", () => { void setWatchPartySyncOffset(Math.min(2000, offset + 100), earlier); });
+  earlier.addEventListener("click", () => { queueWatchPartySyncOffset(offset + 100); });
   later.textContent = "Later 100 ms";
   later.disabled = offset <= -2000;
   later.dataset.sessionAction = "sync-later";
-  later.addEventListener("click", () => { void setWatchPartySyncOffset(Math.max(-2000, offset - 100), later); });
+  later.addEventListener("click", () => { queueWatchPartySyncOffset(offset - 100); });
   reset.textContent = "Reset";
   reset.disabled = offset === 0;
   reset.dataset.sessionAction = "sync-reset";
-  reset.addEventListener("click", () => { void setWatchPartySyncOffset(0, reset); });
+  reset.addEventListener("click", () => { queueWatchPartySyncOffset(0); });
   timingActions.className = "session-sync-actions";
   timingActions.append(earlier, later, reset);
   timing.append(timingTitle, timingState, timingValue, timingHelp, timingActions);
@@ -5738,6 +6230,9 @@ function renderWatchpartySessionPanel(): void {
   leave.dataset.sessionAction = "leave-party";
   leave.addEventListener("click", () => { void leaveWatchParty(leave); });
   actions.append(wait, continueButton, resync, leave);
+  if (value.preparation.phase === "error" && value.joinedGroup?.currentItemId) {
+    actions.prepend(createPreparationRetryButton(value.connection === "connected"));
+  }
   sessionPanelContent.append(enhanced, actions);
 
   const details = document.createElement("details");
@@ -5942,6 +6437,7 @@ function armPlayerControlsTimer(): void {
     if (playback?.fullscreen && playback.phase === "playing" && playback.paused === false
       && !playerControls.contains(document.activeElement)
       && document.activeElement !== playerSegmentSkipButton
+      && playerMiniGuide.classList.contains("is-hidden")
       && playerEpisodeBrowser.classList.contains("is-hidden")) {
       setPlayerControlsIdle(true);
     }
@@ -6057,15 +6553,24 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
     : presentation.item?.type || "";
   playerOverview.textContent = presentation.item?.overview || "";
   playerView.classList.remove("is-hidden");
+  iptvPanel.setVisible(false);
   document.body.classList.add("is-playing");
   setSessionPanelCollapsed(window.matchMedia("(max-width: 1120px)").matches);
   renderPlayerState();
+  // Reveal the video even if the previous playback was scrolled to metadata.
+  // Viewport visibility also applies while IPTV is still resolving its ID.
+  playerCenter.scrollTop = 0;
+  playerCenter.scrollLeft = 0;
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if (requestId !== state.playbackRequestId) return;
   await syncPlayerViewport(true);
+  if (requestId !== state.playbackRequestId) return;
 
   let resolved;
   try {
-    resolved = presentation.liveChannelId
+    resolved = presentation.iptvIdentity
+      ? await window.iptv.play({ identity: presentation.iptvIdentity, resumeMode: "start-over" })
+      : presentation.liveChannelId
       ? await window.jellyfin.playback.startLive({ channelId: presentation.liveChannelId })
       : await window.jellyfin.playback.start({
         itemId: presentation.itemId,
@@ -6091,7 +6596,9 @@ async function startPresentedPlayback(presentation: PlaybackPresentation): Promi
   if (resolved.mediaVersion?.label || presentation.versionLabel) {
     playerMeta.textContent = [presentation.meta, resolved.mediaVersion?.label ?? presentation.versionLabel].filter(Boolean).join(" • ");
   }
-    state.playbackState = await window.jellyfin.playback.getState().catch(() => null);
+  const playback = await window.jellyfin.playback.getState().catch(() => null);
+  if (requestId !== state.playbackRequestId) return;
+  state.playbackState = playback;
   if (resolved.notice) showToast(resolved.notice);
   renderPlayerState();
   void refreshSoloDiagnostics(true);
@@ -6111,6 +6618,7 @@ async function presentExternallyStartedPlayback(playback: PlaybackState): Promis
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind ?? null;
   state.playbackState = playback;
+  if (playback.phase === "playing" && playback.iptvIdentity) iptvPanel.confirmPlaying(playback.iptvIdentity);
   clearPlaybackFeatures();
   state.soloDiagnostics = null;
   state.soloDiagnosticsRequestId += 1;
@@ -6124,17 +6632,20 @@ async function presentExternallyStartedPlayback(playback: PlaybackState): Promis
   playerEyebrow.textContent = "";
   playerOverview.textContent = "";
   playerView.classList.remove("is-hidden");
+  iptvPanel.setVisible(false);
   document.body.classList.add("is-playing");
   setSessionPanelCollapsed(window.matchMedia("(max-width: 1120px)").matches);
   renderPlayerState();
   void loadPlaybackFeatures(playback);
+  playerCenter.scrollTop = 0;
+  playerCenter.scrollLeft = 0;
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
   await Promise.all([
     syncPlayerViewport(true),
     refreshPlayerAdapterPreference(),
   ]);
-  if (playback.itemId) {
+  if (playback.itemId && !playback.iptvIdentity) {
     try {
       const item = await window.jellyfin.items.getDetails({ itemId: playback.itemId });
       if (requestId !== state.playbackRequestId || state.playbackId !== expectedPlaybackId) return;
@@ -6194,6 +6705,7 @@ async function playDownloadedItem(download: DownloadSummary): Promise<void> {
       ? "The downloaded media could not be played."
       : "The partial download could not be played.",
     progressiveOnly,
+    ...(selected.mediaSourceId ? { preferredMediaSourceId: selected.mediaSourceId } : {}),
   });
 }
 
@@ -6240,6 +6752,7 @@ async function closePlayer(): Promise<void> {
     : Promise.resolve();
   playerView.classList.add("is-hidden");
   document.body.classList.remove("is-playing");
+  iptvPanel.setVisible(state.currentRoute === "iptv" && !mainView.classList.contains("is-hidden"));
   state.playbackItem = null;
   state.playbackId = null;
   state.playbackSource = null;
@@ -6285,9 +6798,13 @@ window.jellyfin.playback.subscribe((playback) => {
   }
   if (lostActivePlayback) state.playbackId = null;
   state.playbackState = playback;
+  if (playback.phase === "playing" && playback.iptvIdentity) iptvPanel.confirmPlaying(playback.iptvIdentity);
   state.playbackSource = playback.source;
   state.playbackSourceKind = playback.diagnostics?.sourceKind || state.playbackSourceKind;
   renderPlayerState();
+  // A resolving source has no playback ID yet. Re-show the native surface
+  // when its identity arrives, including IPTV which has no Jellyfin item DTO.
+  if (playerVisible && itemChanged) schedulePlayerViewport();
   if (itemChanged && !externallyStarted) void loadPlaybackFeatures(playback);
   if (externallyStarted) void presentExternallyStartedPlayback(playback);
   if (playback.playbackId && playback.playbackId === state.playbackId && (itemChanged || Date.now() - soloDiagnosticsRefreshedAt >= 30_000)) {
@@ -6385,7 +6902,7 @@ function closeLicenses(): void {
   if (licensesPanel.classList.contains("is-hidden")) return;
   licensesScrim.classList.add("is-hidden");
   licensesPanel.classList.add("is-hidden");
-  licensesLastFocus?.focus?.();
+  restoreVisibleFocus(licensesLastFocus, profileButton);
   licensesLastFocus = null;
 }
 
@@ -6472,11 +6989,22 @@ function closeCleanMachineDiagnostics(): void {
   if (cleanMachineDiagnosticsPanel.classList.contains("is-hidden")) return;
   cleanMachineDiagnosticsScrim.classList.add("is-hidden");
   cleanMachineDiagnosticsPanel.classList.add("is-hidden");
-  cleanMachineDiagnosticsLastFocus?.focus?.();
+  restoreVisibleFocus(cleanMachineDiagnosticsLastFocus, mainView.classList.contains("is-hidden") ? loginCleanMachineDiagnosticsButton : profileButton);
   cleanMachineDiagnosticsLastFocus = null;
 }
 
 function resetSignedInState(): void {
+  disposeLibraryChoiceControls();
+  libraryChoiceLabels.clear();
+  detailHistory.length = 0;
+  detailsReturnFocus = null;
+  downloadCards.clear();
+  transferSamples.clear();
+  watchedSessionRevision += 1;
+  episodeLoadRequestId += 1;
+  loadedEpisodeSeason = null;
+  seasonWatchedStatus.textContent = "";
+  updateSeasonWatchedButton();
   if (smartDownloadDialog.open) smartDownloadDialog.close("cancel");
   if (smartUnfollowDialog.open) smartUnfollowDialog.close("cancel");
   liveTvArtworkUrls.clear();
@@ -6652,6 +7180,7 @@ function resetSignedInState(): void {
   watchPartyStatus.textContent = "";
   watchPartyNameInput.value = "";
   closeTrailer();
+  closeCompanion();
   closeLicenses();
   closeCleanMachineDiagnostics();
   setRoute("home");
@@ -6670,22 +7199,30 @@ async function bootstrap(): Promise<void> {
   } catch {
     state.session = null;
   }
-  showLogin();
+  if (state.currentRoute === "iptv") { showMain(); setRoute("iptv", { preserveScroll: true }); }
+  else showLogin();
   try {
     await discoverServers();
   } catch { /* The login view retains manual server entry. */ }
 }
 
+let signingIn = false;
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (signingIn) return;
+  signingIn = true;
+  const submit = loginForm.querySelector<HTMLButtonElement>("button[type='submit']")!;
+  const credentials = { username: usernameInput.value.trim(), password: passwordInput.value };
+  submit.disabled = true;
+  submit.textContent = "Signing in…";
+  loginForm.setAttribute("aria-busy", "true");
   setLoginMessage("Signing in...");
   const serverUrl = normalizeServerUrl(serverUrlInput.value);
   try {
     const connection = await window.jellyfin.server.connect({ url: serverUrl });
     state.session = await window.jellyfin.session.login({
       connectionId: connection.connectionId,
-      username: usernameInput.value.trim(),
-      password: passwordInput.value,
+      ...credentials,
       remember: true,
     });
     passwordInput.value = "";
@@ -6694,6 +7231,11 @@ loginForm.addEventListener("submit", async (event) => {
     await loadInitialData();
   } catch (error) {
     setLoginMessage(errorMessage(error, "Could not sign in. Check the server URL and credentials."), true);
+  } finally {
+    signingIn = false;
+    submit.disabled = false;
+    submit.textContent = "Sign In";
+    loginForm.removeAttribute("aria-busy");
   }
 });
 
@@ -6702,6 +7244,9 @@ serverUrlInput.addEventListener("input", renderDiscoveredServers);
 
 brandHomeButton.addEventListener("click", openHome);
 navHomeButton.addEventListener("click", openHome);
+for (const id of ["loginIptvButton", "navIptvButton", "mobileIptvButton"]) byId<HTMLButtonElement>(id).addEventListener("click", openIptv);
+byId<HTMLButtonElement>("jellyfinSignInButton").addEventListener("click", () => showLogin());
+byId<HTMLButtonElement>("headerJellyfinSignInButton").addEventListener("click", () => showLogin());
 navLiveTvButton.addEventListener("click", () => { void openLiveTv(); });
 navWatchPartiesButton.addEventListener("click", () => { void openWatchParties(); });
 navCompanionButton.addEventListener("click", () => { void openCompanion(); });
@@ -6752,10 +7297,13 @@ selectDownloadedButton.addEventListener("click", () => {
   renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
 });
 selectAllDownloadedButton.addEventListener("click", () => {
-  for (const checkbox of libraryGrid.querySelectorAll<HTMLInputElement>("[data-download-select]")) {
-    if (!checkbox.disabled && checkbox.dataset.downloadSelect) state.selectedDownloadIds.add(checkbox.dataset.downloadSelect);
+  for (const group of groupDownloadedRecords(state.downloads, state.libraryFilter, state.librarySort)) {
+    const downloads = group.kind === "individual" ? [group.download] : group.downloads;
+    for (const download of downloads) {
+      if (download.canDelete) state.selectedDownloadIds.add(download.downloadId);
+    }
   }
-  renderLibraryGrid(state.libraryCache.get(DOWNLOADED_LIBRARY_ID) || []);
+  syncDownloadedSelection();
 });
 cancelDownloadedSelectionButton.addEventListener("click", () => {
   state.downloadedSelectionMode = false;
@@ -6774,6 +7322,7 @@ detailVersionSelect.addEventListener("change", () => {
 seasonSelect.addEventListener("change", () => {
   if (state.detailItem?.type === "Series") loadEpisodes(state.detailItem.id, seasonSelect.value);
 });
+markSeasonWatchedButton.addEventListener("click", () => { void markSelectedSeasonWatched(); });
 selectSeasonEpisodes.addEventListener("change", () => {
   state.selectedEpisodeIds.clear();
   if (selectSeasonEpisodes.checked) {
@@ -6933,9 +7482,11 @@ liveTvChannelSearch.addEventListener("keydown", (event) => {
 playerPreviousChannelButton.addEventListener("click", () => { void changeLiveChannel(-1); });
 playerNextChannelButton.addEventListener("click", () => { void changeLiveChannel(1); });
 playerGoLiveButton.addEventListener("click", () => {
+  if (playbackForPlayer()?.iptvIdentity) { iptvPanel.goLive(); return; }
   if (state.playbackItem?.type === "TvChannel") void watchLive(state.playbackItem.id);
 });
 playerMiniGuideButton.addEventListener("click", togglePlayerMiniGuide);
+playerLastChannelButton.addEventListener("click", () => { closePlayerMiniGuide(); iptvPanel.lastChannel(); });
 
 createWatchPartyButton.addEventListener("click", () => { void createWatchParty(); });
 refreshWatchPartiesButton.addEventListener("click", () => { void refreshWatchParties(); });
@@ -6947,7 +7498,13 @@ watchPartyNameInput.addEventListener("keydown", (event) => {
 });
 
 searchInput.addEventListener("input", () => {
+  state.searchRequestId += 1;
   if (state.searchTimer) clearTimeout(state.searchTimer);
+  if (!searchInput.value.trim()) {
+    state.searchTimer = null;
+    void runSearch("");
+    return;
+  }
   state.searchTimer = setTimeout(() => runSearch(searchInput.value), 280);
 });
 
@@ -6956,6 +7513,7 @@ profileButton.addEventListener("click", (event) => {
   const willOpen = profileMenu.classList.contains("is-hidden");
   profileMenu.classList.toggle("is-hidden", !willOpen);
   profileButton.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen && event.detail === 0) profileMenu.querySelector<HTMLElement>("button:not(:disabled), select:not(:disabled)")?.focus();
 });
 
 profileMenu.addEventListener("click", (event) => event.stopPropagation());
@@ -6976,9 +7534,15 @@ window.setInterval(() => {
   if ((state.currentRoute === "live-tv" && state.liveTvTab === "guide" && state.liveTvGuide)
     || !playerMiniGuide.classList.contains("is-hidden")) updateLiveTvTimeMarkers();
 }, 60_000);
-window.addEventListener("focus", () => { void refreshVisibleCatalog(); });
+window.addEventListener("focus", () => {
+  schedulePlayerViewportSettled();
+  void refreshVisibleCatalog();
+});
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) void refreshVisibleCatalog();
+  if (!document.hidden) {
+    schedulePlayerViewportSettled();
+    void refreshVisibleCatalog();
+  }
 });
 
 downloadsButton.addEventListener("click", () => openDownloads());
@@ -7000,6 +7564,8 @@ checkForUpdatesButton.addEventListener("click", () => { void checkForUpdates(); 
 dismissUpdateButton.addEventListener("click", () => updateBanner.classList.add("is-hidden"));
 checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });
 closeCompanionButton.addEventListener("click", closeCompanion);
+const youtubeSettings = mountYouTubeSettings(window.jellyfin.companion);
+byId<HTMLButtonElement>("youtubeSearchSettingsButton").addEventListener("click", () => { void openCompanion(); });
 companionScrim.addEventListener("click", closeCompanion);
 closeTrailerButton.addEventListener("click", closeTrailer);
 trailerScrim.addEventListener("click", closeTrailer);
@@ -7146,19 +7712,24 @@ playerTimeline.addEventListener("change", () => {
 playerTimeline.addEventListener("pointercancel", () => { delete playerTimeline.dataset.scrubbing; hideTimelinePreviewIfInactive(); });
 
 playerVolume.addEventListener("input", () => {
+  const playbackId = state.playbackId;
+  if (!playbackId) return;
   const volume = Math.max(0, Math.min(100, Math.round(Number(playerVolume.value))));
   if (volume > 0) lastAudibleVolume = volume;
   playerMuteButton.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
   if (volumeUpdateTimer) clearTimeout(volumeUpdateTimer);
   volumeUpdateTimer = setTimeout(() => {
-    if (!state.playbackId) return;
+    volumeUpdateTimer = null;
+    if (state.playbackId !== playbackId) return;
     void applyPlaybackCommand(
-      () => window.jellyfin.playback.setVolume({ playbackId: state.playbackId as string, volume }),
+      () => window.jellyfin.playback.setVolume({ playbackId, volume }),
       "Volume could not be changed.",
     );
   }, 75);
 });
 playerMuteButton.addEventListener("click", () => {
+  if (volumeUpdateTimer) clearTimeout(volumeUpdateTimer);
+  volumeUpdateTimer = null;
   const playback = playbackForPlayer();
   if (!state.playbackId || !playback) return;
   const volume = playback.volume > 0 ? 0 : Math.max(1, lastAudibleVolume);
@@ -7327,85 +7898,42 @@ window.addEventListener("pointermove", () => {
 for (const button of playerView.querySelectorAll<HTMLButtonElement>("[data-player-route]")) {
   button.addEventListener("click", async () => {
     const route = button.dataset.playerRoute;
+    if (route === "now-playing") return;
     await closePlayer();
     if (route === "home") openHome();
     else if (route === "watch-parties") await openWatchParties();
     else if (route === "live-tv") await openLiveTv();
+    else if (route === "iptv") openIptv();
+    else if (route === "downloads") openDownloads();
+    else if (route === "companion") await openCompanion();
   });
 }
 
 document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented || event.isComposing) return;
   if (smartDownloadDialog.open || smartUnfollowDialog.open) return;
-  if (!libraryFilterDrawer.classList.contains("is-hidden")) {
+  const modal = [
+    { panel: trailerPanel, close: closeTrailer },
+    { panel: cleanMachineDiagnosticsPanel, close: closeCleanMachineDiagnostics },
+    { panel: licensesPanel, close: closeLicenses },
+    { panel: companionPanel, close: closeCompanion },
+    { panel: libraryFilterDrawer, close: closeLibraryFilterDrawer },
+  ].find(({ panel }) => !panel.classList.contains("is-hidden"));
+  if (modal) {
     if (event.key === "Escape") {
       event.preventDefault();
-      closeLibraryFilterDrawer();
-      return;
-    }
-    const focusable = Array.from(libraryFilterDrawer.querySelectorAll<HTMLElement>(
-      "button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])",
-    )).filter((element) => element.offsetParent !== null);
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.key === "Tab" && first && last) {
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      return;
-    }
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if ((event.key === "ArrowDown" || event.key === "ArrowUp")
-      && target
-      && !target.matches("select, input[type='number']")) {
-      const index = focusable.indexOf(target);
-      if (index >= 0) {
-        event.preventDefault();
-        focusable[(index + (event.key === "ArrowDown" ? 1 : -1) + focusable.length) % focusable.length]?.focus();
-      }
-      return;
-    }
-  }
-  if (!trailerPanel.classList.contains("is-hidden") && event.key === "Escape") {
-    event.preventDefault();
-    closeTrailer();
-    return;
-  }
-  if (!cleanMachineDiagnosticsPanel.classList.contains("is-hidden")) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeCleanMachineDiagnostics();
-      return;
-    }
-    if (event.key === "Tab") {
-      const focusable = Array.from(cleanMachineDiagnosticsPanel.querySelectorAll<HTMLElement>("button:not(:disabled), [tabindex]:not([tabindex='-1'])"));
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first && last && event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (first && last && !event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-    return;
-  }
-
-  if (!licensesPanel.classList.contains("is-hidden")) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeLicenses();
-      return;
-    }
-    if (event.key === "Tab") {
-      const focusable = Array.from(licensesPanel.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])"));
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first && last && event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (first && last && !event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+      modal.close();
+    } else {
+      trapDialogFocus(event, modal.panel);
+      if (modal.panel === libraryFilterDrawer && ["ArrowDown", "ArrowUp"].includes(event.key)
+        && event.target instanceof HTMLElement && event.target.matches("button, input[type='checkbox']")) {
+        const controls = Array.from(modal.panel.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled)"))
+          .filter(control => control.getClientRects().length > 0);
+        const index = controls.indexOf(event.target);
+        if (index >= 0) {
+          event.preventDefault();
+          controls[(index + (event.key === "ArrowDown" ? 1 : -1) + controls.length) % controls.length]?.focus();
+        }
       }
     }
     return;
@@ -7417,8 +7945,8 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
       if (!playerEpisodeBrowser.classList.contains("is-hidden")) closePlayerEpisodeBrowser();
-      else if (playbackForPlayer()?.fullscreen) togglePlayerFullscreen();
       else if (!playerSettingsMenu.classList.contains("is-hidden")) closePlayerSettings();
+      else if (playbackForPlayer()?.fullscreen) togglePlayerFullscreen();
       else if (playerDrawerMode && !state.sessionPanelCollapsed) {
         setSessionPanelCollapsed(true);
         openSessionPanelButton.focus();
@@ -7427,9 +7955,10 @@ document.addEventListener("keydown", (event) => {
       return;
     }
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest("input, select, textarea")) return;
-    const key = event.key.toLocaleLowerCase();
-    if (target?.closest("button") && (key === " " || key === "enter")) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || isEditableTarget(event.target)) return;
+    const key = event.key.toLowerCase();
+    if (event.repeat && [" ", "k", "m", "f"].includes(key)) return;
+    if (target?.closest("button, summary, a[href], [role='button']") && (key === " " || key === "enter")) return;
     if (key === " " || key === "k") {
       event.preventDefault();
       void togglePlayerPaused();
@@ -7449,10 +7978,17 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !searchInput.disabled && !mainView.classList.contains("is-hidden")) {
+    event.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+    return;
+  }
   if (event.key !== "Escape") return;
   if (!profileMenu.classList.contains("is-hidden")) {
     profileMenu.classList.add("is-hidden");
     profileButton.setAttribute("aria-expanded", "false");
+    profileButton.focus();
   } else if (!companionPanel.classList.contains("is-hidden")) {
     closeCompanion();
   } else if (state.currentRoute === "details") {
@@ -7510,6 +8046,19 @@ window.jellyfin.watchParties.subscribe((watchParties) => {
   if (!playerView.classList.contains("is-hidden")) renderPlayerState();
 });
 
+let featureRoomShown: string | null = null;
+window.jellyfin.playerFeatures?.subscribe((features) => {
+  if (features.room && features.room.media?.kind !== "jellyfin" && !playerView.classList.contains("is-hidden")) {
+    dismissedPlaybackId = state.playbackId;
+    playerView.classList.add("is-hidden");
+    document.body.classList.remove("is-playing");
+    void syncPlayerViewport(false);
+  }
+  if (!features.room) featureRoomShown = null;
+  const key = features.room ? `${features.room.id}:${features.room.timeline.generation}` : null;
+  if (features.room?.media?.kind === "jellyfin" && key !== featureRoomShown && !playerView.classList.contains("is-hidden")) { featureRoomShown = key; setSessionPanelCollapsed(false); }
+});
+
 window.jellyfin.youtubeRooms.subscribe((youtubeRooms) => {
   state.youtubeRooms = youtubeRooms;
   if (state.currentRoute === "watch-parties") {
@@ -7523,4 +8072,10 @@ window.jellyfin.companion.subscribe((status) => {
   if (!companionPanel.classList.contains("is-hidden")) renderCompanion(status);
 });
 
+const iptvPanel = mountIptv(async (item) => {
+  if (item.identity.contentType !== "live") return;
+  closePlayerMiniGuide();
+  await startPresentedPlayback({ item: null, itemId: `iptv:${item.identity.providerId}:live:${item.identity.itemId}`, iptvIdentity: { ...item.identity, contentType: "live" }, resumeMode: "start-over", title: item.name, meta: "IPTV · Live", failureMessage: "This channel could not be played." });
+}, openIptv);
+const iptvMiniGuide = mountIptvMiniGuide(playerMiniGuide, item => { closePlayerMiniGuide(); iptvPanel.watch(item); }, () => closePlayerMiniGuide(true));
 void bootstrap();

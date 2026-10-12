@@ -72,6 +72,7 @@
             <button class="primary login-submit" type="submit">Sign In</button>
             <p id="loginMessage" class="form-message" role="status"></p>
             <p class="login-help">Your credentials are sent only to the server address above.</p>
+            <button id="loginIptvButton" class="primary" type="button">Open IPTV · no Jellyfin needed</button>
             <button id="loginCleanMachineDiagnosticsButton" class="login-diagnostics-button" type="button">Run player diagnostics</button>
           </form>
         </div>
@@ -84,6 +85,7 @@
             <span><strong>Seeing Stone</strong><small>A Jellyfin client</small></span>
           </button>
           <nav class="app-rail-nav">
+            <button id="jellyfinSignInButton" class="is-hidden" type="button" title="Connect to Jellyfin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"></path></svg><span>Connect Jellyfin</span></button>
             <button type="button" disabled title="Start something from your library to open Now Playing">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg><span>Now Playing</span>
             </button>
@@ -96,9 +98,10 @@
             <button type="button" disabled title="Watchlist is not available in this build">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg><span>Watchlist</span>
             </button>
-            <button id="navLiveTvButton" type="button" title="Live TV (Beta)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
+            <button id="navLiveTvButton" type="button" title="Jellyfin Live TV (Beta)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Jellyfin TV</span>
             </button>
+            <button id="navIptvButton" type="button" title="Direct IPTV"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m10 9 5 3-5 3z"></path></svg><span>IPTV</span></button>
             <button id="navDownloadsButton" type="button" title="Downloads">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg><span>Downloads</span>
             </button>
@@ -120,14 +123,15 @@
         <header class="app-header">
 
           <div class="header-actions">
+            <button id="headerJellyfinSignInButton" class="is-hidden" type="button">Connect Jellyfin</button>
             <label class="header-search" for="searchInput">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
                 <path d="M16.5 16.5 21 21"></path>
               </svg>
-              <input id="searchInput" type="search" placeholder="Search" autocomplete="off" />
+              <input id="searchInput" aria-label="Search Jellyfin" type="search" placeholder="Search" autocomplete="off" />
             </label>
-            <button id="profileButton" class="profile-button" type="button" aria-label="Account menu" aria-expanded="false">
+            <button id="profileButton" aria-controls="profileMenu" class="profile-button" type="button" aria-label="Account menu" aria-expanded="false">
               <span id="profileInitial">L</span>
             </button>
           </div>
@@ -303,6 +307,7 @@
               <header class="page-heading youtube-together-heading">
                 <p class="eyebrow">YouTube · Jellyfin rooms</p>
                 <h1 id="youtubeTogetherHeading">Watch YouTube Together</h1>
+                <button id="youtubeSearchSettingsButton" type="button">YouTube search settings</button>
                 <p>Use your Jellyfin server to keep the content timeline together. YouTube plays in its official embedded player; ads remain untouched and may finish at different times.</p>
                 <div class="youtube-room-entry">
                   <label for="youtubeRoomNameInput">New room name</label>
@@ -425,6 +430,7 @@
                 <h2>Episodes</h2>
                 <div class="episode-heading-actions">
                   <select id="seasonSelect" aria-label="Season"></select>
+                  <button id="markSeasonWatchedButton" type="button" disabled>Mark season as watched</button>
                   <label class="episode-select-all">
                     <input id="selectSeasonEpisodes" type="checkbox" />
                     Select season
@@ -432,6 +438,7 @@
                   <button id="downloadSelectedEpisodes" type="button" disabled>Download selected</button>
                 </div>
               </div>
+              <p id="seasonWatchedStatus" class="season-watched-status" role="status" aria-live="polite"></p>
               <ol id="episodeList" class="episode-list"></ol>
             </section>
           </section>
@@ -444,7 +451,7 @@
               <div><strong id="downloadsActiveCount">0</strong><span>Active downloads</span></div><div><strong id="downloadsQueuedCount">0</strong><span>Queued</span></div><div><strong id="downloadsCompletedCount">0</strong><span>Downloaded</span></div><div class="downloads-storage"><strong id="downloadsStorageCount">Storage unavailable</strong><span>Download storage</span></div>
             </section>
             <div class="downloads-toolbar"><div class="downloads-filters" role="group" aria-label="Filter downloads"><button data-download-filter="all" class="is-active" type="button">All</button><button data-download-filter="active" type="button">Active</button><button data-download-filter="completed" type="button">Completed</button><button data-download-filter="failed" type="button">Failed</button></div><label>Sort by <select id="downloadsSort" aria-label="Sort downloads"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select></label></div>
-            <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
+            <div id="downloadsList" class="downloads-list"></div>
             <div class="downloads-secondary-grid"><section class="download-location" aria-labelledby="downloadLocationTitle"><div class="download-location-copy"><strong id="downloadLocationTitle">Download location</strong><span id="downloadLocationLabel">Windows Videos folder</span><small>New downloads use this folder. Existing downloads stay where they are.</small></div><div class="download-location-actions"><button id="chooseDownloadLocationButton" class="primary" type="button">Change Location</button><button id="openDownloadLocationButton" type="button">Open Folder</button><button id="defaultDownloadLocationButton" type="button">Use Videos Folder</button></div></section>
               <section class="smart-downloads-manager" aria-labelledby="smartDownloadsTitle"><header><div><strong id="smartDownloadsTitle">Smart Downloads</strong><small>Keep upcoming episodes ready automatically.</small></div><button id="checkSmartDownloadsButton" type="button">Check now</button></header><div id="smartDownloadsList" class="smart-downloads-list" aria-live="polite"></div></section></div>
           </section>
@@ -465,12 +472,13 @@
           </button>
           <button id="mobileLiveTvButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg>
-            Live
+            Jellyfin TV
           </button>
           <button id="mobileWatchPartiesButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6"></path><path d="M11 20c0-4 2-6 5-6s5 2 5 6"></path></svg>
             Parties
           </button>
+          <button id="mobileIptvButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m10 9 5 3-5 3z"></path></svg>IPTV</button>
         </nav>
         </div>
       </section>
@@ -494,16 +502,19 @@
             <button type="button" disabled title="Watchlist is not available in this build">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg><span>Watchlist</span>
             </button>
-            <button type="button" data-player-route="live-tv" title="Live TV (Beta)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Live TV</span>
+            <button type="button" data-player-route="live-tv" title="Jellyfin Live TV (Beta)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4"></path></svg><span>Jellyfin TV</span>
             </button>
+            <button type="button" data-player-route="iptv" title="IPTV"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m10 9 5 3-5 3z"></path></svg><span>IPTV</span></button>
+            <button type="button" data-player-route="downloads" title="Downloads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m-4-4 4 4 4-4M5 20h14"></path></svg><span>Downloads</span></button>
             <span class="player-rail-divider"></span>
             <span id="playerLibraryNavigation" class="library-nav-items"></span>
             <button type="button" data-player-route="watch-parties" title="Watch Parties">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"></circle><circle cx="16" cy="9" r="3"></circle><path d="M3 20c0-4 2-6 5-6s5 2 5 6m0 0c0-4 2-6 5-6s5 2 5 6"></path></svg><span>Watch Parties</span>
             </button>
+            <button type="button" data-player-route="companion" title="Phone Remote"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"></rect><path d="M10 5h4M11 18.5h2"></path></svg><span>Phone Remote</span></button>
           </nav>
-          <button id="playerExitButton" class="player-rail-exit" type="button" title="Return to library">
+          <button id="playerExitButton" class="player-rail-exit" type="button" title="Return to browsing">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg><span>Exit player</span>
           </button>
         </aside>
@@ -576,6 +587,7 @@
                   <button id="playerGoLiveButton" class="primary" type="button">Go Live</button>
                   <button id="playerMiniGuideButton" type="button" aria-expanded="false">Mini guide</button>
                   <button id="playerNextChannelButton" type="button" title="Next channel">Next channel</button>
+                  <button id="playerLastChannelButton" type="button" disabled title="Watch another channel to enable Last channel">Last channel</button>
                 </div>
                 <div class="player-timeline-row">
                   <span id="playerCurrentTime">0:00</span>
@@ -686,49 +698,6 @@
         <div><button id="viewUpdateButton" class="primary" type="button">View update</button><button id="dismissUpdateButton" type="button">Later</button></div>
       </aside>
 
-      <section class="legacy-downloads-drawer is-hidden" aria-hidden="true">
-        <header class="downloads-header">
-          <div>
-            <p class="eyebrow">Offline media</p>
-            <h2 id="downloadsTitle">Downloads</h2>
-          </div>
-          <button id="closeDownloadsButton" type="button" aria-label="Close downloads" title="Close downloads">×</button>
-        </header>
-        <p class="downloads-note">Manual downloads are kept until you delete them. Smart Downloads rotate unneeded episodes unless you choose Keep downloaded.</p>
-        <section class="downloads-overview" aria-label="Download summary">
-          <div><strong id="downloadsActiveCount">0</strong><span>Active downloads</span></div>
-          <div><strong id="downloadsQueuedCount">0</strong><span>Queued</span></div>
-          <div><strong id="downloadsCompletedCount">0</strong><span>Downloaded</span></div>
-          <div><strong id="downloadsStorageCount">Storage unavailable</strong><span>Download storage</span></div>
-        </section>
-        <div class="downloads-toolbar">
-          <div class="downloads-filters" role="group" aria-label="Filter downloads"><button data-download-filter="all" class="is-active" type="button">All</button><button data-download-filter="active" type="button">Active</button><button data-download-filter="completed" type="button">Completed</button><button data-download-filter="failed" type="button">Failed</button></div>
-          <select id="downloadsSort" aria-label="Sort downloads"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option></select>
-          <button id="deleteWatchedDownloadsButton" class="danger" type="button">Delete watched downloads</button>
-          <button id="pauseAllDownloadsButton" type="button">Pause all</button><button id="resumePausedDownloadsButton" type="button">Resume paused</button>
-        </div>
-        <section class="download-location" aria-labelledby="downloadLocationTitle">
-          <div class="download-location-copy">
-            <strong id="downloadLocationTitle">Download location</strong>
-            <span id="downloadLocationLabel">Windows Videos folder</span>
-            <small>New downloads use this folder. Existing downloads stay where they are.</small>
-          </div>
-          <div class="download-location-actions">
-            <button id="chooseDownloadLocationButton" class="primary" type="button">Change Location</button>
-            <button id="openDownloadLocationButton" type="button">Open Folder</button>
-            <button id="defaultDownloadLocationButton" type="button">Use Videos Folder</button>
-          </div>
-        </section>
-        <section class="smart-downloads-manager" aria-labelledby="smartDownloadsTitle">
-          <header>
-            <div><strong id="smartDownloadsTitle">Smart Downloads</strong><small>Keep upcoming episodes ready automatically.</small></div>
-            <button id="checkSmartDownloadsButton" type="button">Check now</button>
-          </header>
-          <div id="smartDownloadsList" class="smart-downloads-list" aria-live="polite"></div>
-        </section>
-        <div id="downloadsList" class="downloads-list" aria-live="polite"></div>
-      </section>
-
       <dialog id="smartDownloadDialog" class="smart-download-dialog" aria-labelledby="smartDownloadDialogTitle">
         <form method="dialog">
           <h2 id="smartDownloadDialogTitle">Smart Downloads</h2>
@@ -810,6 +779,14 @@
           <img id="companionQr" alt="Pairing QR code">
           <p id="companionPairAddress"></p><strong id="companionPairCode"></strong><p id="companionPairExpiry"></p>
         </section>
+        <h3>YouTube search</h3>
+        <p>Save a YouTube Data API key to search and browse videos from your phone. Video links and playback controls work without a key.</p>
+        <form id="youtubeApiKeyForm">
+          <label for="youtubeApiKeyInput">YouTube API key</label>
+          <input id="youtubeApiKeyInput" type="password" maxlength="256" autocomplete="off" spellcheck="false" placeholder="Paste your API key" aria-describedby="youtubeApiKeyStatus">
+          <div class="download-location-actions"><button id="youtubeSaveKeyButton" class="primary" type="submit">Save key</button><button id="youtubeRemoveKeyButton" type="button">Remove saved key</button></div>
+        </form>
+        <p id="youtubeApiKeyStatus" role="status">Loading YouTube settings…</p>
         <h3>Paired phones</h3><div id="companionDevices" class="downloads-list"></div>
         <details><summary>Troubleshooting</summary>
           <p>Allow Seeing Stone on Windows Private networks only. Guest Wi-Fi isolation, VPNs, mDNS filtering, DHCP changes, or a blocked port may prevent connection. Try the direct-IP address when the .local name does not resolve.</p>

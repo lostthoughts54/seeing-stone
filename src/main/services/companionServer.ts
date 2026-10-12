@@ -15,10 +15,11 @@ import type { CompanionStateService } from "./companionState";
 import type { PlaybackCommandService } from "./playbackCommandService";
 import type { PlaybackQueueStore } from "./playbackQueue";
 import type { CompanionArtworkService } from "./companionArtwork";
+import type { CompanionYouTubeService } from "./companionYouTube";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; connect-src 'self' ws:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data: https://i.ytimg.com; connect-src 'self' ws:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -39,6 +40,7 @@ interface CompanionServerOptions {
   commands: PlaybackCommandService;
   queue: PlaybackQueueStore;
   artwork: CompanionArtworkService;
+  youtube?: CompanionYouTubeService;
   onConnectionsChanged?: (count: number, deviceIds: ReadonlySet<string>) => void;
   onDevicesChanged?: () => void;
 }
@@ -214,6 +216,13 @@ export class CompanionServer {
 
     if (url.pathname.startsWith("/api/")) {
       const device = await this.options.authentication.authenticateCookie(request.headers.cookie);
+      if (request.method === "GET" && url.pathname === "/api/v1/youtube/state") {
+        return this.json(response, 200, this.requireYouTube().getState());
+      }
+      if (request.method === "GET" && url.pathname === "/api/v1/youtube/browse") {
+        this.acceptSearch(device.deviceId);
+        return this.json(response, 200, await this.requireYouTube().browse(url.searchParams.get("q") ?? "", url.searchParams.get("pageToken") ?? ""));
+      }
       if (request.method === "GET" && url.pathname === "/api/v1/session") {
         const session = this.options.authentication.issueSession(device.deviceId);
         return this.json(response, 200, {
@@ -310,12 +319,15 @@ export class CompanionServer {
   private async execute(envelope: CompanionCommandEnvelope): Promise<void> {
     const state = this.options.commands.getState();
     const command = envelope.command;
-    if (!["send-item", "start-live", "queue-remove", "queue-move", "queue-clear-upcoming", "queue-play-now", "set-watchparty-sync-offset"].includes(command.type)
+    if (!["send-item", "start-live", "queue-remove", "queue-move", "queue-clear-upcoming", "queue-play-now", "set-watchparty-sync-offset", "youtube-add", "youtube-control", "youtube-queue"].includes(command.type)
       && (!envelope.playbackId || envelope.playbackId !== state.playbackId)) {
       throw new AppError("PLAYBACK_STALE", "Playback changed. Refresh the Companion state.", 409);
     }
     const playbackId = envelope.playbackId ?? "";
     switch (command.type) {
+      case "youtube-add": await this.requireYouTube().add(command.videoUrl, command.roomId, command.playNow); break;
+      case "youtube-control": await this.requireYouTube().control(command); break;
+      case "youtube-queue": await this.requireYouTube().queueAction(command); break;
       case "set-paused": await this.options.commands.setPaused(playbackId, command.paused); break;
       case "stop": await this.options.commands.stop(playbackId); break;
       case "seek": await this.options.commands.seek(playbackId, command.positionTicks); break;
@@ -362,6 +374,11 @@ export class CompanionServer {
     this.assertQueueEditable();
     const item = await this.options.commands.getDetails(itemId);
     this.options.queue.add(item, command.placement === "play-next" ? "next" : "end");
+  }
+
+  private requireYouTube(): CompanionYouTubeService {
+    if (!this.options.youtube) throw new AppError("YOUTUBE_UNAVAILABLE", "YouTube is unavailable on this desktop.", 503);
+    return this.options.youtube;
   }
 
   private assertQueueEditable(): void {

@@ -8,19 +8,16 @@ export interface SharedTextureSlotClaim {
 export type SharedTextureSlotLifecycleEvent =
   | "slot-tracked"
   | "all-references-released"
-  | "renderer-gpu-release-complete"
   | "slot-reusable"
   | "unimported-slot-released";
 
 interface SharedTextureSlotState extends SharedTextureSlotClaim {
   allReferencesReleased: boolean;
-  rendererGpuReleaseComplete: boolean;
 }
 
 /**
- * Gates native texture-slot reuse on Electron's precise renderer GPU
- * command-buffer completion callback. The process-wide reference callback is
- * retained as supporting telemetry, but is not timely enough to gate a pool.
+ * Gates native texture-slot reuse on Electron's managed allReferencesReleased
+ * callback, after renderer references and both processes' GPU work are done.
  */
 export class SharedTextureSlotLifecycle {
   private readonly bySequence = new Map<number, SharedTextureSlotState>();
@@ -42,7 +39,6 @@ export class SharedTextureSlotLifecycle {
     const state: SharedTextureSlotState = {
       ...claim,
       allReferencesReleased: false,
-      rendererGpuReleaseComplete: false,
     };
     this.bySequence.set(claim.sequence, state);
     this.sequenceBySlot.set(claim.slot, claim.sequence);
@@ -68,21 +64,12 @@ export class SharedTextureSlotLifecycle {
     }
     state.allReferencesReleased = true;
     this.onEvent?.("all-references-released", state);
-  }
-
-  markRendererGpuReleaseComplete(sequence: number): void {
-    const state = this.require(sequence);
-    if (state.rendererGpuReleaseComplete) {
-      throw new Error(`LIBMPV_TEXTURE_GPU_RELEASE_COMPLETED_TWICE:${sequence}`);
-    }
-    state.rendererGpuReleaseComplete = true;
-    this.onEvent?.("renderer-gpu-release-complete", state);
     this.releaseNative(state, "slot-reusable");
   }
 
   abandonUnimported(sequence: number): void {
     const state = this.require(sequence);
-    if (state.allReferencesReleased || state.rendererGpuReleaseComplete) {
+    if (state.allReferencesReleased) {
       throw new Error(`LIBMPV_TEXTURE_IMPORTED_SLOT_ABANDONED:${sequence}`);
     }
     this.releaseNative(state, "unimported-slot-released");

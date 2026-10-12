@@ -203,6 +203,9 @@ export interface PlaybackDiagnostics {
   directRendering?: boolean | null;
   frameQueueDepth?: number | null;
   droppedFrames?: number | null;
+  /** Source frame rate and the player's current output estimate, in frames per second. */
+  sourceFps?: number | null;
+  estimatedFps?: number | null;
   renderFallbackUsed?: boolean;
 }
 
@@ -245,6 +248,8 @@ export interface PlaybackState {
   durationTicks: number;
   paused: boolean;
   buffering: boolean;
+  /** The engine is still settling a seek; position alone is not readiness. */
+  seeking?: boolean;
   seekable: boolean;
   /** null means ordinary seek rules; 0 means progressive playback has not confirmed a BOF range. */
   seekableUntilTicks: number | null;
@@ -256,6 +261,7 @@ export interface PlaybackState {
   nextEpisodeCountdown?: NextItemCountdown | null;
   error: string | null;
   contentKind?: "on-demand" | "live-tv";
+  iptvIdentity?: import("./iptv").IptvPlayableIdentity;
 }
 
 export type LiveTvAvailability = "available" | "not-configured" | "forbidden" | "offline";
@@ -495,6 +501,26 @@ export interface TrailerOpenResult {
   embedUrl: string | null;
 }
 export interface LibraryItemsInput { libraryId: string; type: "Movie" | "Series" | "Mixed"; limit: number }
+export interface LibraryFilterOptionsInput {
+  libraryId: string;
+  type: "Movie" | "Series" | "Mixed";
+  kind: "genres" | "people";
+  query?: string;
+  startIndex: number;
+  limit: number;
+}
+export interface FilterChoice {
+  value: string;
+  label: string;
+  /** Counts, when present, cover the library rather than the current media page. */
+  count?: number | null;
+  detail?: string;
+}
+export interface FilterChoicePage {
+  items: FilterChoice[];
+  hasMore: boolean;
+  nextStartIndex: number | null;
+}
 export type BrowseInput = BrowseQuery;
 export interface SearchInput { query: string }
 export interface EpisodesInput { seriesId: string; seasonId: string }
@@ -711,6 +737,8 @@ export type WatchPartyPreparationPhase =
   | "idle"
   | "waiting-for-participant"
   | "preparing"
+  | "buffering"
+  | "retrying"
   | "ready"
   | "starting"
   | "playing"
@@ -828,6 +856,10 @@ export interface YouTubeRoomAdvanceInput { expectedVideoId: string }
 export interface YouTubeRoomHandoffInput { groupId: string; groupName: string }
 
 export interface JellyfinBridge {
+  playerFeatures: {
+    command(input: import("./playerFeatures").FeatureInput): Promise<import("./playerFeatures").FeatureState>;
+    subscribe(listener: (state: import("./playerFeatures").FeatureState) => void): () => void;
+  };
   application: {
     close(): Promise<void>;
   };
@@ -845,6 +877,7 @@ export interface JellyfinBridge {
   libraries: {
     list(): Promise<LibrarySummary[]>;
     getItems(input: LibraryItemsInput): Promise<MediaItem[]>;
+    getFilterOptions(input: LibraryFilterOptionsInput): Promise<FilterChoicePage>;
   };
   browse: { get(input: BrowseInput): Promise<BrowsePage> };
   people: { getResults(input: ItemIdInput): Promise<PersonMediaResult[]> };
@@ -958,6 +991,7 @@ export interface JellyfinBridge {
     wait(): Promise<WatchPartyViewState>;
     continue(): Promise<WatchPartyViewState>;
     resync(): Promise<WatchPartyViewState>;
+    retryPreparation(): Promise<WatchPartyViewState>;
     setLocalSyncOffset(input: WatchPartySyncOffsetInput): Promise<WatchPartyViewState>;
     setBufferingPolicy(input: BufferingPolicyPreferenceInput): Promise<WatchPartyViewState>;
     setVisible(input: WatchPartyVisibilityInput): Promise<WatchPartyViewState>;
@@ -992,6 +1026,7 @@ export const IPC = {
   homeGet: "home:get",
   librariesList: "libraries:list",
   librariesGetItems: "libraries:get-items",
+  librariesGetFilterOptions: "libraries:get-filter-options",
   browseGet: "browse:get",
   peopleGetResults: "people:get-results",
   searchQuery: "search:query",
@@ -1069,6 +1104,8 @@ export const IPC = {
   diagnosticsCopyCleanMachine: "diagnostics:copy-clean-machine",
   diagnosticsSaveCleanMachine: "diagnostics:save-clean-machine",
   companionGetStatus: "companion:get-status",
+  companionYouTubeSettings: "companion:youtube-settings",
+  companionYouTubeSetKey: "companion:youtube-set-key",
   companionSetEnabled: "companion:set-enabled",
   companionSelectNetwork: "companion:select-network",
   companionBeginPairing: "companion:begin-pairing",
@@ -1085,6 +1122,7 @@ export const IPC = {
   watchPartiesWait: "watch-parties:wait",
   watchPartiesContinue: "watch-parties:continue",
   watchPartiesResync: "watch-parties:resync",
+  watchPartiesRetryPreparation: "watch-parties:retry-preparation",
   watchPartiesSetLocalSyncOffset: "watch-parties:set-local-sync-offset",
   watchPartiesSetBufferingPolicy: "watch-parties:set-buffering-policy",
   watchPartiesSetVisible: "watch-parties:set-visible",

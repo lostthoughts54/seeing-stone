@@ -6,6 +6,7 @@ import type {
   PlaybackState,
 } from "../../shared/contracts";
 import { AppError } from "./errors";
+import { readLocalSubtitle, type LocalSubtitleTrack } from "./downloadSubtitles";
 import { formatMediaVersionLabel } from "../../shared/mediaVersions";
 import type { SqlitePersistenceService } from "./persistence";
 import type { ProgressiveDownloadLease, ProgressiveDownloadProvider } from "./progressiveDownload";
@@ -40,6 +41,7 @@ interface PlaybackApi {
 }
 
 interface PlaybackRecord {
+  iptvStream?: import("./iptvStream").IptvStream;
   id: string;
   serverPlaySessionId: string;
   itemId: string;
@@ -49,6 +51,7 @@ interface PlaybackRecord {
   streamStartTimeTicks: number;
   localVersionId: string | null;
   externalSubtitles: ExternalSubtitleTrack[];
+  localSubtitles?: LocalSubtitleTrack[];
   requests: Set<AbortController>;
   liveStreamId: string | null;
   negotiatedLiveStreamUrl: string | null;
@@ -57,6 +60,8 @@ interface PlaybackRecord {
 }
 
 export interface ResolvedPlaybackSource extends PlaybackStartResult {
+  iptvIdentity?: import("../../shared/iptv").IptvPlayableIdentity;
+  iptvStream?: import("./iptvStream").IptvStream;
   serverPlaySessionId: string;
   itemId: string;
   itemType: "Movie" | "Episode" | "Video";
@@ -69,6 +74,8 @@ export interface ResolvedPlaybackSource extends PlaybackStartResult {
   localVersionId?: string;
   diagnostics?: import("../../shared/contracts").PlaybackDiagnostics;
   externalSubtitles: ExternalSubtitleTrack[];
+  /** Main-only, identity-bound file capabilities; never returned through renderer IPC. */
+  localSubtitles?: LocalSubtitleTrack[];
   initialAction: "progress" | "start_over" | "replay";
   contentKind?: "on-demand" | "live-tv";
   /** Main-process-only live tuner session identifier. */
@@ -149,6 +156,7 @@ function state(overrides: Partial<PlaybackState> = {}): PlaybackState {
 export class PlaybackSessionService {
   private current: PlaybackRecord | null = null;
   private revision = 0;
+  private resolution: AbortController | null = null;
   private state: PlaybackState = state();
   private liveStreamRelease: Promise<void> = Promise.resolve();
   private readonly excludedLocalVersionIds = new Set<string>();
@@ -160,12 +168,13 @@ export class PlaybackSessionService {
     private readonly persistence?: PlaybackCatalogPersistence,
     private readonly continuation?: PlaybackContinuationResolver & PlaybackContinuationTransactions,
     private readonly progressiveProvider?: ProgressiveDownloadProvider,
+    private readonly iptv?: Pick<import("./iptvService").IptvService, "resolveLive">,
   ) {}
 
   async start(
     itemId: string,
     resumeMode: "resume" | "start-over",
-    options: { skipLocal?: boolean; skipProgressive?: boolean; requireProgressive?: boolean; preserveLocalExclusions?: boolean; preferredMediaSourceId?: string } = {},
+    options: { iptvIdentity?: import("../../shared/iptv").IptvPlayableIdentity; skipLocal?: boolean; skipProgressive?: boolean; requireProgressive?: boolean; preserveLocalExclusions?: boolean; preferredMediaSourceId?: string } = {},
   ): Promise<ResolvedPlaybackSource> {
     const skipProgressiveOnce = this.skipProgressiveOnceItems.delete(itemId);
     const revision = ++this.revision;
@@ -174,6 +183,16 @@ export class PlaybackSessionService {
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     if (!options.preserveLocalExclusions) this.excludedLocalVersionIds.clear();
     this.state = state({ itemId, phase: "resolving" });
+    if (options.iptvIdentity) {
+      if (!this.iptv) throw new AppError("IPTV_UNAVAILABLE", "IPTV playback is unavailable.", 503);
+      const controller = new AbortController(); this.resolution = controller;
+      const stream = await this.iptv.resolveLive(options.iptvIdentity, controller.signal);
+      if (revision !== this.revision) { stream.close(); throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled."); }
+      const id = randomUUID();
+      this.current = { id, serverPlaySessionId: id, itemId, mediaSourceId: id, delivery: "direct", sourceKind: "direct-play", streamStartTimeTicks: 0, localVersionId: null, externalSubtitles: [], requests: new Set(), liveStreamId: null, negotiatedLiveStreamUrl: null, progressiveLease: null, preferredMediaSourceId: null, iptvStream: stream };
+      this.state = state({ playbackId: id, itemId, phase: "loading", source: "server", contentKind: "live-tv", iptvIdentity: options.iptvIdentity });
+      return { playbackId: id, serverPlaySessionId: id, itemId, itemType: "Video", seriesId: null, mediaSourceId: id, mediaUrl: `jellyfin-media://stream/${id}`, delivery: "direct", sourceKind: "direct-play", source: "server", usesServerTimelineOffset: false, externalSubtitles: [], initialAction: "progress", contentKind: "live-tv", resumePositionTicks: 0, durationTicks: 0, iptvIdentity: options.iptvIdentity, iptvStream: stream };
+    }
     const local = options.skipLocal
       ? null
       : await (options.preferredMediaSourceId
@@ -181,12 +200,13 @@ export class PlaybackSessionService {
         : this.localResolver?.resolve(itemId, resumeMode, this.excludedLocalVersionIds))?.catch(() => null) ?? null;
     if (revision !== this.revision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     if (local) {
-      let externalSubtitleTracks: ExternalSubtitleTrack[] = [];
+      let externalSubtitleTracks: ExternalSubtitleTrack[] = [...(local.externalSubtitles ?? [])];
       const connectionState = this.api.getConnectionDiagnostics?.().state ?? "unknown";
       if (connectionState !== "offline" && connectionState !== "reconnecting") {
         try {
           const capabilities = await this.api.getMediaSourceCapabilities(itemId, AbortSignal.timeout(1500));
-          externalSubtitleTracks = capabilities.sources.find((source) => source.id === local.mediaSourceId)?.externalSubtitles ?? [];
+          const remoteTracks = capabilities.sources.find((source) => source.id === local.mediaSourceId)?.externalSubtitles ?? [];
+          externalSubtitleTracks = [...externalSubtitleTracks, ...remoteTracks.filter((remote) => !externalSubtitleTracks.some((saved) => saved.streamIndex === remote.streamIndex))];
         } catch {
           // A verified local video remains playable when Jellyfin is offline or subtitle metadata is unavailable.
         }
@@ -209,6 +229,7 @@ export class PlaybackSessionService {
         streamStartTimeTicks: 0,
         localVersionId: resolvedLocal.localVersionId ?? null,
         externalSubtitles: resolvedLocal.externalSubtitles,
+        localSubtitles: resolvedLocal.localSubtitles,
         requests: new Set(),
         liveStreamId: null,
         negotiatedLiveStreamUrl: null,
@@ -597,7 +618,7 @@ export class PlaybackSessionService {
   /** Main-process-only identity for optional resources tied to the active source. */
   getActiveResourceContext(playbackId: string): { itemId: string; mediaSourceId: string; contentKind: "on-demand" | "live-tv" } | null {
     const playback = this.current;
-    if (!playback || playback.id !== playbackId) return null;
+    if (!playback || playback.id !== playbackId || playback.iptvStream) return null;
     return {
       itemId: playback.itemId,
       mediaSourceId: playback.mediaSourceId,
@@ -620,7 +641,7 @@ export class PlaybackSessionService {
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts.length !== 1 || !this.current || parts[0] !== this.current.id) return new Response(null, { status: 404 });
     const playback = this.current;
-    if (playback.delivery === "local") return new Response(null, { status: 404 });
+    if (playback.delivery === "local" || playback.iptvStream) return new Response(null, { status: 404 });
     const requestController = new AbortController();
     playback.requests.add(requestController);
     let upstream: Response;
@@ -704,13 +725,24 @@ export class PlaybackSessionService {
       : requestController.signal;
     let upstream: Response;
     try {
-      upstream = await this.api.fetchExternalSubtitle(
-        playback.itemId,
-        playback.mediaSourceId,
-        authorized.streamIndex,
-        authorized.format,
-        requestSignal,
-      );
+      const local = playback.localSubtitles?.find((track) => track.streamIndex === authorized.streamIndex && track.format === authorized.format);
+      const saved = local ? await readLocalSubtitle(local, requestSignal).catch(() => null) : null;
+      if (saved) upstream = saved;
+      else {
+        requestSignal.throwIfAborted();
+        const connection = this.api.getConnectionDiagnostics?.().state;
+        if (connection === "offline" || connection === "reconnecting") {
+          playback.requests.delete(requestController);
+          return new Response(null, { status: 404 });
+        }
+        upstream = await this.api.fetchExternalSubtitle(
+          playback.itemId,
+          playback.mediaSourceId,
+          authorized.streamIndex,
+          authorized.format,
+          requestSignal,
+        );
+      }
     } catch (error) {
       playback.requests.delete(requestController);
       if (requestController.signal.aborted || signal?.aborted) return new Response(null, { status: 404 });
@@ -735,8 +767,10 @@ export class PlaybackSessionService {
   }
 
   private abortCurrent(): void {
+    this.resolution?.abort(); this.resolution = null;
     if (!this.current) return;
     const current = this.current;
+    current.iptvStream?.close();
     for (const request of current.requests) request.abort();
     current.requests.clear();
     current.progressiveLease?.release();

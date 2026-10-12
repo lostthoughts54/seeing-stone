@@ -76,7 +76,8 @@ export class PlaybackProxy {
     const method = request.method;
     const mediaRequest = Boolean(source && (source.source === "server" || source.progressiveLease) && request.url === this.mediaCapabilityPath);
     const subtitle = request.url ? this.subtitleCapabilities.get(request.url) : undefined;
-    if (!source || (method !== "GET" && method !== "HEAD") || (!mediaRequest && !subtitle)) {
+    const iptvResource = Boolean(source?.iptvStream && request.url && source.iptvStream.has(request.url));
+    if (!source || (method !== "GET" && method !== "HEAD") || (!mediaRequest && !subtitle && !iptvResource)) {
       response.writeHead(method === "GET" || method === "HEAD" ? 404 : 405, { "Cache-Control": "no-store" });
       response.end();
       return;
@@ -88,7 +89,9 @@ export class PlaybackProxy {
     if (request.headers.range) headers.set("Range", request.headers.range);
     let upstream: Response;
     try {
-      upstream = mediaRequest
+      upstream = source.iptvStream && (mediaRequest || iptvResource)
+        ? await source.iptvStream.fetch(mediaRequest ? "root" : request.url!, controller.signal, request.headers.range)
+        : mediaRequest
         ? source.progressiveLease
           ? await source.progressiveLease.handle(new Request(source.mediaUrl, { method, headers, signal: controller.signal }))
           : await this.playback.handle(new Request(source.mediaUrl, { headers, signal: controller.signal }))
@@ -118,7 +121,7 @@ export class PlaybackProxy {
       while (!controller.signal.aborted) {
         const chunk = await reader.read();
         if (chunk.done) break;
-        if (!response.write(Buffer.from(chunk.value))) await once(response, "drain");
+        if (!response.write(Buffer.from(chunk.value))) await once(response, "drain", { signal: controller.signal });
       }
     } catch {
       // Closing or seeking aborts an in-flight range request by design.

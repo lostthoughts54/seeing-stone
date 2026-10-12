@@ -83,7 +83,7 @@ export class SoloSessionDiagnosticsService {
 
   private async getLegacySnapshot(): Promise<SoloSessionDiagnostics> {
     const initialPlayback = this.playback.getState();
-    if (!initialPlayback.playbackId || !initialPlayback.itemId) {
+    if (!initialPlayback.playbackId || !initialPlayback.itemId || initialPlayback.iptvIdentity) {
       return { playback: initialPlayback, connection: this.api.getConnectionDiagnostics(), item: null, nextUp: null };
     }
     let item: MediaItem | null = null;
@@ -106,7 +106,7 @@ export class SoloSessionDiagnosticsService {
 
   private async getCachedSnapshot(): Promise<SoloSessionDiagnostics> {
     const initialPlayback = this.playback.getState();
-    if (!initialPlayback.playbackId || !initialPlayback.itemId || !this.persistence || !this.api.getAuthenticatedContext) {
+    if (!initialPlayback.playbackId || !initialPlayback.itemId || initialPlayback.iptvIdentity || !this.persistence || !this.api.getAuthenticatedContext) {
       return { playback: initialPlayback, connection: this.api.getConnectionDiagnostics(), item: null, nextUp: null };
     }
     let identity: { serverId: string; userId: string };
@@ -141,7 +141,7 @@ export class SoloSessionDiagnosticsService {
   private async performRefresh(): Promise<void> {
     if (!this.persistence || !this.api.getAuthenticatedContext) return;
     const initialPlayback = this.playback.getState();
-    if (!initialPlayback.playbackId || !initialPlayback.itemId) return;
+    if (!initialPlayback.playbackId || !initialPlayback.itemId || initialPlayback.iptvIdentity) return;
     let identity: { serverId: string; userId: string };
     try { identity = this.api.getAuthenticatedContext(); } catch { return; }
     try {

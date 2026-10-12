@@ -1,6 +1,8 @@
 # SQLite persistence model
 
-Milestone 4 established the local data boundary. The database is now schema version 8. Every change preserves existing catalog, download, local-version, playback, preference, and Smart Download rows across upgrades.
+Milestone 4 established the local data boundary. The database is now schema version 11. Every change preserves existing catalog, download, local-version, playback, preference, and Smart Download rows across upgrades.
+
+Version 11 adds `iptv_channel_favourites`, keyed by provider and channel ID independently of catalogue snapshots. Refreshes retain favourites; deleting the provider removes its favourites. Jellyfin favourites and playback records are unaffected.
 
 ## Process boundary
 
@@ -67,7 +69,15 @@ Milestone 7 coalesces redundant automatic progress while retaining completion an
 
 Older rows with no version-5 cache remain valid and materialize as minimal safe item metadata until a successful Jellyfin request refreshes them.
 
+## Additive schema version 9: independent IPTV provider foundation
+
+`iptv_providers` stores an installation-local provider UUID, kind, display name, OS-encrypted configuration blob and timestamps. It has no Jellyfin server/profile foreign key. The complete setup, including provider address and credential-bearing playlist/XMLTV URLs, is encrypted by the main-only `IptvProviderStore` using the existing `SessionProtector` abstraction before reaching SQLite. List queries return only ID, kind and display name. Failed decryption or key rotation preserves the saved blob.
+
+This migration does not add provider networking, playback, guide imports or IPC. Catalogue, guide, preferences, FTS indexes and local IPTV progress will be additive follow-up migrations described in [Direct IPTV architecture](DIRECT_IPTV_ARCHITECTURE.md).
+
 ## Migrations and failure behavior
+
+Version 10 adds `iptv_catalogue_snapshots` and `iptv_catalogue_items`, with provider foreign keys, a unique published snapshot per provider, composite item identities, and browse/category indexes. Imports append at most 250 metadata records per worker transaction, then publish atomically. Refresh failure keeps the previous published snapshot. Startup discards unfinished staging snapshots. Item rows contain sanitized text only, never provider stream/artwork URLs. Search in this testing slice uses normalized literal substring matching and snapshot-bound keyset pages of at most 50 entries; FTS and programme search remain later work.
 
 - `PRAGMA user_version` is the authoritative schema version.
 - Each migration runs inside `BEGIN IMMEDIATE` and is rolled back on failure.

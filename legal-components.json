@@ -4,7 +4,7 @@
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.7.1",
+      "version": "0.7.2",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "sourceRevision": "1acdc1ce3f03e3e602ce183096a5c1b37d014b02",
@@ -34,17 +34,17 @@
           "path": "native/libmpv-bridge/synthetic-gate-result.json",
           "sha256": "4146f1c0e6644e88da0dd5efd87c731229f9182dc2b24847203f63867d018757"
         },
-          {
-            "path": "native/libmpv-runtime/source-lock.json",
-            "sha256": "c320b20b3c3240096b7958ad10316f6fd160329055f9954b43af4e6781006a1b"
-          },
+        {
+          "path": "native/libmpv-runtime/source-lock.json",
+          "sha256": "c320b20b3c3240096b7958ad10316f6fd160329055f9954b43af4e6781006a1b"
+        },
         {
           "path": "native/libmpv-runtime/build-result.json",
-          "sha256": "8b0f1d8ee6df66d4a066b9a8b2b6827e18d15763cf677e49a4d47547eb5111c6"
+          "sha256": "77610f12b795db4f2da5a6c4bcf21e2efba74049850bdd8e676e939acaad7d72"
         },
         {
           "path": "libmpv-runtime.json",
-          "sha256": "a43f7d503b02a3fdd06717170a5dc0be5ec1a62091a33ff8d1269544eb9c7d2a"
+          "sha256": "135572db0e81de7777f697673ea206904a9252dfed00b7cdd4e9523fbb519e55"
         },
         {
           "path": "native/libmpv-runtime/render-context-gate-result.json",
@@ -52,11 +52,11 @@
         },
         {
           "path": "native/libmpv-runtime/real-video-gate-result-scale-1.json",
-          "sha256": "fe6b4675e5fd4ad52185d52f07dbcba0e145becc2ae3801eca686a8419123bae"
+          "sha256": "0b9afeadd27eb45eff620d00be0a7e4dfb78aef4cbc2809de6b18970d0a36725"
         },
         {
           "path": "native/libmpv-runtime/real-video-gate-result-scale-1-5.json",
-          "sha256": "78325ce018552f2318e82221af040b22ce6e583f03b6e9a37fd673876a3d7e10"
+          "sha256": "90cc584dadb817dfbe29802c386fec44690a691300f1383f7d9dae7e4ea5b9c2"
         },
         {
           "path": "assets/fixtures/libmpv-h264-gate.mp4",
@@ -132,13 +132,24 @@
         "sourceArchive": "node-addon-api-8.5.0.tgz",
         "sourceArchiveSha512": "sha512-/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==",
         "binaryHashes": [],
-        "buildFlags": ["NAPI_CPP_EXCEPTIONS=0"],
-        "toolchain": ["node-gyp 12.4.0 (locked dependency)", "Visual Studio Community 18.8.0 MSVC x64", "Windows SDK 10.0.28000.0", "Python 3.12.x"],
+        "buildFlags": [
+          "NAPI_CPP_EXCEPTIONS=0"
+        ],
+        "toolchain": [
+          "node-gyp 12.4.0 (locked dependency)",
+          "Visual Studio Community 18.8.0 MSVC x64",
+          "Windows SDK 10.0.28000.0",
+          "Python 3.12.x"
+        ],
         "requiredRuntimeDlls": [
           "The exact 33-file companion closure and owning package versions are recorded in native/libmpv-runtime/build-result.json"
         ],
         "patches": [],
-        "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1"],
+        "buildScripts": [
+          "native/libmpv-bridge/binding.gyp",
+          "scripts/check-libmpv-native-toolchain.ps1",
+          "scripts/build-libmpv-native-bridge.ps1"
+        ],
         "correspondingSource": "pnpm-lock.yaml plus the immutable source URL",
         "applicationRelease": "0.7.1"
       }
@@ -171,11 +182,19 @@
           "swresample-6.dll sha256:47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
           "swscale-9.dll sha256:8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96"
         ],
-        "buildFlags": ["native/libmpv-runtime/source-lock.json"],
-        "toolchain": ["MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"],
+        "buildFlags": [
+          "native/libmpv-runtime/source-lock.json"
+        ],
+        "toolchain": [
+          "MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"
+        ],
         "requiredRuntimeDlls": [],
         "patches": [],
-        "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
+        "buildScripts": [
+          "scripts/setup-libmpv-sources.ps1",
+          "scripts/build-libmpv-runtime.ps1",
+          "scripts/build-libmpv-runtime.sh"
+        ],
         "correspondingSource": "source-archives/mpv-v0.41.0.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
         "applicationRelease": "0.7.1"
       }
@@ -198,13 +217,31 @@
         "sourceArchive": "Seeing-Stone-0.7.1-source-72a3f07.zip",
         "sourceArchiveSha512": "sha512-1f799c42e2a9a1cbde6286801399b89d363071be252708820ca40083d7b1d3138f294dc6afcd88d6abe6fe0d397eb78551e3ce2fded29d14a9e16021fdcee359",
         "binaryHashes": [
-          "seeing_stone_libmpv_bridge.node sha256:085357c4ff13995debda404276a5ee2ab8dc158facc36f4aa45870d911f0292f"
+          "seeing_stone_libmpv_bridge.node sha256:f41e6acfe24a9f732a5a16280ad406c06f5d909e46beba7805a462abe1b59564"
         ],
-        "buildFlags": ["NAPI_DISABLE_CPP_EXCEPTIONS", "C++20", "x64", "Release"],
-        "toolchain": ["Visual Studio Community 18.8.0 MSVC x64", "Windows SDK 10.0.28000.0", "node-gyp 12.4.0", "Node-API via node-addon-api 8.5.0"],
-        "requiredRuntimeDlls": ["Windows D3D11/DXGI system libraries", "Manifest-controlled libmpv runtime closure for the lifecycle probe"],
+        "buildFlags": [
+          "NAPI_DISABLE_CPP_EXCEPTIONS",
+          "C++20",
+          "x64",
+          "Release"
+        ],
+        "toolchain": [
+          "Visual Studio Community 18.8.0 MSVC x64",
+          "Windows SDK 10.0.28000.0",
+          "node-gyp 12.4.0",
+          "Node-API via node-addon-api 8.5.0"
+        ],
+        "requiredRuntimeDlls": [
+          "Windows D3D11/DXGI system libraries",
+          "Manifest-controlled libmpv runtime closure for the lifecycle probe"
+        ],
         "patches": [],
-        "buildScripts": ["native/libmpv-bridge/binding.gyp", "scripts/check-libmpv-native-toolchain.ps1", "scripts/build-libmpv-native-bridge.ps1", "scripts/stage-libmpv-runtime.ps1"],
+        "buildScripts": [
+          "native/libmpv-bridge/binding.gyp",
+          "scripts/check-libmpv-native-toolchain.ps1",
+          "scripts/build-libmpv-native-bridge.ps1",
+          "scripts/stage-libmpv-runtime.ps1"
+        ],
         "correspondingSource": "source-archives/Seeing-Stone-0.7.1-source-72a3f07.zip and build-materials/native/libmpv-bridge inside Seeing-Stone-0.7.1-corresponding-source.zip",
         "applicationRelease": "0.7.1"
       }
@@ -233,11 +270,26 @@
           "dxcompiler.dll sha256:1085707889573af5b32e7644d47a7c5f0809ed0818217d75f6eaedee37a2a767",
           "dxil.dll sha256:77e039c905030a641e53658a008b74e90635a5ea9b6b79eabd0f2003bdfca59a"
         ],
-        "buildFlags": ["Electron official Windows x64 release build; exact GN flags remain part of Electron/Chromium corresponding source"],
-        "toolchain": ["Electron 43.1.0", "Chromium 150.0.7871.47"],
-        "requiredRuntimeDlls": ["libEGL.dll", "libGLESv2.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll"],
+        "buildFlags": [
+          "Electron official Windows x64 release build; exact GN flags remain part of Electron/Chromium corresponding source"
+        ],
+        "toolchain": [
+          "Electron 43.1.0",
+          "Chromium 150.0.7871.47"
+        ],
+        "requiredRuntimeDlls": [
+          "libEGL.dll",
+          "libGLESv2.dll",
+          "d3dcompiler_47.dll",
+          "dxcompiler.dll",
+          "dxil.dll"
+        ],
         "patches": [],
-        "buildScripts": ["package.json", "pnpm-lock.yaml", "scripts/libmpv-render-context-smoke.cjs"],
+        "buildScripts": [
+          "package.json",
+          "pnpm-lock.yaml",
+          "scripts/libmpv-render-context-smoke.cjs"
+        ],
         "correspondingSource": "source-archives/angle-bbf3d8a4755268f016087be2f56099fa5a5f3f6e.tar.gz inside Seeing-Stone-0.7.1-corresponding-source.zip",
         "applicationRelease": "0.7.1"
       }
@@ -268,11 +320,19 @@
           "swresample-6.dll sha256:47f76002dcdc51b6340d8a01429c85574080bc3c0dcc5b0886ea82a1e6a238a4",
           "swscale-9.dll sha256:8da939cea049915a6ced839739777dc7d6f5e97c42ee09205986fe16d2e50e96"
         ],
-        "buildFlags": ["native/libmpv-runtime/source-lock.json"],
-        "toolchain": ["MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"],
+        "buildFlags": [
+          "native/libmpv-runtime/source-lock.json"
+        ],
+        "toolchain": [
+          "MSYS2 UCRT64 package set in native/libmpv-runtime/source-lock.json"
+        ],
         "requiredRuntimeDlls": [],
         "patches": [],
-        "buildScripts": ["scripts/setup-libmpv-sources.ps1", "scripts/build-libmpv-runtime.ps1", "scripts/build-libmpv-runtime.sh"],
+        "buildScripts": [
+          "scripts/setup-libmpv-sources.ps1",
+          "scripts/build-libmpv-runtime.ps1",
+          "scripts/build-libmpv-runtime.sh"
+        ],
         "correspondingSource": "source-archives/ffmpeg-8.1.2.tar.xz inside Seeing-Stone-0.7.1-corresponding-source.zip",
         "applicationRelease": "0.7.1"
       }

@@ -6,7 +6,7 @@
     "sourceBuild":  {
                         "configurationId":  "seeing-stone-libmpv-0.41.0-ffmpeg-8.1.2-v2",
                         "sourceLock":  "native/libmpv-runtime/source-lock.json",
-                        "sourceLockSha256":  "71693995747cde77fd65c54832ed029086b0e3f8c68b7d0d98c63bbddaf16b0f",
+                        "sourceLockSha256":  "c320b20b3c3240096b7958ad10316f6fd160329055f9954b43af4e6781006a1b",
                         "mpv":  {
                                     "version":  "0.41.0",
                                     "commit":  "41f6a645068483470267271e1d09966ca3b9f413",
@@ -187,7 +187,7 @@
                                       ],
                    "nativeAddon":  {
                                        "filename":  "seeing_stone_libmpv_bridge.node",
-                                       "sha256":  "1ee151106e510876e0dbe30f3df106fa6819ea15a748d626c72d723da1ab5931"
+                                       "sha256":  "f41e6acfe24a9f732a5a16280ad406c06f5d909e46beba7805a462abe1b59564"
                                    },
                    "build":  {
                                  "sourceRevision":  "41f6a645068483470267271e1d09966ca3b9f413",
@@ -240,7 +240,7 @@
                                                    "packages":  "mingw-w64-ucrt-x86_64-binutils 2.46.1-2; mingw-w64-ucrt-x86_64-crt 14.0.0.r190.g96fb1bff7-1; mingw-w64-ucrt-x86_64-gcc 16.1.0-5; mingw-w64-ucrt-x86_64-headers 14.0.0.r190.g96fb1bff7-1; mingw-w64-ucrt-x86_64-cmake 4.4.0-1; mingw-w64-ucrt-x86_64-meson 1.11.2-1; mingw-w64-ucrt-x86_64-ninja 1.13.2-1; mingw-w64-ucrt-x86_64-pkgconf 1~3.0.3-1; mingw-w64-ucrt-x86_64-libass 0.17.5-1; mingw-w64-ucrt-x86_64-libplacebo 7.360.1-2; mingw-w64-ucrt-x86_64-angleproject 2.1.r25748.890b5d8f-3; mingw-w64-ucrt-x86_64-zlib 1.3.2-2",
                                                    "configurationId":  "seeing-stone-libmpv-0.41.0-ffmpeg-8.1.2-v2"
                                                },
-                                 "correspondingSource":  ".runtime/libmpv-build/archives until the public-release source archive is produced"
+                                 "correspondingSource":  "Seeing-Stone-0.7.1-corresponding-source.zip"
                              }
                }
 }

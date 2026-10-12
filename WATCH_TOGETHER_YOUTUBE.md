@@ -95,7 +95,7 @@ attempt to detect, skip, or manipulate the ad.
    The `.deps.json`, `.pdb`, and `.xml` publish outputs are build metadata and are
    not required for this dependency-free plugin. See the plugin's own README for
    common locations.
-3. Restart Jellyfin and confirm **Seeing Stone YouTube Rooms** appears in the
+3. Restart Jellyfin and confirm **Seeing Stone Player Features** appears in the
    server's plugin list.
 4. Run Seeing Stone with `pnpm start`, sign in to that server, and open
    **Watch Parties**.

@@ -62,4 +62,33 @@ describe("LibMpvHost scaffold", () => {
     await expect(host.initialize()).rejects.toMatchObject({ code: "LIBMPV_UNAVAILABLE" });
     await host.destroy();
   });
+
+  it("does not open media when stopped during native initialization", async () => {
+    const h = bridgeHarness();
+    let finishInitialization!: () => void;
+    vi.mocked(h.bridge.initialize).mockImplementationOnce(() => new Promise<void>((resolve) => { finishInitialization = resolve; }));
+    const opening = h.host.open({ location: "cancelled" }, 0);
+    const cancelled = expect(opening).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    await h.host.stop();
+    finishInitialization();
+    await cancelled;
+    expect(h.bridge.open).not.toHaveBeenCalled();
+    await h.host.open({ location: "next" }, 0);
+    expect(h.bridge.open).toHaveBeenCalledOnce();
+    expect(h.bridge.open).toHaveBeenCalledWith({ location: "next" }, 0, expect.any(Object));
+  });
+
+  it("opens only the latest requested source after shared initialization", async () => {
+    const h = bridgeHarness();
+    let finishInitialization!: () => void;
+    vi.mocked(h.bridge.initialize).mockImplementationOnce(() => new Promise<void>((resolve) => { finishInitialization = resolve; }));
+    const first = h.host.open({ location: "first" }, 0);
+    const cancelled = expect(first).rejects.toMatchObject({ code: "PLAYBACK_CANCELLED" });
+    const second = h.host.open({ location: "second" }, 0);
+    finishInitialization();
+    await cancelled;
+    await second;
+    expect(h.bridge.open).toHaveBeenCalledOnce();
+    expect(h.bridge.open).toHaveBeenCalledWith({ location: "second" }, 0, expect.any(Object));
+  });
 });

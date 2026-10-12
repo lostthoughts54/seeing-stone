@@ -19,6 +19,7 @@ import {
   episodesSchema,
   itemIdSchema,
   libraryItemsSchema,
+  libraryFilterOptionsSchema,
   browseSchema,
   liveTvCancelScheduleSchema,
   liveTvCreateRecordingSchema,
@@ -80,6 +81,10 @@ import type { SmartDownloadService } from "./services/smartDownloads";
 import type { PlaybackMetadataService } from "./services/playbackMetadata";
 import type { TrickplayService } from "./services/trickplay";
 import type { YouTubeRoomService } from "./services/youtubeRooms";
+import type { PlayerFeaturesService } from "./services/playerFeatures";
+import { featureIpc, featureInputSchema } from "../shared/playerFeatures";
+import { IPTV_IPC, iptvSetupSchema, iptvProviderInputSchema, iptvCatalogueSchema, iptvGroupsSchema, iptvPlaybackSchema, iptvScheduleSchema, iptvPosterSchema, iptvFavouriteSchema } from "../shared/iptv";
+import type { IptvService } from "./services/iptvService";
 
 type Handler<T> = (input: unknown) => Promise<T> | T;
 
@@ -153,7 +158,7 @@ export function registerIpcHandlers(
   artwork: ArtworkService,
   playback: PlayerController,
   downloads: DownloadManager,
-  synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched">,
+  synchronization: Pick<OfflineSynchronizationService, "activate" | "deactivate" | "setWatched"> & Partial<Pick<OfflineSynchronizationService, "cacheEpisodes">>,
   syncPlay?: SyncPlayService,
   downloadLocation?: DownloadLocationController,
   videoHost?: PlaybackViewportSink,
@@ -171,6 +176,8 @@ export function registerIpcHandlers(
   adapterSelectionAvailable = true,
   updates?: UpdateCheckerController,
   youtubeRooms?: YouTubeRoomService,
+  playerFeatures?: PlayerFeaturesService,
+  iptv?: IptvService,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
@@ -182,6 +189,34 @@ export function registerIpcHandlers(
       }
       return safeResult(handler)(input);
     });
+  };
+
+  const requireIptv = (): IptvService => {
+    if (!iptv) throw new AppError("IPTV_UNAVAILABLE", "IPTV is unavailable.", 503);
+    return iptv;
+  };
+  register(IPTV_IPC.setup, (input) => requireIptv().setup(iptvSetupSchema.parse(input)));
+  register(IPTV_IPC.poster, (input) => requireIptv().poster(iptvPosterSchema.parse(input)));
+  register(IPTV_IPC.favourite, (input) => requireIptv().favourite(iptvFavouriteSchema.parse(input)));
+  register(IPTV_IPC.schedule, (input) => { const value = iptvScheduleSchema.parse(input); return requireIptv().schedule(value.providerId, value.channelId); });
+  register(IPTV_IPC.play, (input) => {
+    requireIptv();
+    const value = iptvPlaybackSchema.parse(input);
+    if (!playbackCommands) throw new AppError("IPTV_UNAVAILABLE", "IPTV playback is unavailable.", 503);
+    return playbackCommands.startIptv(value.identity);
+  });
+  register(IPTV_IPC.list, (input) => { emptySchema.strict().parse(input ?? {}); return requireIptv().list(); });
+  register(IPTV_IPC.remove, (input) => requireIptv().remove(iptvProviderInputSchema.parse(input).providerId));
+  register(IPTV_IPC.refresh, (input) => requireIptv().refresh(iptvProviderInputSchema.parse(input).providerId));
+  register(IPTV_IPC.catalogue, (input) => requireIptv().catalogue(iptvCatalogueSchema.parse(input)));
+  register(IPTV_IPC.groups, (input) => { const value = iptvGroupsSchema.parse(input); return requireIptv().groups(value.providerId, value.contentType); });
+
+  register(featureIpc.command, (input) => {
+    if (!playerFeatures) throw new AppError("FEATURES_UNAVAILABLE", "Player features are unavailable.", 503);
+    return playerFeatures.command(featureInputSchema.parse(input));
+  });
+  const requireNoFeatureRoom = (): void => {
+    if (playerFeatures?.isJoined()) throw new AppError("FEATURE_ROOM_CONFLICT", "Leave your Seeing Stone room first.", 409);
   };
 
   register(IPC.applicationClose, (input) => {
@@ -197,6 +232,7 @@ export function registerIpcHandlers(
     const value = loginSchema.strict().parse(input);
     await syncPlay?.deactivate();
     youtubeRooms?.deactivate();
+    playerFeatures?.deactivate();
     artwork.clear();
     playbackMetadata?.clear();
     trickplay?.clear();
@@ -211,12 +247,14 @@ export function registerIpcHandlers(
     synchronization.activate();
     await syncPlay?.activate();
     await youtubeRooms?.activate();
+    await playerFeatures?.activate();
     await companion?.activateAfterLogin?.();
     return session;
   });
   register(IPC.sessionRestore, async () => {
     await syncPlay?.deactivate();
     youtubeRooms?.deactivate();
+    playerFeatures?.deactivate();
     await smartDownloads?.deactivate();
     await downloads.deactivate();
     synchronization.deactivate();
@@ -232,6 +270,7 @@ export function registerIpcHandlers(
       synchronization.activate();
       await syncPlay?.activate();
       await youtubeRooms?.activate();
+      await playerFeatures?.activate();
       await companion?.activateAfterLogin?.();
     }
     return session;
@@ -241,6 +280,7 @@ export function registerIpcHandlers(
     await companion?.stopForSessionChange?.();
     await syncPlay?.deactivate();
     youtubeRooms?.deactivate();
+    playerFeatures?.deactivate();
     artwork.clear();
     playbackMetadata?.clear();
     trickplay?.clear();
@@ -257,6 +297,7 @@ export function registerIpcHandlers(
     return api.getLibraryItems(value.libraryId, value.type, value.limit);
   });
   register(IPC.browseGet, (input) => api.browse(browseSchema.parse(input)));
+  register(IPC.librariesGetFilterOptions, (input) => api.getLibraryFilterOptions(libraryFilterOptionsSchema.parse(input)));
   register(IPC.peopleGetResults, (input) => api.getPersonMediaResults(itemIdSchema.strict().parse(input).itemId));
   register(IPC.searchQuery, (input) => api.search(searchSchema.strict().parse(input).query));
   register(IPC.itemsGetDetails, (input) => api.getDetails(itemIdSchema.strict().parse(input).itemId));
@@ -277,9 +318,12 @@ export function registerIpcHandlers(
     return result;
   });
   register(IPC.showsGetSeasons, (input) => api.getSeasons(itemIdSchema.strict().parse(input).itemId));
-  register(IPC.showsGetEpisodes, (input) => {
+  register(IPC.showsGetEpisodes, async (input) => {
     const value = episodesSchema.strict().parse(input);
-    return api.getEpisodes(value.seriesId, value.seasonId);
+    const episodes = await api.getEpisodes(value.seriesId, value.seasonId);
+    return synchronization.cacheEpisodes
+      ? synchronization.cacheEpisodes(value.seriesId, value.seasonId, episodes)
+      : episodes;
   });
   register(IPC.artworkGetUrl, (input) => artwork.getUrl(artworkSchema.strict().parse(input)));
   register(IPC.playbackFeaturesGetMediaSegments, (input) => {
@@ -563,6 +607,13 @@ export function registerIpcHandlers(
   register(IPC.companionSetEnabled, (input) => requireCompanion().setEnabled(
     z.object({ enabled: z.boolean() }).strict().parse(input),
   ));
+  register(IPC.companionYouTubeSettings, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireCompanion().getYouTubeSearchSettings();
+  });
+  register(IPC.companionYouTubeSetKey, (input) => requireCompanion().setYouTubeApiKey(
+    z.object({ apiKey: z.string().trim().max(256).refine(value => value === "" || /^[A-Za-z0-9_-]{20,256}$/.test(value)) }).strict().parse(input),
+  ));
   register(IPC.companionSelectNetwork, (input) => requireCompanion().selectNetwork(
     z.object({ networkId: z.string().min(1).max(128) }).strict().parse(input),
   ));
@@ -595,8 +646,8 @@ export function registerIpcHandlers(
     emptySchema.strict().parse(input ?? {});
     return requireSyncPlay().list();
   });
-  register(IPC.watchPartiesCreate, (input) => requireSyncPlay().create(watchPartyCreateSchema.strict().parse(input).name));
-  register(IPC.watchPartiesJoin, (input) => requireSyncPlay().join(watchPartyGroupSchema.strict().parse(input).groupId));
+  register(IPC.watchPartiesCreate, (input) => { requireNoFeatureRoom(); return requireSyncPlay().create(watchPartyCreateSchema.strict().parse(input).name); });
+  register(IPC.watchPartiesJoin, (input) => { requireNoFeatureRoom(); return requireSyncPlay().join(watchPartyGroupSchema.strict().parse(input).groupId); });
   register(IPC.watchPartiesLeave, (input) => {
     emptySchema.strict().parse(input ?? {});
     return requireSyncPlay().leave();
@@ -612,6 +663,10 @@ export function registerIpcHandlers(
   register(IPC.watchPartiesResync, (input) => {
     emptySchema.strict().parse(input ?? {});
     return requireSyncPlay().resyncGroup();
+  });
+  register(IPC.watchPartiesRetryPreparation, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    return requireSyncPlay().retryPreparation();
   });
   register(IPC.watchPartiesSetLocalSyncOffset, (input) => requireSyncPlay().setLocalSyncOffset(
     watchPartySyncOffsetSchema.strict().parse(input).offsetMilliseconds,
@@ -635,10 +690,11 @@ export function registerIpcHandlers(
     return { opened: true, ...result };
   });
   register(IPC.youtubeRoomsCreate, (input) => {
+    requireNoFeatureRoom();
     const value = youtubeRoomCreateSchema.strict().parse(input);
     return requireYouTubeRooms().create(value.name, value.youtubeUrl);
   });
-  register(IPC.youtubeRoomsJoin, (input) => requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).roomId));
+  register(IPC.youtubeRoomsJoin, (input) => { requireNoFeatureRoom(); return requireYouTubeRooms().join(youtubeRoomJoinSchema.strict().parse(input).roomId); });
   register(IPC.youtubeRoomsLeave, () => requireYouTubeRooms().leave());
   register(IPC.youtubeRoomsSetVideo, (input) => requireYouTubeRooms().setVideo(youtubeRoomVideoSchema.strict().parse(input).youtubeUrl));
   register(IPC.youtubeRoomsAddToQueue, (input) => requireYouTubeRooms().addToQueue(youtubeRoomQueueAddSchema.strict().parse(input)));

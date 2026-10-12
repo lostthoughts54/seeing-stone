@@ -16,6 +16,7 @@ import type { CompanionStateService } from "./companionState";
 import type { PlaybackCommandService } from "./playbackCommandService";
 import type { PlaybackQueueStore } from "./playbackQueue";
 import type { CompanionArtworkService } from "./companionArtwork";
+import type { CompanionYouTubeService } from "./companionYouTube";
 
 function newPort(): number {
   return 49152 + (randomBytes(2).readUInt16BE(0) % (65535 - 49152 + 1));
@@ -48,6 +49,7 @@ export class CompanionRemoteManager implements CompanionSettingsBridge {
     private readonly artwork: CompanionArtworkService,
     private readonly identity: () => { serverId: string; userId: string },
     private readonly staticRoot: string,
+    private readonly youtube?: CompanionYouTubeService,
   ) {
     this.authentication = new CompanionAuthenticationService(credentials, identity);
   }
@@ -152,6 +154,16 @@ export class CompanionRemoteManager implements CompanionSettingsBridge {
     return this.getStatus();
   }
 
+  async getYouTubeSearchSettings() {
+    if (!this.youtube) throw new AppError("YOUTUBE_UNAVAILABLE", "YouTube is unavailable in this build.", 503);
+    return this.youtube.getSearchSettings();
+  }
+
+  async setYouTubeApiKey(input: { apiKey: string }) {
+    if (!this.youtube) throw new AppError("YOUTUBE_UNAVAILABLE", "YouTube is unavailable in this build.", 503);
+    return this.youtube.setApiKey(input.apiKey);
+  }
+
   async selectNetwork(input: { networkId: string }): Promise<CompanionSettingsState> {
     this.settings ??= await this.loadSettings();
     const adapter = selectCompanionNetwork(input.networkId);
@@ -247,6 +259,7 @@ export class CompanionRemoteManager implements CompanionSettingsBridge {
       commands: this.commands,
       queue: this.queue,
       artwork: this.artwork,
+      youtube: this.youtube,
       onConnectionsChanged: (_socketCount, deviceIds) => {
         this.connectedDevices = deviceIds.size;
         this.connectedDeviceIds = new Set(deviceIds);

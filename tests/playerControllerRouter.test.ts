@@ -22,7 +22,7 @@ function fakeController(load: () => Promise<PlaybackStartResult>): PlayerControl
     load,
     loadItem: load,
     play: async () => state(), pause: async () => state(), setRate: async () => state(), setVolume: async () => state(),
-    setPaused: async () => state(), seek: async () => state(), setPlaybackRate: async () => state(),
+    setPaused: async () => state(), seek: async () => state(), adjustLocalTimeline: async () => state(), setPlaybackRate: async () => state(),
     selectAudio: async () => state(), selectSubtitle: async () => state(), setFullscreen: async () => state(),
     showMessage: async () => undefined, stop: async () => state(), clear: async () => undefined,
   };
@@ -128,5 +128,21 @@ describe("PlayerControllerRouter", () => {
     expect(embeddedCreated).toBe(false);
     expect(legacyCreated).toBe(false);
     expect(launch.active).toBe("libmpv");
+  });
+
+  it.each(["JELLYFIN_REQUEST_FAILED", "PLAYBACK_CANCELLED"])("preserves the embedded recovery engine after %s", async (code) => {
+    const launch = status("libmpv");
+    const sourceError = new AppError(code, "The source could not be opened.");
+    let legacyCreated = false;
+    const router = new PlayerControllerRouter(
+      { mode: "libmpv", controller: fakeController(async () => { throw new AppError("LIBMPV_INITIALIZATION_FAILED", "Runtime failed."); }) },
+      launch,
+      () => ({ mode: "embedded", controller: fakeController(async () => { throw sourceError; }) }),
+      () => { legacyCreated = true; return { mode: "legacy", controller: fakeController(async () => success) }; },
+    );
+
+    await expect(router.loadItem("item", "resume")).rejects.toBe(sourceError);
+    expect(legacyCreated).toBe(false);
+    expect(launch).toMatchObject({ active: "embedded", fallbackReason: "initialization-failed" });
   });
 });

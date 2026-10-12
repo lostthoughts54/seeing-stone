@@ -3,6 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { JellyfinConnectionDiagnostics, MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
 import { AppError } from "./errors";
+import { getLocalSubtitles } from "./downloadSubtitles";
 import { materializeCachedDiagnostics, materializeCachedMediaItem } from "./cachedMedia";
 import type { AuthenticatedContext } from "./jellyfinApi";
 import type { MediaProbeService } from "./mediaProbe";
@@ -191,6 +192,7 @@ export class LocalPlaybackResolver {
           diagnostics,
         }).catch(() => undefined);
       }
+      const localSubtitles = await getLocalSubtitles(candidate);
       return {
         playbackId,
         serverPlaySessionId: playbackId,
@@ -207,7 +209,8 @@ export class LocalPlaybackResolver {
         usesServerTimelineOffset: false,
         localVersionId: candidate.localVersionId,
         diagnostics,
-        externalSubtitles: [],
+        externalSubtitles: localSubtitles.map(({ file: _file, ...track }) => track),
+        localSubtitles,
         initialAction: resumeMode !== "start-over"
           ? "progress"
           : previouslyWatched ? "replay" : previousPositionTicks > 0 ? "start_over" : "progress",

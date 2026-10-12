@@ -1,0 +1,108 @@
+using SeeingStone.YouTubeRooms;
+
+var count = 0;
+void Check(bool condition, string name) { if (!condition) throw new Exception(name); count++; Console.WriteLine($"PASS {name}"); }
+void Denied(Action action, int code, string name) { try { action(); throw new Exception($"Expected rejection: {name}"); } catch (RoomAccessException e) { Check(e.StatusCode == code, name); } }
+long now = 100_000;
+var owner = Guid.NewGuid(); var guest = Guid.NewGuid();
+var rooms = new PlayerFeatureRooms(now: () => now);
+var room = rooms.Create(owner, "owner", "Movie night", "Alice");
+var id = room.Id;
+var media = new FeatureMedia("jellyfin", Guid.NewGuid().ToString("N"), "version-one", "Movie", 1_000_000_000, "fingerprint");
+rooms.Add(id, owner, "owner", media);
+rooms.Join(id, guest, "guest", "Bob");
+FeatureReport Ready(FeatureRoomView r, string state = "paused", bool ready = true) => new(r.Timeline.Generation, state, ready, r.Timeline.PositionTicks, null, "Direct play", media.Version, null, "Loaded", r.Timeline.TargetRevision);
+room = rooms.Get(id, owner, "owner");
+rooms.Report(id, owner, "owner", Ready(room));
+room = rooms.Action(id, owner, "owner", new("play"));
+Check(!room.Timeline.Playing && room.Timeline.Phase == "waiting", "startup waits for second viewer readiness");
+room = rooms.Report(id, guest, "guest", Ready(room));
+Check(room.Timeline.StartAt == now + 2500 && room.Timeline.Playing, "everyone ready schedules shared future start");
+now += 2600;
+room = rooms.Get(id, owner, "owner");
+Check(room.Timeline.Phase == "playing", "countdown becomes playing");
+rooms.Report(id, guest, "guest", Ready(room, "buffering", false)); now += 1600;
+room = rooms.Report(id, owner, "owner", Ready(room, "playing"));
+Check(!room.Timeline.Playing && room.Timeline.Phase == "waiting", "sustained buffering pauses the room");
+room = rooms.Report(id, guest, "guest", Ready(room));
+Check(room.Timeline.StartAt == now + 2500, "buffer recovery schedules coordinated restart");
+var staleReady = Ready(room);
+room = rooms.Action(id, owner, "owner", new("seek", PositionTicks: 500_000_000));
+rooms.Report(id, owner, "owner", staleReady);
+room = rooms.Report(id, guest, "guest", staleReady);
+Check(!room.Timeline.Playing && room.Members.All(m => !m.Ready), "old readiness cannot satisfy a newer seek");
+rooms.Report(id, owner, "owner", Ready(room));
+room = rooms.Report(id, guest, "guest", Ready(room));
+Check(room.Timeline.Playing && room.Timeline.PositionTicks == 500_000_000, "new seek acknowledgements restore playback at shared target");
+Denied(() => rooms.Get(id, owner, "other-device"), 403, "membership is exact session scoped");
+rooms.Action(id, owner, "owner", new("host-only", Enabled: true));
+Denied(() => rooms.Action(id, guest, "guest", new("pause")), 403, "host-only policy rejects guest playback control");
+room = rooms.Add(id, guest, "guest", media with { Title = "Second" });
+var second = room.Queue[1].Id;
+room = rooms.Action(id, guest, "guest", new("vote", QueueItemId: second));
+Check(room.Queue[1].Votes == 1, "guests can vote under host-only control");
+room = rooms.Action(id, guest, "guest", new("vote", QueueItemId: second));
+Check(room.Queue[1].Votes == 0, "voting toggles once per account");
+room = rooms.Message(id, guest, "guest", "comment", "Nice scene", 500_000_000);
+Check(room.Messages[0].PositionTicks == 500_000_000, "comments keep their shared timestamp");
+Denied(() => rooms.Message(id, guest, "guest", "chat", "flood", null), 429, "chat rate is bounded");
+room = rooms.Action(id, owner, "owner", new("next"));
+Denied(() => rooms.Action(id, owner, "owner", new("next", ExpectedGeneration: room.Timeline.Generation - 1)), 409, "stale next events cannot skip another queue item");
+Check(room.Queue.Length == 1 && room.Timeline.PositionTicks == 0, "next resets the new media timeline");
+room = rooms.Report(id, owner, "owner", Ready(room) with { Version = "wrong" });
+Check(!room.Members.Single(m => m.Id == "owner").Ready, "wrong media version cannot report ready");
+now += 31_000;
+room = rooms.Report(id, owner, "owner", Ready(room));
+Check(!room.Members.Single(m => m.Id == "guest").Connected, "missing heartbeats become disconnected");
+room = rooms.Action(id, owner, "owner", new("continue"));
+Check(room.Timeline.Playing && !room.WaitForAll, "host override continues and visibly disables waiting");
+now += 11_000; rooms.List(); room = rooms.Get(id, owner, "owner");
+Check(!room.Timeline.Playing, "empty room stops advancing its timeline");
+
+var path = Path.Combine(Path.GetTempPath(), $"seeing-stone-room-test-{Guid.NewGuid():N}.json");
+try
+{
+    var persisted = new PlayerFeatureRooms(path, () => now);
+    var saved = persisted.Create(owner, "session", "Saved room", "Alice");
+    persisted.Add(saved.Id, owner, "session", media);
+    persisted.Action(saved.Id, owner, "session", new("seek", PositionTicks: 123_000_000));
+    var restored = new PlayerFeatureRooms(path, () => now + 300_000);
+    Denied(() => restored.Get(saved.Id, owner, "session"), 403, "server restart requires fresh membership");
+    var joined = restored.Join(saved.Id, owner, "session", "Alice");
+    Check(joined.Queue.Length == 1 && joined.Timeline.PositionTicks == 123_000_000 && !joined.Timeline.Playing, "room queue and paused position survive restart");
+}
+finally { if (File.Exists(path)) File.Delete(path); }
+
+var youtube = new YouTubeRoomStore(); var client = Guid.NewGuid();
+var yt = youtube.Create(owner, "Alice", client, "Videos", "dQw4w9WgXcQ");
+yt = youtube.AddToQueue(yt.InviteToken, owner, client, new[] { "dQw4w9WgXcQ", "9bZkp7q19f0" }, false);
+var first = yt.Queue[0].QueueItemId;
+yt = youtube.Advance(yt.InviteToken, owner, client, "dQw4w9WgXcQ", first);
+Check(yt.Queue.Count == 2, "first duplicate video advances once");
+yt = youtube.Advance(yt.InviteToken, owner, client, "dQw4w9WgXcQ", first);
+Check(yt.Queue.Count == 2, "duplicate completion cannot advance the next copy");
+for (var i = 1; i < 32; i++) youtube.Join(yt.InviteToken, Guid.NewGuid(), "Viewer", Guid.NewGuid());
+Denied(() => youtube.Join(yt.InviteToken, Guid.NewGuid(), "Extra", Guid.NewGuid()), 409, "YouTube rooms enforce participant bound");
+var finishRooms = new PlayerFeatureRooms(now: () => now);
+var finishRoom = finishRooms.Create(owner, "finish", "Next episode", "Alice");
+finishRooms.Add(finishRoom.Id, owner, "finish", media);
+finishRooms.Add(finishRoom.Id, owner, "finish", media with { Title = "Next episode" });
+finishRoom = finishRooms.Action(finishRoom.Id, owner, "finish", new("continue"));
+var finishId = finishRoom.Id;
+var endedReport = Ready(finishRoom, "ended", false) with { PositionTicks = media.DurationTicks };
+finishRoom = finishRooms.Report(finishId, owner, "finish", endedReport);
+Check(finishRoom.Timeline.NextAt is null, "premature end cannot skip the current movie");
+now += 102_000;
+finishRoom = finishRooms.Report(finishId, owner, "finish", endedReport);
+Check(finishRoom.Timeline.NextAt == now + 5000 && finishRoom.Queue.Length == 2, "natural completion schedules five-second next countdown");
+now += 5100;
+finishRoom = finishRooms.Report(finishId, owner, "finish", endedReport);
+Check(finishRoom.Queue.Length == 1 && finishRoom.Media?.Title == "Next episode", "countdown advances exactly one item");
+finishRoom = finishRooms.Report(finishId, owner, "finish", endedReport);
+Check(finishRoom.Queue.Length == 1 && finishRoom.Timeline.NextAt is null, "old completion cannot advance the new generation");
+var fullRoom = rooms.Create(owner, "full-owner", "Reconnect test", "Alice");
+for (var i = 1; i < 32; i++) rooms.Join(fullRoom.Id, Guid.NewGuid(), $"session-{i}", "Viewer");
+now += 600_001;
+var reopened = rooms.Join(fullRoom.Id, guest, "fresh-session", "Bob");
+Check(reopened.Members.Length == 1, "expired membership does not block joining a formerly full room");
+Console.WriteLine($"{count} behavioral checks passed.");

@@ -102,3 +102,45 @@ analytics, external fonts, embeds, or HTTP-mode service worker.
 iOS before 17.2 may require pairing again after adding the site to the Home
 Screen. Remote DVR mutation, downloads, watched-state editing, TLS provisioning,
 Web Push, wake/relay support, and background media controls are deferred.
+
+## YouTube discovery and queueing
+
+**Launch Seeing Stone.cmd** opens `.runtime/release/win-unpacked/Seeing Stone.exe`
+with the current YouTube, phone remote, Jellyfin and IPTV features. All features
+share the normal `%APPDATA%\Seeing Stone` profile. Rebuild this same location with
+`pnpm run package:windows:dir`; do not create a new hotfix launcher or output folder.
+
+The phone remote's **YouTube** tab searches videos, browses popular US videos,
+and adds a selected video or pasted link to the desktop's active YouTube room.
+Open or join the room under **Watch Parties** on the desktop first. The room's
+existing Player Features server plugin and official embedded player still handle
+the queue and playback. The tab shows the target room and its queue, refreshing
+every two seconds while visible. Controls include **Play/Pause**, **Next video**,
+**Restart video**, **−10 seconds**, **+30 seconds**, and **Play now** from results
+or links. Queue entries support playing, removing, and moving upcoming videos.
+Transport requests target the current queue entry so a stale phone cannot skip
+the next occurrence of a repeated video. These controls affect the YouTube room,
+not the separate Jellyfin player. They do not control the standalone **Test alone**
+trailer. YouTube may require an initial click on the desktop to allow playback.
+The tab does not expose a personal
+YouTube home feed, subscriptions, or a Google sign-in.
+
+Search and popular browsing require a Google project with **YouTube Data API v3**
+enabled and an API key. Follow Google's setup instructions:
+https://developers.google.com/youtube/v3/getting-started
+
+Restrict the key to YouTube Data API v3. On the desktop, open **Phone Remote →
+YouTube search**, paste it in **YouTube API key**, and choose **Save key**.
+**YouTube search settings** under Watch Parties opens the same panel. The input
+is masked and cleared after saving. Saving takes effect without restarting.
+**Remove saved key** deletes the saved key. Windows-protected storage keeps it
+in the local app profile; the settings response never returns the key.
+`SEEING_STONE_YOUTUBE_API_KEY` remains supported as a fallback when no saved key
+exists. The panel identifies when this environment fallback is active.
+
+The key stays in the desktop process and is never returned to the phone. Search
+runs on form submission and pages are cached for five minutes to reduce quota
+use. Google's daily quotas apply. Search failures appear in the tab, and pasted
+video links continue to work without a key or when search quota is exhausted.
+Thumbnails load from YouTube's image host. Searches request embeddable videos,
+but YouTube can still restrict playback by region, age, or availability.

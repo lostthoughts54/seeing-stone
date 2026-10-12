@@ -6,6 +6,8 @@ import { AppError } from "./errors";
 import { redactText } from "./logger";
 import { cachedMediaItemSchema, cachedPlaybackDiagnosticsSchema } from "../../shared/schemas";
 import type { MediaItem, PlaybackDiagnostics } from "../../shared/contracts";
+import { IPTV_CATALOGUE_MAX_PAGE_SIZE, iptvProviderIdSchema, type IptvProviderSummary } from "../../shared/iptv";
+import type { IptvProviderRecord, IptvCatalogueOperation } from "./persistenceTypes";
 import type {
   ApplicationPreferenceKey,
   ApplicationPreferenceRecord,
@@ -178,20 +180,68 @@ export class SqlitePersistenceService {
   async open(): Promise<PersistenceHealth> {
     if (this.closed) throw new AppError("PERSISTENCE_CLOSED", "Local data storage is closed.", 409);
     if (this.opening) return this.opening;
-    this.opening = this.startWorker();
+    const opening = this.startWorker();
+    this.opening = opening;
     try {
-      return await this.opening;
+      return await opening;
     } catch (error) {
-      const worker = this.worker;
-      this.worker = null;
-      await worker?.terminate().catch(() => undefined);
-      this.opening = null;
+      // Failure callbacks may already have released this attempt and allowed
+      // a replacement worker to start. Never tear that replacement down.
+      if (this.opening === opening) {
+        const worker = this.worker;
+        this.worker = null;
+        this.opening = null;
+        await worker?.terminate().catch(() => undefined);
+      }
       throw error;
     }
   }
 
   async health(): Promise<PersistenceHealth> {
     return this.invoke({ kind: "health" }) as Promise<PersistenceHealth>;
+  }
+
+  // Main-only operations; never expose this facade or protected records through IPC.
+  async iptvCatalogue(operation: IptvCatalogueOperation): Promise<unknown> {
+    iptvProviderIdSchema.parse(operation.providerId);
+    if ("snapshotId" in operation) iptvProviderIdSchema.parse(operation.snapshotId);
+    if (operation.action === "batch" && operation.items.length > 250) throw new AppError("INVALID_IPTV_BATCH", "Catalogue batch is too large.", 400);
+    if (operation.action === "page" && (!Number.isInteger(operation.limit) || operation.limit < 1 || operation.limit > IPTV_CATALOGUE_MAX_PAGE_SIZE + 1)) throw new AppError("INVALID_IPTV_PAGE", "Catalogue page is invalid.", 400);
+    return this.invoke({ kind: "iptvCatalogue", operation });
+  }
+
+  async insertIptvProvider(record: IptvProviderRecord): Promise<void> {
+    const providerId = iptvProviderIdSchema.parse(record.providerId);
+    const name = boundedText(record.name, "Provider name", 120);
+    if (!["xtream", "m3u"].includes(record.kind)) throw new AppError("INVALID_IPTV_PROVIDER", "Provider kind is invalid.", 400);
+    this.validateIptvProtection(record.protectedConfiguration);
+    const createdAt = nonnegativeInteger(record.createdAt, "Creation time");
+    const updatedAt = nonnegativeInteger(record.updatedAt, "Update time");
+    if (updatedAt < createdAt) throw new AppError("INVALID_IPTV_PROVIDER", "Provider timestamps are invalid.", 400);
+    await this.invoke({ kind: "insertIptvProvider", record: { ...record, providerId, name, createdAt, updatedAt } });
+  }
+
+  async getIptvProvider(providerId: string): Promise<IptvProviderRecord | null> {
+    return this.invoke({ kind: "getIptvProvider", providerId: iptvProviderIdSchema.parse(providerId) }) as Promise<IptvProviderRecord | null>;
+  }
+
+  async listIptvProviders(): Promise<IptvProviderSummary[]> {
+    return this.invoke({ kind: "listIptvProviders" }) as Promise<IptvProviderSummary[]>;
+  }
+
+  async deleteIptvProvider(providerId: string): Promise<void> {
+    await this.invoke({ kind: "deleteIptvProvider", providerId: iptvProviderIdSchema.parse(providerId) });
+  }
+
+  async rotateIptvProviderProtection(providerId: string, protectedConfiguration: Uint8Array): Promise<void> {
+    this.validateIptvProtection(protectedConfiguration);
+    await this.invoke({ kind: "rotateIptvProviderProtection", providerId: iptvProviderIdSchema.parse(providerId), protectedConfiguration, updatedAt: Date.now() });
+  }
+
+  private validateIptvProtection(value: Uint8Array): void {
+    if (!(value instanceof Uint8Array) || value.byteLength < 1 || value.byteLength > 65536) {
+      throw new AppError("INVALID_IPTV_PROTECTION", "Protected provider configuration is invalid.", 400);
+    }
   }
 
   async getApplicationPreference(key: ApplicationPreferenceKey): Promise<ApplicationPreferenceRecord | null> {
@@ -658,11 +708,12 @@ export class SqlitePersistenceService {
 
   private async startWorker(): Promise<PersistenceHealth> {
     await mkdir(this.userDataPath, { recursive: true });
+    if (this.closed) throw new AppError("PERSISTENCE_CLOSED", "Local data storage is closed.", 409);
     const worker = new Worker(this.workerPath, { workerData: { databasePath: this.databasePath } });
     this.worker = worker;
-    worker.on("message", (message: PersistenceResponse) => this.receive(message));
-    worker.on("error", () => this.failWorker());
-    worker.on("exit", (code) => { if (!this.closed && code !== 0) this.failWorker(); });
+    worker.on("message", (message: PersistenceResponse) => { if (this.worker === worker) this.receive(message); });
+    worker.on("error", () => this.failWorker(worker));
+    worker.on("exit", () => { if (!this.closed) this.failWorker(worker); });
     return this.send({ kind: "initialize" }) as Promise<PersistenceHealth>;
   }
 
@@ -702,10 +753,12 @@ export class SqlitePersistenceService {
     else pending.reject(new AppError(response.error.code, response.error.message, 503));
   }
 
-  private failWorker(): void {
+  private failWorker(worker: Worker): void {
+    if (this.worker !== worker) return;
     this.worker = null;
     this.opening = null;
     this.rejectPending(new AppError("PERSISTENCE_UNAVAILABLE", "Local data storage is unavailable.", 503));
+    void worker.terminate().catch(() => undefined);
   }
 
   private timeoutWorker(id: number): void {
@@ -717,7 +770,7 @@ export class SqlitePersistenceService {
     const worker = this.worker;
     this.worker = null;
     this.opening = null;
-    void worker?.terminate();
+    void worker?.terminate().catch(() => undefined);
     this.rejectPending(new AppError("PERSISTENCE_UNAVAILABLE", "Local data storage is unavailable.", 503));
   }
 

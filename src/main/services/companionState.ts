@@ -42,7 +42,7 @@ interface CompanionLibraryApi {
   ): Promise<{ items: MediaItem[]; totalRecordCount: number }>;
   search(query: string): Promise<MediaItem[]>;
   getDetails(itemId: string): Promise<MediaItem>;
-  getSeasons(seriesId: string): Promise<MediaItem[]>;
+  getCompanionEpisodesPage(seriesId: string, startIndex: number, limit: number): Promise<{ items: MediaItem[]; nextOffset: number | null }>;
   getEpisodes(seriesId: string, seasonId: string): Promise<MediaItem[]>;
 }
 
@@ -165,7 +165,7 @@ export class CompanionStateService {
     const snapshot = await this.diagnostics.getSnapshot();
     const state = snapshot.playback;
     const media = snapshot.item ? this.mapMedia(snapshot.item) : null;
-    const live = state.contentKind === "live-tv" && state.itemId
+    const live = state.contentKind === "live-tv" && state.itemId && !state.iptvIdentity
       ? await this.liveTv?.getContext(state.itemId).catch(() => null) ?? null
       : null;
     const skipSegment = await this.getSkipSegment(state);
@@ -208,8 +208,8 @@ export class CompanionStateService {
         canPrevious: this.queue.getPrevious() !== null,
         canNext: this.queue.peekNext() !== null || Boolean(snapshot.nextUp),
         canGoLive: state.contentKind === "live-tv",
-        canPreviousChannel: state.contentKind === "live-tv",
-        canNextChannel: state.contentKind === "live-tv",
+        canPreviousChannel: state.contentKind === "live-tv" && !state.iptvIdentity,
+        canNextChannel: state.contentKind === "live-tv" && !state.iptvIdentity,
       },
     };
     return freezeDeep(companionPlayerStateSchema.parse(value) as CompanionPlayerState);
@@ -348,9 +348,14 @@ export class CompanionStateService {
 
   async getSeriesPage(seriesRef: string, offset = 0, limit = 30): Promise<CompanionLibraryPage> {
     const seriesId = this.capabilities.resolve(seriesRef);
-    const seasons = await this.api.getSeasons(seriesId);
-    const rows = await Promise.all(seasons.map((season) => this.api.getEpisodes(seriesId, season.id)));
-    return this.page(rows.flat(), offset, limit);
+    const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 30;
+    const page = await this.api.getCompanionEpisodesPage(seriesId, safeOffset, safeLimit);
+    return freezeDeep(companionLibraryPageSchema.parse({
+      revision: `${Date.now()}-${safeOffset}`,
+      items: page.items.map((item) => this.mapMedia(item)),
+      nextOffset: page.nextOffset,
+    }) as CompanionLibraryPage);
   }
 
   async getEpisodeNeighbors(episodeRef: string): Promise<{ previous: CompanionMediaSummary | null; next: CompanionMediaSummary | null }> {

@@ -2,6 +2,12 @@
 
 Status: client protocol and fallback accepted; server plugin disabled.
 
+Update: this status applies to the original optional **SyncPlay telemetry transport**.
+The Seeing Stone Player Features plugin now supplies its own authenticated rooms
+and participant reports. Those rooms own exact session membership directly and
+do not enable the private-SyncPlay integration described below. See
+`plugins/SeeingStone.YouTubeRooms/README.md` for the new plugin and validation scope.
+
 This report records a source-only compatibility review. No Jellyfin server was contacted, modified, restarted, upgraded, load-tested, or given a plugin during this work.
 
 ## Detected compatibility target

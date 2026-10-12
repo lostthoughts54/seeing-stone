@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { registerIpcHandlers } from "../src/main/ipc";
 import { IPC } from "../src/shared/contracts";
+import { IPTV_IPC } from "../src/shared/iptv";
 
 type RegisteredHandler = (event: unknown, input?: unknown) => Promise<unknown>;
 
@@ -61,6 +62,7 @@ function createHarness(options: { playerPreferences?: { get: () => Promise<{ ada
     activate: vi.fn(),
     deactivate: vi.fn(),
     setWatched: vi.fn(async (itemId: string, watched: boolean) => ({ itemId, watched, synchronization: "synchronized" })),
+    cacheEpisodes: vi.fn(async (_seriesId: string, _seasonId: string, episodes: unknown[]) => episodes),
   };
   const downloadLocation = {
     getSummary: vi.fn(async () => ({ mode: "default" as const, label: "Windows Videos folder" })),
@@ -98,6 +100,7 @@ function createHarness(options: { playerPreferences?: { get: () => Promise<{ ada
     waitForAll: vi.fn(async () => structuredClone(watchPartyState)),
     continueAfterBuffering: vi.fn(async () => structuredClone(watchPartyState)),
     resyncGroup: vi.fn(async () => structuredClone(watchPartyState)),
+    retryPreparation: vi.fn(async () => structuredClone(watchPartyState)),
     setBufferingPolicy: vi.fn(async () => structuredClone(watchPartyState)),
     setLocalSyncOffset: vi.fn(async () => structuredClone(watchPartyState)),
     setViewVisible: vi.fn(async () => structuredClone(watchPartyState)),
@@ -140,6 +143,7 @@ function createHarness(options: { playerPreferences?: { get: () => Promise<{ ada
   };
   const playbackMetadata = { clear: vi.fn(), getMediaSegments: vi.fn() };
   const trickplay = { clear: vi.fn(), getManifest: vi.fn(), getSpriteUrl: vi.fn() };
+  const playerFeatures = { command: vi.fn(async () => ({})), activate: vi.fn(), deactivate: vi.fn(), isJoined: vi.fn(() => false) };
   registerIpcHandlers(
     ipcMain as never,
     window as never,
@@ -163,12 +167,50 @@ function createHarness(options: { playerPreferences?: { get: () => Promise<{ ada
     playbackMetadata as never,
     trickplay as never,
     options.adapterSelectionAvailable,
+    undefined,
+    undefined,
+    playerFeatures as never,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
-  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, playbackMetadata, trickplay, login, getSafeSession, validEvent };
+  return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, playbackMetadata, trickplay, playerFeatures, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
+  it("guards IPTV setup and rejects privileged catalogue inputs even while signed out", async () => {
+    const { handlers, validEvent } = createHarness();
+    for (const channel of Object.values(IPTV_IPC)) {
+      expect(await handlers.get(channel)!({ ...validEvent, senderFrame: { url: "https://foreign.test" } }, {})).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED_IPC" } });
+    }
+    expect(await handlers.get(IPTV_IPC.catalogue)!(validEvent, { providerId: "11111111-1111-4111-8111-111111111111", contentType: "live", url: "http://private.test" })).toMatchObject({ ok: false });
+    const rejected = await handlers.get(IPTV_IPC.setup)!(validEvent, { kind: "xtream", name: "Test", address: "invalid-secret-address", username: "private-user", password: "private-password" });
+    expect(rejected).toMatchObject({ ok: false });
+    expect(JSON.stringify(rejected)).not.toMatch(/invalid-secret-address|private-user|private-password/);
+  });
+  it("validates plugin room intents and rejects renderer-authored native readiness or credentials", async () => {
+    const { handlers, validEvent, playerFeatures } = createHarness();
+    const invoke = handlers.get("player-features:intent")!;
+    for (const input of [{ operation: "report", ready: true }, { operation: "join", roomId: "a".repeat(32), token: "secret" }, { operation: "action", action: { action: "exec", path: "file" } }]) {
+      expect(await invoke(validEvent, input)).toMatchObject({ ok: false });
+    }
+    expect(playerFeatures.command).not.toHaveBeenCalled();
+    expect(await invoke(validEvent, { operation: "action", action: { action: "pause" } })).toMatchObject({ ok: true });
+    expect(playerFeatures.command).toHaveBeenCalledWith({ operation: "action", action: { action: "pause" } });
+  });
+  it("prevents joining SyncPlay while a plugin room owns playback", async () => {
+    const { handlers, validEvent, playerFeatures, syncPlay } = createHarness();
+    playerFeatures.isJoined.mockReturnValue(true);
+    expect(await handlers.get(IPC.watchPartiesCreate)!(validEvent, { name: "Other" })).toMatchObject({ ok: false, error: { code: "FEATURE_ROOM_CONFLICT" } });
+    expect(syncPlay.create).not.toHaveBeenCalled();
+  });
+  it("caches authorized season results before exposing them for offline watched actions", async () => {
+    const { handlers, validEvent, api, synchronization } = createHarness();
+    const episodes = [{ id: "episode-1", type: "Episode" }];
+    api.getEpisodes.mockResolvedValue(episodes);
+    await expect(handlers.get(IPC.showsGetEpisodes)?.(validEvent, { seriesId: "series-1", seasonId: "season-1" }))
+      .resolves.toEqual({ ok: true, data: episodes });
+    expect(synchronization.cacheEpisodes).toHaveBeenCalledWith("series-1", "season-1", episodes);
+  });
+
   it("does not allow packaged production IPC to change the fixed libmpv adapter", async () => {
     const playerPreferences = {
       get: vi.fn(async () => ({ adapterMode: "libmpv" as const })),
@@ -242,7 +284,7 @@ describe("IPC authorization and allowlist", () => {
       IPC.youtubeRoomsChanged,
       IPC.companionChanged,
     ].includes(channel));
-    expect([...handlers.keys()].sort()).toEqual(invokeChannels.sort());
+    expect([...handlers.keys()].sort()).toEqual([...invokeChannels, "player-features:intent", ...Object.values(IPTV_IPC)].sort());
     expect([...handlers.keys()].join(" ")).not.toMatch(/report|sessions\/playing|request|fetch|filesystem|shell|command/i);
   });
 
@@ -468,11 +510,14 @@ describe("IPC authorization and allowlist", () => {
     await expect(handlers.get(IPC.watchPartiesWait)?.(validEvent)).resolves.toMatchObject({ ok: true });
     await expect(handlers.get(IPC.watchPartiesContinue)?.(validEvent)).resolves.toMatchObject({ ok: true });
     await expect(handlers.get(IPC.watchPartiesResync)?.(validEvent)).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesRetryPreparation)?.(validEvent)).resolves.toMatchObject({ ok: true });
+    await expect(handlers.get(IPC.watchPartiesRetryPreparation)?.(validEvent, { itemId: "untrusted" })).resolves.toMatchObject({ ok: false });
     await expect(handlers.get(IPC.watchPartiesSetBufferingPolicy)?.(validEvent, { mode: "continue" })).resolves.toMatchObject({ ok: true });
     await expect(handlers.get(IPC.watchPartiesSetLocalSyncOffset)?.(validEvent, { offsetMilliseconds: -300 })).resolves.toMatchObject({ ok: true });
     expect(syncPlay.waitForAll).toHaveBeenCalledOnce();
     expect(syncPlay.continueAfterBuffering).toHaveBeenCalledOnce();
     expect(syncPlay.resyncGroup).toHaveBeenCalledOnce();
+    expect(syncPlay.retryPreparation).toHaveBeenCalledOnce();
     expect(syncPlay.setBufferingPolicy).toHaveBeenCalledWith("continue");
     expect(syncPlay.setLocalSyncOffset).toHaveBeenCalledWith(-300);
 

@@ -861,6 +861,11 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
     const std::wstring source_path = Utf8ToWide(source_utf8);
     const bool loop = !options.Has("loop") || options.Get("loop").ToBoolean().Value();
     const bool audio_enabled = options.Has("audioEnabled") && options.Get("audioEnabled").ToBoolean().Value();
+    if (options.Has("startPaused") && !options.Get("startPaused").IsBoolean()) {
+      Fail(env, "startPaused must be a boolean.");
+      return;
+    }
+    const bool start_paused = options.Has("startPaused") && options.Get("startPaused").ToBoolean().Value();
     if (options.Has("cpuReadback") && !options.Get("cpuReadback").IsBoolean()) {
       Fail(env, "cpuReadback must be a boolean.");
       return;
@@ -931,6 +936,7 @@ class LibMpvVideoProducer final : public Napi::ObjectWrap<LibMpvVideoProducer> {
         state_->instance->SetOption("hwdec", hardware_decoding_mode.c_str()) < 0 ||
         state_->instance->SetOption("loop-file", loop ? "inf" : "no") < 0 ||
         state_->instance->SetOption("keep-open", "yes") < 0 ||
+        (start_paused && state_->instance->SetOption("pause", "yes") < 0) ||
         (start_position_seconds > 0 && state_->instance->SetOption("start", start_option.c_str()) < 0) ||
         state_->instance->Initialize() < 0) {
       Fail(env, "LIBMPV_VIDEO_INITIALIZE_FAILED");

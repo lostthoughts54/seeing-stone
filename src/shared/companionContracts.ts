@@ -133,7 +133,7 @@ export interface CompanionBootstrap {
 
 export interface CompanionWatchPartyState {
   joined: boolean;
-  phase: "idle" | "waiting-for-participant" | "preparing" | "ready" | "starting" | "playing" | "error";
+  phase: "idle" | "waiting-for-participant" | "preparing" | "buffering" | "retrying" | "ready" | "starting" | "playing" | "error";
   participantCount: number;
   minimumParticipants: 2;
   localSyncOffsetMilliseconds: number;
@@ -141,6 +141,9 @@ export interface CompanionWatchPartyState {
 }
 
 export type CompanionCommand =
+  | { type: "youtube-add"; videoUrl: string; roomId: string; playNow?: boolean }
+  | { type: "youtube-control"; roomId: string; queueItemId: string; action: "play" | "pause" | "next" | "restart" | "back" | "forward" }
+  | { type: "youtube-queue"; roomId: string; queueItemId: string; action: "play" | "remove" | "move-up" | "move-down" }
   | { type: "set-paused"; paused: boolean }
   | { type: "stop" }
   | { type: "seek"; positionTicks: number }
@@ -173,6 +176,26 @@ export interface CompanionCommandEnvelope {
   commandId: string;
   playbackId: string | null;
   command: CompanionCommand;
+}
+
+export interface CompanionYouTubePage {
+  items: { videoId: string; title: string; channelTitle: string }[];
+  nextPageToken: string | null;
+}
+
+export interface CompanionYouTubeState {
+  searchConfigured: boolean;
+  room: {
+    id: string; name: string; queue: { queueItemId: string; videoId: string }[];
+    playing: boolean; positionSeconds: number; videoId: string | null;
+    controllable: boolean;
+  } | null;
+}
+
+export interface YouTubeSearchSettings {
+  configured: boolean;
+  source: "saved" | "environment" | "none";
+  storageUnavailable: boolean;
 }
 
 export interface CompanionPairedDeviceSummary {
@@ -217,6 +240,8 @@ export interface CompanionSettingsState {
 }
 
 export interface CompanionSettingsBridge {
+  getYouTubeSearchSettings(): Promise<YouTubeSearchSettings>;
+  setYouTubeApiKey(input: { apiKey: string }): Promise<YouTubeSearchSettings>;
   getStatus(): Promise<CompanionSettingsState>;
   setEnabled(input: { enabled: boolean }): Promise<CompanionSettingsState>;
   selectNetwork(input: { networkId: string }): Promise<CompanionSettingsState>;

@@ -65,7 +65,11 @@ export class LibMpvCommandClient implements MpvCommandClient {
       return null;
     }
     if (name === "seek") {
-      await this.session.command({ kind: "seek", positionTicks: Math.max(0, Math.round(numericValue(command[1]) * 10_000_000)) });
+      const ticks = Math.round(numericValue(command[1]) * 10_000_000);
+      const mode = stringValue(command[2] ?? "absolute");
+      await this.session.command(mode.includes("relative")
+        ? { kind: "seek-relative", deltaTicks: ticks }
+        : { kind: "seek", positionTicks: Math.max(0, ticks) });
       return null;
     }
     if (name === "sub-add") {
@@ -122,12 +126,14 @@ export class LibMpvCommandClient implements MpvCommandClient {
     try {
       const observations = [...this.observed.values()];
       if (observations.length === 0) return;
-      // time-pos drives the visible playhead, so keep it at the original 10 Hz.
-      // Every other property is checked round-robin instead of querying the
-      // entire native property set in a single frame-blocking burst.
-      const position = observations.find((entry) => entry.property === "time-pos") ?? null;
-      if (position) await this.pollObservation(position);
-      const others = observations.filter((entry) => entry !== position);
+      // Startup and SyncPlay need current seek/cache state alongside position.
+      // Keep the remaining properties spread across ticks to avoid native bursts.
+      const urgent = new Set(["seeking", "paused-for-cache", "time-pos"]);
+      for (const property of urgent) {
+        const observation = observations.find((entry) => entry.property === property);
+        if (observation) await this.pollObservation(observation);
+      }
+      const others = observations.filter((entry) => !urgent.has(entry.property));
       if (others.length > 0) {
         const next = others[this.pollCursor % others.length];
         this.pollCursor = (this.pollCursor + 1) % others.length;

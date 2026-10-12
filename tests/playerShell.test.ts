@@ -409,6 +409,13 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("closePlayerSettings()");
   });
 
+  it("keeps every sidebar destination reachable when navigation exceeds the window height", async () => {
+    const styles = await readFile("src/renderer/styles.css", "utf8");
+    expect(styles).toMatch(/\.app-rail-nav \{[^}]*flex: 1 1 auto[^}]*min-height: 0[^}]*overflow-y: auto/s);
+    expect(styles).toMatch(/\.player-rail-nav \{[^}]*flex: 1 1 auto[^}]*min-height: 0[^}]*overflow-y: auto/s);
+    expect(styles).toContain("scrollbar-gutter: stable");
+  });
+
   it("keeps a readable fallback reason visible after libmpv initialization fails", async () => {
     const [html, styles, renderer] = await Promise.all([
       readFile("src/renderer/index.html", "utf8"),
@@ -433,9 +440,17 @@ describe("Seeing Stone player shell", () => {
 
   it("keeps Watch Party timing controls in the local Earlier/Later sign convention", async () => {
     const renderer = await readFile("src/renderer/app.ts", "utf8");
-    expect(renderer).toContain('earlier.addEventListener("click", () => { void setWatchPartySyncOffset(Math.min(2000, offset + 100), earlier); });');
-    expect(renderer).toContain('later.addEventListener("click", () => { void setWatchPartySyncOffset(Math.max(-2000, offset - 100), later); });');
-    expect(renderer).toContain('reset.addEventListener("click", () => { void setWatchPartySyncOffset(0, reset); });');
+    expect(renderer).toContain('earlier.addEventListener("click", () => { queueWatchPartySyncOffset(offset + 100); });');
+    expect(renderer).toContain('later.addEventListener("click", () => { queueWatchPartySyncOffset(offset - 100); });');
+    expect(renderer).toContain('reset.addEventListener("click", () => { queueWatchPartySyncOffset(0); });');
+    expect(renderer).toContain("while (desiredWatchPartySyncOffsetMilliseconds !== null)");
+    expect(renderer).toContain("desiredWatchPartySyncOffsetMilliseconds ?? value.preparation.localSyncOffsetMilliseconds");
+  });
+
+  it("shows the actionable Watch Party preparation error in the session panel", async () => {
+    const renderer = await readFile("src/renderer/app.ts", "utf8");
+    expect(renderer).toContain('value.preparation.phase === "error" && value.error?.message');
+    expect(renderer).toContain("? value.error.message");
   });
 
   it("preserves a visible safe terminal state after forced player termination", async () => {
@@ -467,9 +482,9 @@ describe("Seeing Stone player shell", () => {
     expect(renderer).toContain("await refreshLibrary(library, true)");
     expect(renderer).toContain("!state.libraryRequestGate.isCurrent(requestToken)");
     expect(renderer).toContain("window.setInterval(() => { void refreshVisibleCatalog(); }, CATALOG_REFRESH_INTERVAL_MS)");
-    expect(renderer).toContain('window.addEventListener("focus", () => { void refreshVisibleCatalog(); })');
+    expect(renderer).toMatch(/window\.addEventListener\("focus", \(\) => \{\s*schedulePlayerViewportSettled\(\);\s*void refreshVisibleCatalog\(\);/);
     expect(renderer).toContain('document.addEventListener("visibilitychange"');
-    expect(renderer).toContain("if (!document.hidden) void refreshVisibleCatalog()");
+    expect(renderer).toMatch(/if \(!document\.hidden\) \{\s*schedulePlayerViewportSettled\(\);\s*void refreshVisibleCatalog\(\);/);
   });
 
   it("hides a stale trickplay image before requesting the newly targeted sprite", async () => {

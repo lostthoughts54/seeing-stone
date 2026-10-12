@@ -77,6 +77,7 @@ public sealed class YouTubeRoomStore
         lock (_gate)
         {
             CleanupExpired(DateTimeOffset.UtcNow);
+            if (_rooms.Count >= 100) throw new RoomAccessException(409, "The server room limit has been reached.");
             var now = DateTimeOffset.UtcNow;
             string token;
             do { token = CreateToken(); } while (_rooms.ContainsKey(token));
@@ -205,7 +206,7 @@ public sealed class YouTubeRoomStore
         }
     }
 
-    public YouTubeRoomDto Advance(string token, Guid userId, Guid clientId, string expectedVideoId)
+    public YouTubeRoomDto Advance(string token, Guid userId, Guid clientId, string expectedVideoId, string? expectedQueueItemId = null)
     {
         ValidateVideoId(expectedVideoId);
         lock (_gate)
@@ -213,6 +214,10 @@ public sealed class YouTubeRoomStore
             var now = DateTimeOffset.UtcNow;
             var room = RequireMember(token, userId, clientId, now);
             if (!string.Equals(room.VideoId, expectedVideoId, StringComparison.Ordinal)) return Snapshot(room, now);
+            if (expectedQueueItemId is not null && room.Queue.FirstOrDefault()?.QueueItemId != expectedQueueItemId) return Snapshot(room, now);
+            // Older v3 clients cannot distinguish consecutive copies of the same video.
+            // Leave that ambiguous transition to an upgraded client or an explicit queue action.
+            if (expectedQueueItemId is null && room.Queue.Skip(1).FirstOrDefault()?.VideoId == expectedVideoId) return Snapshot(room, now);
             var actor = room.Members[MemberKey(userId, clientId)].DisplayName;
             if (room.Queue.Count > 0) room.Queue.RemoveAt(0);
             SetCurrent(room, room.Queue.FirstOrDefault()?.VideoId, now, actor);
@@ -282,6 +287,7 @@ public sealed class YouTubeRoomStore
     private Room RequireMember(string token, Guid userId, Guid clientId, DateTimeOffset now)
     {
         var room = RequireRoom(token, now);
+        PruneMembers(room, now);
         if (!room.Members.ContainsKey(MemberKey(userId, clientId))) throw new RoomAccessException(403, "Join this room before changing it.");
         return room;
     }
@@ -365,6 +371,8 @@ public sealed class YouTubeRoomStore
         public void UpsertMember(Guid userId, string displayName, Guid clientId, string status, DateTimeOffset now)
         {
             var key = MemberKey(userId, clientId);
+            PruneMembers(this, now);
+            if (!Members.ContainsKey(key) && Members.Count >= 32) throw new RoomAccessException(409, "This room is full.");
             Members[key] = new Member(key, displayName, status, now);
         }
     }

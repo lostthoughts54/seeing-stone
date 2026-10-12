@@ -21,6 +21,7 @@ import {
 } from "./electronSecurity";
 import { registerIpcHandlers } from "./ipc";
 import { ArtworkService } from "./services/artwork";
+import { materializeCachedMediaItem } from "./services/cachedMedia";
 import { DeviceIdentityService } from "./services/deviceIdentity";
 import { DownloadManager } from "./services/downloadManager";
 import { DownloadLocationService } from "./services/downloadLocation";
@@ -72,6 +73,12 @@ import {
 import { UnavailablePlayerController } from "./services/unavailablePlayerController";
 import { UpdateChecker } from "./services/updateChecker";
 import { YouTubeRoomService } from "./services/youtubeRooms";
+import { CompanionYouTubeService } from "./services/companionYouTube";
+import { YouTubeApiKeyStore } from "./services/youtubeApiKeyStore";
+import { PlayerFeaturesService } from "./services/playerFeatures";
+import { featureIpc } from "../shared/playerFeatures";
+import { IptvProviderStore } from "./services/iptvProviderStore";
+import { IptvService } from "./services/iptvService";
 
 registerPrivilegedSchemes();
 app.enableSandbox();
@@ -82,6 +89,8 @@ const applicationId = internalLibMpvAcceptanceBuild
   ? "app.seeingstone.client.libmpv-test"
   : "app.seeingstone.client";
 app.setAppUserModelId(applicationId);
+// IPTV, Jellyfin and Companion Remote share the application's normal profile.
+// The old --iptv-beta argument is only a navigation alias now.
 
 let mainWindow: BrowserWindow | null = null;
 let persistence: SqlitePersistenceService | null = null;
@@ -93,6 +102,8 @@ let activeVideoHost: EmbeddedVideoHost | null = null;
 let activeCompanion: CompanionRemoteManager | null = null;
 let activeSmartDownloads: SmartDownloadService | null = null;
 let activeYouTubeRooms: YouTubeRoomService | null = null;
+let activePlayerFeatures: PlayerFeaturesService | null = null;
+let activeIptv: IptvService | null = null;
 let persistenceClosing = false;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
@@ -120,13 +131,16 @@ app.on("before-quit", (event) => {
   activeSmartDownloads = null;
   activeYouTubeRooms = null;
   youtubeRooms?.deactivate();
+  activePlayerFeatures?.deactivate();
+  activePlayerFeatures = null;
   const stopDownloads = (smartDownloads ? smartDownloads.shutdown().catch(() => undefined) : Promise.resolve())
     .then(() => activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : undefined);
   const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
   const stopPlayback = playback ? playback.clear().catch(() => undefined) : Promise.resolve();
   const stopCompanion = companion ? companion.shutdown().catch(() => undefined) : Promise.resolve();
-  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback, stopCompanion]).then(() => activePersistence.close()).finally(() => {
+  const stopIptv = activeIptv?.shutdown().catch(() => undefined);
+  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback, stopCompanion, stopIptv]).then(() => activePersistence.close()).finally(() => {
     videoHost?.destroy();
     persistenceClosing = true;
     app.quit();
@@ -171,6 +185,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     app.getVersion(),
   ).get();
   const sessionProtector = createSafeStorageProtector();
+  activeIptv = new IptvService(new IptvProviderStore(persistence, sessionProtector), persistence);
   const sessionStore = new SecureSessionStore(app.getPath("userData"), sessionProtector);
   const api = new JellyfinApi(identity, sessionStore, async (url) => { await shell.openExternal(url); });
   const artwork = new ArtworkService(api);
@@ -213,7 +228,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   const localPlayback = new LocalPlaybackResolver(api, persistence, mediaProbe, downloadStorageRoots);
   const playbackQueue = new PlaybackQueueStore();
   const playbackContinuation = new DefaultPlaybackContinuationResolver(playbackQueue, api);
-  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence, playbackContinuation, downloadManager);
+  const playbackSource = new PlaybackSessionService(api, localPlayback, persistence, playbackContinuation, downloadManager, activeIptv);
   offlineSynchronization = new OfflineSynchronizationService(api, persistence, logger);
   offlineSynchronization.activate();
   const playbackReporting = new PlaybackReportingService(api, offlineSynchronization, logger);
@@ -349,7 +364,17 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   );
   recordPlayerEngineStatus();
   const soloSessionDiagnostics = new SoloSessionDiagnosticsService(api, playback, persistence);
-  const playbackCommands = new PlaybackCommandService(playback, api, playbackQueue);
+  const playbackCatalog = persistence;
+  const playbackCommands = new PlaybackCommandService(playback, api, playbackQueue, async (itemId) => {
+    const identity = api.getAuthenticatedContext();
+    const [item, head] = await Promise.all([
+      playbackCatalog.getMediaItem(identity.serverId, identity.userId, itemId),
+      playbackCatalog.getPlaybackHead(identity.serverId, identity.userId, itemId),
+    ]);
+    const current = api.getAuthenticatedContext();
+    if (current.serverId !== identity.serverId || current.userId !== identity.userId) return null;
+    return item ? materializeCachedMediaItem(item, head) : null;
+  });
   const playbackMetadata = new PlaybackMetadataService(api);
   const trickplay = new TrickplayService(api, (playbackId) => playbackSource.getActiveResourceContext(playbackId));
   playbackMetadata.setPlaybackState(playback.getState());
@@ -441,19 +466,26 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   });
   activeSyncPlay = new SyncPlayService(api, playback, logger, 5000, applicationPreferences);
   activeYouTubeRooms = new YouTubeRoomService(api);
+  activePlayerFeatures = new PlayerFeaturesService(api, playback, downloadManager, () => Boolean(activeSyncPlay?.isJoined() || activeYouTubeRooms?.getState().room));
+  playbackCommands.setPlayerFeatures(activePlayerFeatures);
+  activePlayerFeatures.onState((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(featureIpc.changed, state);
+  });
   playbackCommands.setSyncPlay(activeSyncPlay);
   const companionState = new CompanionStateService(
     playback,
     playbackQueue,
     soloSessionDiagnostics,
     api,
-    () => activeSyncPlay?.isJoined() ?? false,
+    () => Boolean(activeSyncPlay?.isJoined() || activePlayerFeatures?.isJoined()),
     liveTvContext,
     () => activeSyncPlay?.getState() ?? null,
     playbackMetadata,
   );
   const companionCredentials = new CompanionCredentialStore(app.getPath("userData"), sessionProtector);
   const companionArtwork = new CompanionArtworkService(api, companionState);
+  const youtubeApiKeyStore = new YouTubeApiKeyStore(app.getPath("userData"), sessionProtector);
+  await youtubeApiKeyStore.load();
   activeCompanion = new CompanionRemoteManager(
     applicationPreferences,
     companionCredentials,
@@ -466,6 +498,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       return { serverId: context.serverId, userId: context.userId };
     },
     join(__dirname, "../companion"),
+    new CompanionYouTubeService(activeYouTubeRooms, () => youtubeApiKeyStore.getKey(), fetch, youtubeApiKeyStore),
   );
   activeCompanion.subscribe((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.companionChanged, state);
@@ -532,8 +565,13 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     !packagedProduction,
     updateController,
     activeYouTubeRooms,
+    activePlayerFeatures,
+    activeIptv,
   );
   await mainWindow.loadURL(APP_URL);
+  if (process.argv.includes("--open-iptv") || process.argv.includes("--iptv-beta")) {
+    await mainWindow.webContents.executeJavaScript("document.getElementById('loginIptvButton')?.click()");
+  }
   // Packaged Windows builds can occasionally miss ready-to-show while the
   // sandboxed renderer is warming up. Loading has completed at this point, so
   // make the primary window visible as a reliable fallback.

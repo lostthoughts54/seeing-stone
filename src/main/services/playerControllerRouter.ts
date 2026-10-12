@@ -105,7 +105,8 @@ export class PlayerControllerRouter implements PlayerController {
       await this.switchRoute(this.embeddedFactory, "embedded", "initialization-failed");
       try {
         return await this.route.controller.loadItem(itemId, resumeMode, context);
-      } catch {
+      } catch (embeddedError) {
+        if (!isEngineFailure(embeddedError, "embedded")) throw embeddedError;
         await this.switchRoute(this.legacyFactory, "legacy", "embedded-initialization-failed");
         return this.route.controller.loadItem(itemId, resumeMode, context);
       }
@@ -118,9 +119,14 @@ export class PlayerControllerRouter implements PlayerController {
   setVolume(playbackId: string, volume: number, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.setVolume(playbackId, volume, context); }
   setPaused(playbackId: string, paused: boolean, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.setPaused(playbackId, paused, context); }
   seek(playbackId: string, positionTicks: number, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.seek(playbackId, positionTicks, context); }
+  adjustLocalTimeline(playbackId: string, deltaTicks: number, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.adjustLocalTimeline(playbackId, deltaTicks, context); }
   setPlaybackRate(playbackId: string, rate: number, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.setPlaybackRate(playbackId, rate, context); }
   selectAudio(playbackId: string, trackId: number | null): Promise<PlaybackState> { return this.route.controller.selectAudio(playbackId, trackId); }
   selectSubtitle(playbackId: string, trackId: number | null): Promise<PlaybackState> { return this.route.controller.selectSubtitle(playbackId, trackId); }
+  async setSubtitleDelay(playbackId: string, seconds: number): Promise<void> {
+    if (!this.route.controller.setSubtitleDelay) throw new AppError("SUBTITLE_TIMING_UNAVAILABLE", "Subtitle timing is unavailable in this player.", 422);
+    await this.route.controller.setSubtitleDelay(playbackId, seconds);
+  }
   setFullscreen(playbackId: string, fullscreen: boolean, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.setFullscreen(playbackId, fullscreen, context); }
   continueNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.continueNextEpisode(playbackId, context); }
   cancelNextEpisode(playbackId: string, context?: PlayerCommandContext): Promise<PlaybackState> { return this.route.controller.cancelNextEpisode(playbackId, context); }

@@ -22,6 +22,14 @@ export const libraryItemsSchema = z.object({
   type: z.enum(["Movie", "Series", "Mixed"]),
   limit: z.number().int().min(1).max(500),
 });
+export const libraryFilterOptionsSchema = z.object({
+  libraryId: z.string().min(1).max(128),
+  type: z.enum(["Movie", "Series", "Mixed"]),
+  kind: z.enum(["genres", "people"]),
+  query: z.string().trim().max(100).optional(),
+  startIndex: z.number().int().min(0).max(10_000_000),
+  limit: z.number().int().min(1).max(100),
+}).strict();
 export const browseSchema = z.object({
   libraryId: z.string().min(1).max(128).optional(),
   type: z.enum(["Movie", "Series", "Episode", "Mixed"]),

@@ -83,6 +83,16 @@ const unsafeItem = {
 };
 
 describe("JellyfinApi main-side boundary", () => {
+  it("allows all bundled YouTube routes and rejects paths outside that plugin", async () => {
+    const api = new JellyfinApi(identity, {} as SecureSessionStore, async () => undefined);
+    const request = vi.spyOn(api as unknown as { request: (...args: unknown[]) => Promise<unknown> }, "request").mockResolvedValue({});
+    for (const suffix of ["queue/add", "queue/action", "advance", "handoff", "presence"]) {
+      await api.youtubeRoomRequest(`/SeeingStone/YouTubeRooms/${"A".repeat(43)}/${suffix}`, {});
+    }
+    expect(request).toHaveBeenCalledTimes(5);
+    for (const path of ["/Users", "/SeeingStone/YouTubeRooms/../Users", `/SeeingStone/YouTubeRooms/${"A".repeat(43)}/queue/add?api_key=x`]) expect(() => api.youtubeRoomRequest(path, {})).toThrow();
+    request.mockRestore();
+  });
   it("sanitizes bounded recognized media segments only", () => {
     expect(sanitizeMediaSegments({ Items: [
       { Type: "Intro", StartTicks: 0, EndTicks: 100 },

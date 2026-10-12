@@ -14,6 +14,6 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     }
 
     public static Plugin? Instance { get; private set; }
-    public override string Name => "Seeing Stone YouTube Rooms";
+    public override string Name => "Seeing Stone Player Features";
     public override Guid Id => Guid.Parse("ba1e7220-03eb-4f16-86a8-6dff57b896bf");
 }

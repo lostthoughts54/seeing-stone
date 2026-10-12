@@ -2,6 +2,17 @@
 param()
 
 $ErrorActionPreference = "Stop"
+
+function Get-Sha256([string]$LiteralPath) {
+  $stream = [IO.File]::OpenRead($LiteralPath)
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try {
+    return [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $hasher.Dispose()
+    $stream.Dispose()
+  }
+}
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $buildRoot = (Resolve-Path (Join-Path $root ".runtime\libmpv-build")).Path
 $prefixBin = Join-Path $buildRoot "prefix\bin"
@@ -84,7 +95,7 @@ foreach ($symbol in $requiredSymbols) {
   if ($exports -notmatch "(?m)\b$([regex]::Escape($symbol))$") { throw "LIBMPV_REQUIRED_SYMBOL_MISSING: $symbol" }
 }
 
-$sourceLockHash = (Get-FileHash -LiteralPath $sourceLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceLockHash = Get-Sha256 $sourceLockPath
 $artifacts = @(Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name | ForEach-Object {
   $role = if ($_.Name -eq $libraries[0].Name) { "library" }
     elseif ($_.Name -eq "mpv.exe") { "headless-media-probe" }
@@ -95,7 +106,7 @@ $artifacts = @(Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name | 
   [ordered]@{
     filename = $_.Name
     role = $role
-    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    sha256 = Get-Sha256 $_.FullName
     bytes = $_.Length
     owner = if ($packageOwners.ContainsKey($_.Name)) { $packageOwners[$_.Name] } elseif ($role -eq "ffmpeg-companion") { "FFmpeg 8.1.2" } elseif ($role -eq "native-addon") { "Seeing Stone $applicationVersion" } else { "mpv 0.41.0" }
   }

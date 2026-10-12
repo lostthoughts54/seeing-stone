@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "../src/main/services/errors";
 import { YouTubeRoomService } from "../src/main/services/youtubeRooms";
 
 const token = "A".repeat(43);
@@ -30,6 +31,8 @@ const openRooms = [{
   expiresAtUnixMs: 21_601_000,
 }] as const;
 
+const services: YouTubeRoomService[] = [];
+afterEach(() => { for (const service of services.splice(0)) service.deactivate(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function harness() {
   const youtubeRoomRequest = vi.fn(async (path: string, body?: unknown) => structuredClone(
     path === "/SeeingStone/YouTubeRooms" && body === undefined ? { protocolVersion: 3, roomLifetimeMinutes: 360 }
@@ -39,7 +42,8 @@ function harness() {
     getAuthenticatedContext: vi.fn(() => ({ userId: "user-1" })),
     youtubeRoomRequest,
   };
-  return { service: new YouTubeRoomService(api as never, 1000), youtubeRoomRequest };
+  const service = new YouTubeRoomService(api as never, 1000); services.push(service);
+  return { service, youtubeRoomRequest };
 }
 
 describe("YouTubeRoomService", () => {
@@ -96,6 +100,7 @@ describe("YouTubeRoomService", () => {
     expect(youtubeRoomRequest).toHaveBeenCalledWith(`/SeeingStone/YouTubeRooms/${token}/advance`, {
       clientId: expect.any(String),
       expectedVideoId: "dQw4w9WgXcQ",
+      expectedQueueItemId: "1".repeat(32),
     });
   });
 
@@ -127,5 +132,55 @@ describe("YouTubeRoomService", () => {
     const state = await service.refresh();
     expect(state.openRooms).toEqual(openRooms);
     expect(youtubeRoomRequest).toHaveBeenCalledWith("/SeeingStone/YouTubeRooms/open");
+  });
+
+  it("ignores an outstanding presence response after leaving", async () => {
+    const { service, youtubeRoomRequest } = harness(); await service.join(token);
+    let resolve!: (value: typeof room) => void;
+    youtubeRoomRequest.mockImplementationOnce(() => new Promise(r => { resolve = r as typeof resolve; }));
+    const pending = service.setPresence("playing");
+    await service.leave(); resolve(room); await pending;
+    expect(service.getState().room).toBeNull();
+  });
+
+  it("ignores a room creation completed after sign-out", async () => {
+    const { service, youtubeRoomRequest } = harness();
+    let resolve!: (value: typeof room) => void;
+    youtubeRoomRequest.mockImplementationOnce(() => new Promise(r => { resolve = r as typeof resolve; }));
+    const pending = service.create("Night", "https://youtu.be/dQw4w9WgXcQ");
+    service.deactivate(); resolve(room); await pending;
+    expect(service.getState()).toMatchObject({ connection: "signed-out", room: null });
+  });
+
+  it("does not overwrite a newer timeline with a slower old response", async () => {
+    const { service, youtubeRoomRequest } = harness(); await service.join(token);
+    let resolve!: (value: typeof room) => void;
+    youtubeRoomRequest.mockImplementationOnce(() => new Promise(r => { resolve = r as typeof resolve; }));
+    const pending = service.setPresence("paused");
+    youtubeRoomRequest.mockResolvedValueOnce({ ...room, timeline: { ...room.timeline, version: 2, positionSeconds: 55 } } as never);
+    await service.action({ action: "seek", positionSeconds: 55 }); resolve(room); await pending;
+    expect(service.getState().room?.timeline.positionSeconds).toBe(55);
+  });
+
+  it("keeps presence alive with the room view hidden", async () => {
+    vi.useFakeTimers(); const { service, youtubeRoomRequest } = harness(); await service.join(token);
+    service.setVisible(false); youtubeRoomRequest.mockClear();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(youtubeRoomRequest).toHaveBeenCalledWith(expect.stringContaining("/presence"), expect.any(Object));
+  });
+
+  it("distinguishes an expired room from a missing plugin", async () => {
+    const { service, youtubeRoomRequest } = harness(); await service.join(token);
+    youtubeRoomRequest.mockRejectedValueOnce(new AppError("NOT_FOUND", "Missing", 404));
+    await service.refresh();
+    expect(service.getState()).toMatchObject({ connection: "connected", room: null, error: { code: "YOUTUBE_ROOM_EXPIRED" } });
+  });
+
+  it("estimates the room clock at the round-trip midpoint", async () => {
+    const { service, youtubeRoomRequest } = harness();
+    vi.spyOn(Date, "now").mockReturnValueOnce(5000).mockReturnValue(5200);
+    youtubeRoomRequest.mockResolvedValueOnce(structuredClone(room));
+    const state = await service.join(token);
+    expect(state.room?.timeline.anchoredAtUnixMs).toBe(5100);
   });
 });

@@ -30,8 +30,26 @@ import type { MpvVideoHost } from "./embeddedVideoHost";
 const TICKS_PER_SECOND = 10_000_000;
 const NEXT_EPISODE_COUNTDOWN_SECONDS = 10;
 const VIDEO_OUTPUT_TIMEOUT_MS = 5000;
+const WATCH_PARTY_STARTUP_TIMEOUT_MS = 30_000;
+const LIVE_TV_STARTUP_TIMEOUT_MS = 25_000;
 
 type MpvRenderProfile = "legacy" | "d3d11" | "opengl-software" | "libmpv-opengl-angle";
+
+export function libMpvStartupTimeoutMilliseconds(
+  contentKind: ResolvedPlaybackSource["contentKind"],
+  origin: PlayerCommandContext["origin"],
+): number | undefined {
+  if (origin === "remote-sync") return WATCH_PARTY_STARTUP_TIMEOUT_MS;
+  if (contentKind === "live-tv") return LIVE_TV_STARTUP_TIMEOUT_MS;
+  return undefined;
+}
+
+export function shouldStartPlaybackPaused(
+  sourceKind: ResolvedPlaybackSource["sourceKind"],
+  origin: PlayerCommandContext["origin"],
+): boolean {
+  return sourceKind === "downloading" || origin === "remote-sync";
+}
 
 export function embeddedRenderProfileArgs(profile: "d3d11" | "opengl-software"): string[] {
   return profile === "d3d11"
@@ -171,6 +189,8 @@ export class MpvPlayerService implements PlayerController {
   private stalledTimer: ReturnType<typeof setTimeout> | null = null;
   private reportingActive = false;
   private stopping = false;
+  private stoppingPromise: Promise<PlaybackState> | null = null;
+  private loadRequestRevision = 0;
   private playbackRevision = 0;
   private endHandlingRevision: number | null = null;
   private replacingFile = false;
@@ -223,7 +243,10 @@ export class MpvPlayerService implements PlayerController {
   }
 
   getState(): PlaybackState {
-    return structuredClone(this.state);
+    return structuredClone({
+      ...this.state,
+      seeking: Boolean(this.state.seeking || (this.pendingSeek && performance.now() <= this.pendingSeek.expiresAt)),
+    });
   }
 
   getControllerRevision(): number {
@@ -272,6 +295,7 @@ export class MpvPlayerService implements PlayerController {
       throw new AppError("INVALID_PLAYBACK_VOLUME", "Playback volume must be between 0 and 100.", 422);
     }
     await this.command(["set_property", "volume", volume]);
+    this.assertPlayback(playbackId);
     this.update({ ...this.state, volume }, "volume", context);
     return this.getState();
   }
@@ -289,17 +313,21 @@ export class MpvPlayerService implements PlayerController {
     resumeMode: "resume" | "start-over",
     context: PlayerCommandContext = { origin: "local-user" },
   ): Promise<PlaybackStartResult> {
-    if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
+    const requestRevision = ++this.loadRequestRevision;
+    if (this.source) await this.stopPlayback(this.source.playbackId, "stopped", { origin: "system" });
+    if (requestRevision !== this.loadRequestRevision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     const revision = ++this.playbackRevision;
     const preferences = await this.preferences.get().catch(() => ({ windowMaximized: true }));
+    if (revision !== this.playbackRevision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
     this.windowMaximized = preferences.windowMaximized;
     this.update(emptyState({ itemId, phase: "resolving" }));
     let source: ResolvedPlaybackSource;
     try {
       source = await this.playback.start(itemId, resumeMode, {
+        iptvIdentity: context.iptvIdentity,
         skipProgressive: context.origin === "remote-sync",
         requireProgressive: context.requireProgressive === true,
-        preferredMediaSourceId: context.origin === "remote-sync" ? undefined : context.preferredMediaSourceId,
+        preferredMediaSourceId: context.preferredMediaSourceId,
       });
     } catch (error) {
       if (revision === this.playbackRevision) {
@@ -313,17 +341,21 @@ export class MpvPlayerService implements PlayerController {
       this.adoptResolvedSource(source, itemId);
       try {
         const playbackTargets = await this.openPlaybackTarget(source);
+        if (!this.isCurrent(revision, source)) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
         this.playbackTarget = playbackTargets;
         const progressive = source.sourceKind === "downloading" && Boolean(source.progressiveLease);
+        const startPaused = shouldStartPlaybackPaused(source.sourceKind, context.origin);
         await this.launchProcess(
           playbackTargets,
           progressive ? 0 : source.usesServerTimelineOffset ? 0 : source.resumePositionTicks,
-          progressive,
+          startPaused,
           this.windowMaximized,
+          libMpvStartupTimeoutMilliseconds(source.contentKind, context.origin),
         );
         if (progressive) await this.finishProgressiveStartup(source);
         break;
       } catch (error) {
+        if (revision !== this.playbackRevision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
         if (source.source !== "local") {
           await this.failAndClean(error);
           throw error;
@@ -332,14 +364,18 @@ export class MpvPlayerService implements PlayerController {
         if (source.sourceKind === "downloading") {
           source.progressiveLease?.endMetadataAllowance();
           const decision = await this.progressiveFallbackDecider("open-failed");
+          if (revision !== this.playbackRevision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
           if (decision !== "stream") {
             try { this.playback.stop(source.playbackId); } catch { /* Already cleared. */ }
-            throw new AppError("PROGRESSIVE_PLAYBACK_WAITING", "Playback will be available when more of the download is ready.", 409);
+            const waiting = new AppError("PROGRESSIVE_PLAYBACK_WAITING", "Playback will be available when more of the download is ready.", 409);
+            await this.failAndClean(waiting);
+            throw waiting;
           }
         }
         try {
           source = await this.playback.retryAfterLocalFailure(source.playbackId, resumeMode);
         } catch (fallbackError) {
+          if (revision !== this.playbackRevision) throw new AppError("PLAYBACK_CANCELLED", "Playback was cancelled.");
           this.source = null;
           await this.failAndClean(fallbackError);
           throw fallbackError;
@@ -377,6 +413,7 @@ export class MpvPlayerService implements PlayerController {
     this.assertPlayback(playbackId);
     this.pendingPause = { paused, expiresAt: performance.now() + 3000 };
     await this.command(["set_property", "pause", paused]);
+    this.assertPlayback(playbackId);
     this.update({
       ...this.state,
       paused,
@@ -403,15 +440,46 @@ export class MpvPlayerService implements PlayerController {
       try {
         await this.command(["seek", bounded / TICKS_PER_SECOND, "absolute+exact"]);
       } catch {
+        this.assertPlayback(playbackId);
         try {
           await this.command(["seek", bounded / TICKS_PER_SECOND, "absolute"]);
         } catch {
+          this.assertPlayback(playbackId);
           await this.restartAt(bounded);
         }
       }
     }
+    this.assertPlayback(playbackId);
     this.update({ ...this.state, positionTicks: bounded }, "seek", context);
     await this.report("progress", undefined, context.origin === "local-user" ? "explicit" : "automatic");
+    return this.getState();
+  }
+
+  async adjustLocalTimeline(
+    playbackId: string,
+    deltaTicks: number,
+    context: PlayerCommandContext = { origin: "remote-sync" },
+  ): Promise<PlaybackState> {
+    this.assertPlayback(playbackId);
+    if (!Number.isSafeInteger(deltaTicks) || Math.abs(deltaTicks) > 20 * TICKS_PER_SECOND) {
+      throw new AppError("INVALID_LOCAL_TIMING_ADJUSTMENT", "The local timing adjustment is invalid.", 422);
+    }
+    if (deltaTicks === 0) return this.getState();
+    const targetTicks = Math.max(0, Math.min(
+      this.state.durationTicks || Number.MAX_SAFE_INTEGER,
+      this.state.positionTicks + deltaTicks,
+    ));
+    const appliedTicks = targetTicks - this.state.positionTicks;
+    if (appliedTicks === 0) return this.getState();
+    try {
+      await this.command(["seek", appliedTicks / TICKS_PER_SECOND, "relative+exact"]);
+    } catch {
+      this.assertPlayback(playbackId);
+      await this.command(["seek", appliedTicks / TICKS_PER_SECOND, "relative"]);
+    }
+    this.assertPlayback(playbackId);
+    this.pendingSeek = { positionTicks: targetTicks, expiresAt: performance.now() + 5000 };
+    this.update({ ...this.state, positionTicks: targetTicks }, "seek", context);
     return this.getState();
   }
 
@@ -428,6 +496,7 @@ export class MpvPlayerService implements PlayerController {
       throw new AppError("INVALID_PLAYBACK_RATE", "That playback rate is outside the supported range.", 422);
     }
     await this.command(["set_property", "speed", rate]);
+    this.assertPlayback(playbackId);
     this.playbackRate = rate;
     this.update({ ...this.state, diagnostics: { ...this.state.diagnostics!, playbackRate: rate } }, "rate", context);
     return this.getState();
@@ -437,15 +506,23 @@ export class MpvPlayerService implements PlayerController {
     this.assertPlayback(playbackId);
     if (trackId !== null && !this.state.audioTracks.some((track) => track.id === trackId)) throw new AppError("INVALID_TRACK", "That audio track is unavailable.", 422);
     await this.command(["set_property", "aid", trackId ?? "no"]);
+    this.assertPlayback(playbackId);
     this.update({ ...this.state, audioTracks: this.state.audioTracks.map((track) => ({ ...track, selected: trackId !== null && track.id === trackId })) }, "tracks");
     await this.report("progress");
     return this.getState();
+  }
+
+  async setSubtitleDelay(playbackId: string, seconds: number): Promise<void> {
+    this.assertPlayback(playbackId);
+    if (!Number.isFinite(seconds) || Math.abs(seconds) > 120) throw new AppError("INVALID_SUBTITLE_DELAY", "Subtitle timing must be within two minutes.", 400);
+    await this.command(["set_property", "sub-delay", seconds]);
   }
 
   async selectSubtitle(playbackId: string, trackId: number | null): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
     if (trackId !== null && !this.state.subtitleTracks.some((track) => track.id === trackId)) throw new AppError("INVALID_TRACK", "That subtitle track is unavailable.", 422);
     await this.command(["set_property", "sid", trackId ?? "no"]);
+    this.assertPlayback(playbackId);
     this.update({ ...this.state, subtitleTracks: this.state.subtitleTracks.map((track) => ({ ...track, selected: trackId !== null && track.id === trackId })) }, "tracks");
     await this.report("progress");
     return this.getState();
@@ -470,6 +547,7 @@ export class MpvPlayerService implements PlayerController {
       this.videoHost?.setFullscreen(fullscreen);
     }
     else await this.command(["set_property", "fullscreen", fullscreen]);
+    this.assertPlayback(playbackId);
     this.update({ ...this.state, fullscreen }, "fullscreen", context);
     return this.getState();
   }
@@ -529,7 +607,30 @@ export class MpvPlayerService implements PlayerController {
     context: PlayerCommandContext = { origin: "local-user" },
   ): Promise<PlaybackState> {
     this.assertPlayback(playbackId);
-    if (this.stopping) return this.getState();
+    this.loadRequestRevision += 1;
+    return this.stopPlayback(playbackId, phase, context);
+  }
+
+  private async stopPlayback(
+    playbackId: string,
+    phase: "stopped" | "ended",
+    context: PlayerCommandContext,
+  ): Promise<PlaybackState> {
+    if (this.stoppingPromise) return this.stoppingPromise;
+    const pending = this.finishStop(playbackId, phase, context);
+    this.stoppingPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.stoppingPromise === pending) this.stoppingPromise = null;
+    }
+  }
+
+  private async finishStop(
+    playbackId: string,
+    phase: "stopped" | "ended",
+    context: PlayerCommandContext,
+  ): Promise<PlaybackState> {
     this.resolveAutomaticTransition("cancel");
     this.playbackRevision += 1;
     this.endHandlingRevision = null;
@@ -580,8 +681,9 @@ export class MpvPlayerService implements PlayerController {
   }
 
   async clear(): Promise<void> {
+    this.loadRequestRevision += 1;
     this.resolveAutomaticTransition("cancel");
-    if (this.source) await this.stop(this.source.playbackId, "stopped", { origin: "system" });
+    if (this.source) await this.stopPlayback(this.source.playbackId, "stopped", { origin: "system" });
     else {
       this.playbackRevision += 1;
       this.exitIntegratedFullscreen();
@@ -666,6 +768,7 @@ export class MpvPlayerService implements PlayerController {
       volume: retained.volume ?? 100,
       fullscreen: retained.fullscreen ?? false,
       contentKind: source.contentKind ?? "on-demand",
+      iptvIdentity: source.iptvIdentity,
     }), action, context);
     if (source.progressiveLease) {
       this.removeProgressiveListener = source.progressiveLease.onEvent((event) => {
@@ -725,9 +828,15 @@ export class MpvPlayerService implements PlayerController {
     return new MpvIpcClient();
   }
 
-  private async launchProcess(playbackTargets: PlaybackTargets, positionTicks: number, paused: boolean, windowMaximized: boolean): Promise<void> {
+  private async launchProcess(
+    playbackTargets: PlaybackTargets,
+    positionTicks: number,
+    paused: boolean,
+    windowMaximized: boolean,
+    startupTimeoutMilliseconds?: number,
+  ): Promise<void> {
     if (this.libMpvHost) {
-      await this.launchLibMpvAttempt(playbackTargets, positionTicks, paused);
+      await this.launchLibMpvAttempt(playbackTargets, positionTicks, paused, startupTimeoutMilliseconds);
       return;
     }
     if (!this.videoHost) {
@@ -769,6 +878,7 @@ export class MpvPlayerService implements PlayerController {
     playbackTargets: PlaybackTargets,
     positionTicks: number,
     paused: boolean,
+    startupTimeoutMilliseconds?: number,
   ): Promise<void> {
     if (!this.libMpvHost) throw new AppError("LIBMPV_UNAVAILABLE", "The experimental player is unavailable.", 503);
     this.eofArmed = false;
@@ -777,7 +887,8 @@ export class MpvPlayerService implements PlayerController {
     this.activeRenderProfile = "libmpv-opengl-angle";
     const session = await this.libMpvHost.open({
       location: playbackTargets.media,
-      ...(this.source?.contentKind === "live-tv" ? { startupTimeoutMilliseconds: 25_000 } : {}),
+      initialPaused: paused,
+      ...(startupTimeoutMilliseconds === undefined ? {} : { startupTimeoutMilliseconds }),
     }, positionTicks);
     const ipc = new LibMpvCommandClient(session, (listener) => this.libMpvHost!.onEvent(listener));
     this.ipc = ipc;
@@ -801,7 +912,10 @@ export class MpvPlayerService implements PlayerController {
         ipc.observe(15, "hwdec-current"),
         ipc.observe(16, "vo-configured"),
         ipc.observe(17, "seeing-stone-frame-stats"),
+        ipc.observe(20, "container-fps"),
+        ipc.observe(21, "estimated-vf-fps"),
         ipc.observe(18, "demuxer-cache-state"),
+        ipc.observe(19, "seeking"),
       ]);
       if (paused) await ipc.command(["set_property", "pause", true]);
       const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
@@ -914,6 +1028,9 @@ export class MpvPlayerService implements PlayerController {
         ipc.observe(15, "hwdec-current"),
         ipc.observe(16, "vo-configured"),
         ipc.observe(18, "demuxer-cache-state"),
+        ipc.observe(20, "container-fps"),
+        ipc.observe(21, "estimated-vf-fps"),
+        ipc.observe(19, "seeking"),
       ]);
       const authoritativePosition = await this.waitForPropertyNumber(ipc, "time-pos");
       const rawPositionTicks = Math.max(0, Math.round(authoritativePosition * TICKS_PER_SECOND));
@@ -1532,6 +1649,7 @@ export class MpvPlayerService implements PlayerController {
         else this.clearStalledTimer();
       }
     }
+    if (message.name === "seeking" && typeof message.data === "boolean") next.seeking = message.data;
     if (message.name === "seekable" && typeof message.data === "boolean") {
       next.seekable = this.source?.usesServerTimelineOffset ? true : message.data;
     }
@@ -1567,6 +1685,14 @@ export class MpvPlayerService implements PlayerController {
     }
     if (this.activeRenderProfile !== "legacy" && message.name === "vo-configured" && typeof message.data === "boolean") {
       next.diagnostics = { ...next.diagnostics!, videoOutputHealthy: message.data };
+    }
+    if (message.name === "video-format" && typeof message.data === "string") {
+      next.diagnostics = { ...next.diagnostics!, videoCodec: message.data.slice(0, 128) };
+    }
+    if (message.name === "container-fps" || message.name === "estimated-vf-fps") {
+      const fps = typeof message.data === "number" && Number.isFinite(message.data) && message.data > 0
+        ? Math.round(message.data * 100) / 100 : null;
+      next.diagnostics = { ...next.diagnostics!, [message.name === "container-fps" ? "sourceFps" : "estimatedFps"]: fps };
     }
     if (this.activeRenderProfile !== "legacy" && message.name === "hwdec-current") {
       next.diagnostics = {
@@ -1705,6 +1831,7 @@ export class MpvPlayerService implements PlayerController {
       conflictPolicy: conflictPolicy
         ?? (resolvedActionKind !== "progress" ? "explicit" : "automatic"),
       contentKind: source.contentKind,
+      iptvIdentity: source.iptvIdentity,
       liveStreamId: source.liveStreamId,
     });
   }
