@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "result": "waived",
-  "release": "0.7.1",
-  "packagedArtifactSha256": "7bf83b0e416cbd6ecbd2d5c2728350b2bb570610e936eae4bbfaf52e5361a967",
-  "inventorySha256": "fab834a008565395254312a72d4e4c4f5d7a41024d7881a28ca7251179f848f4",
-  "correspondingSourceSha256": "7203a0893a82487f645b6923711d73d3ccb0de298139075fffdc98f23d4a44fa",
-  "waiverReason": "The release owner previously installed and field-tested this build and elected to waive the separate clean-machine install/playback/uninstall acceptance requirement for release 0.7.1.",
+  "release": "0.7.4",
+  "packagedArtifactSha256": "9b09a44eef2e0c8c09e4a166e48f2da0e1dce7ee962c7e05e20beb16550bb788",
+  "inventorySha256": "664dd2f88cfe351def46a9d8bca9b0ac91c634cb0f17f350bf43256fb377fa18",
+  "correspondingSourceSha256": "eb74df6752772476a71c0e460e4ece9f9ef4ee99787c7254dbe39e7789875a34",
+  "waiverReason": "The release owner elects to publish the prepared 0.7.4 artifacts and perform testing after publication instead of completing the separate clean-machine install/playback/uninstall gate first.",
   "authorizedBy": "release owner",
-  "authorization": "Explicit user instruction on 2026-08-15: waive that policy for this release.",
-  "waivedAtUtc": "2026-08-15T11:31:06.6516351Z"
+  "authorization": "Explicit user instruction on 2026-10-18: just go ahead. ill check it and fix it if there is an issue, this is how im testing it",
+  "waivedAtUtc": "2026-10-18T20:35:32.252Z"
 }
