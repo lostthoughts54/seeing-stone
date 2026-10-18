@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { NsisUpdater } from "electron-updater";
+import { readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -71,7 +72,8 @@ import {
   probeControlledLibMpvRuntime,
 } from "./services/cleanMachineDiagnostics";
 import { UnavailablePlayerController } from "./services/unavailablePlayerController";
-import { UpdateChecker } from "./services/updateChecker";
+import { UpdateChecker, updateUnavailableReason } from "./services/updateChecker";
+import { getUpdateSessionActivity } from "./services/updateSessionActivity";
 import { YouTubeRoomService } from "./services/youtubeRooms";
 import { CompanionYouTubeService } from "./services/companionYouTube";
 import { YouTubeApiKeyStore } from "./services/youtubeApiKeyStore";
@@ -105,13 +107,16 @@ let activeYouTubeRooms: YouTubeRoomService | null = null;
 let activePlayerFeatures: PlayerFeaturesService | null = null;
 let activeIptv: IptvService | null = null;
 let persistenceClosing = false;
+let shutdownPromise: Promise<void> | null = null;
+let shuttingDown = false;
+let activeUpdates: UpdateChecker | null = null;
 const ownsSingleInstance = app.requestSingleInstanceLock();
 
 if (!ownsSingleInstance) app.quit();
 
-app.on("before-quit", (event) => {
-  if (!persistence || persistenceClosing) return;
-  event.preventDefault();
+function shutdownApplication(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
   const activePersistence = persistence;
   const activeDownloads = downloadManager;
   const activeSynchronization = offlineSynchronization;
@@ -121,6 +126,7 @@ app.on("before-quit", (event) => {
   const companion = activeCompanion;
   const smartDownloads = activeSmartDownloads;
   const youtubeRooms = activeYouTubeRooms;
+  const playerFeatures = activePlayerFeatures;
   persistence = null;
   downloadManager = null;
   offlineSynchronization = null;
@@ -130,22 +136,29 @@ app.on("before-quit", (event) => {
   activeCompanion = null;
   activeSmartDownloads = null;
   activeYouTubeRooms = null;
-  youtubeRooms?.deactivate();
-  activePlayerFeatures?.deactivate();
   activePlayerFeatures = null;
+  const stopYouTube = (youtubeRooms?.getState().room ? youtubeRooms.leave().catch(() => undefined) : Promise.resolve()).finally(() => youtubeRooms?.deactivate());
+  const stopFeatures = (playerFeatures?.isJoined() ? playerFeatures.command({ operation: "leave" }).catch(() => undefined) : Promise.resolve()).finally(() => playerFeatures?.deactivate());
   const stopDownloads = (smartDownloads ? smartDownloads.shutdown().catch(() => undefined) : Promise.resolve())
     .then(() => activeDownloads ? activeDownloads.shutdown().catch(() => undefined) : undefined);
-  const stopSynchronization = activeSynchronization ? activeSynchronization.shutdown().catch(() => undefined) : Promise.resolve();
   const stopSyncPlay = syncPlay ? syncPlay.deactivate().catch(() => undefined) : Promise.resolve();
-  const stopPlayback = playback ? playback.clear().catch(() => undefined) : Promise.resolve();
+  const stopPlayback = Promise.all([stopSyncPlay, stopFeatures]).then(() => playback?.clear().catch(() => undefined));
+  const stopSynchronization = stopPlayback.then(() => activeSynchronization?.shutdown().catch(() => undefined));
   const stopCompanion = companion ? companion.shutdown().catch(() => undefined) : Promise.resolve();
   const stopIptv = activeIptv?.shutdown().catch(() => undefined);
-  void Promise.all([stopDownloads, stopSynchronization, stopSyncPlay, stopPlayback, stopCompanion, stopIptv]).then(() => activePersistence.close()).finally(() => {
+  shutdownPromise = Promise.all([stopDownloads, stopSynchronization, stopYouTube, stopCompanion, stopIptv]).then(() => activePersistence?.close()).finally(() => {
     videoHost?.destroy();
     persistenceClosing = true;
-    app.quit();
   });
+  return shutdownPromise;
+}
+
+app.on("before-quit", (event) => {
+  if (persistenceClosing) return;
+  event.preventDefault();
+  void shutdownApplication().catch(() => logger.warn("Application cleanup failed.")).finally(() => app.quit());
 });
+app.on("will-quit", () => activeUpdates?.dispose());
 
 app.on("second-instance", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -422,23 +435,34 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
       return { completed: true };
     },
   };
-  const updateChecker = new UpdateChecker(app.getVersion(), logger);
-  let latestUpdatePageUrl: string | null = null;
-  const updateController = {
-    check: async (source: "automatic" | "manual") => {
-      const status = await updateChecker.check(source);
-      latestUpdatePageUrl = status.releasePageUrl;
-      return status;
+  let installed = false;
+  try {
+    installed = (await readFile(join(process.resourcesPath, "seeing-stone-install-type"), "utf8")).trim() === "nsis"
+      && existsSync(join(dirname(process.execPath), "Uninstall Seeing Stone.exe"));
+  } catch { /* Unpacked and portable builds have no installer-owned marker. */ }
+  const unavailableReason = updateUnavailableReason({
+    packaged: app.isPackaged, platform: process.platform, arch: process.arch, internal: internalLibMpvAcceptanceBuild,
+    installed, feed: existsSync(join(process.resourcesPath, "app-update.yml")),
+  });
+  const updateController = new UpdateChecker({
+    appName: app.isPackaged ? app.getName() : "Seeing Stone", currentVersion: app.getVersion(), unavailableReason,
+    updater: unavailableReason ? null : new NsisUpdater(), logger,
+    activity: () => getUpdateSessionActivity(playback.getState(), activeSyncPlay?.getState(), activeYouTubeRooms?.getState(), activePlayerFeatures?.getState()),
+    confirmRestart: async () => {
+      if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return false;
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "warning", title: "Restart & Update", message: "End this session and install the update?",
+        detail: "Restarting Seeing Stone will stop playback and leave your active watch party. Cancel keeps your session and downloaded update available.",
+        buttons: ["Cancel", "Restart & Update"], defaultId: 0, cancelId: 0, noLink: true,
+      });
+      return result.response === 1 && !shuttingDown;
     },
-    open: async () => {
-      const page = latestUpdatePageUrl;
-      if (!page) return { opened: false };
-      const url = new URL(page);
-      if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/lostthoughts54/seeing-stone/releases/tag/")) return { opened: false };
-      await shell.openExternal(url.toString());
-      return { opened: true };
-    },
-  };
+    shutdown: shutdownApplication,
+  });
+  activeUpdates = updateController;
+  updateController.onState((status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.updatesChanged, status);
+  });
   activePlayback = playback;
   activeSmartDownloads = new SmartDownloadService(
     api,
@@ -452,6 +476,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   });
   let previousPlaybackItemId = playback.getState().itemId;
   playback.onState((state) => {
+    updateController.activityChanged();
     playbackMetadata.setPlaybackState(state);
     trickplay.setPlaybackState(state);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.playbackStateChanged, state);
@@ -469,6 +494,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   activePlayerFeatures = new PlayerFeaturesService(api, playback, downloadManager, () => Boolean(activeSyncPlay?.isJoined() || activeYouTubeRooms?.getState().room));
   playbackCommands.setPlayerFeatures(activePlayerFeatures);
   activePlayerFeatures.onState((state) => {
+    updateController.activityChanged();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(featureIpc.changed, state);
   });
   playbackCommands.setSyncPlay(activeSyncPlay);
@@ -504,10 +530,12 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.companionChanged, state);
   });
   activeSyncPlay.onState((state) => {
+    updateController.activityChanged();
     companionState.notifyWatchPartyChange();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.watchPartiesChanged, state);
   });
   activeYouTubeRooms.onState((state) => {
+    updateController.activityChanged();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.youtubeRoomsChanged, state);
   });
   const downloadLocationController = {
@@ -567,6 +595,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
     activeYouTubeRooms,
     activePlayerFeatures,
     activeIptv,
+    () => shuttingDown,
   );
   await mainWindow.loadURL(APP_URL);
   if (process.argv.includes("--open-iptv") || process.argv.includes("--iptv-beta")) {
@@ -577,11 +606,7 @@ if (ownsSingleInstance) app.whenReady().then(async () => {
   // make the primary window visible as a reliable fallback.
   if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
   // Update discovery starts after the renderer has loaded and never affects startup.
-  setTimeout(() => {
-    void updateController.check("automatic").then((status) => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.updatesChanged, status);
-    });
-  }, 1500);
+  updateController.start();
 }).catch((error) => {
   logger.error("Application startup failed.", error);
   app.quit();

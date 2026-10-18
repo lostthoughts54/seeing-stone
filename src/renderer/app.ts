@@ -1,3 +1,4 @@
+import { mountUpdates } from "./updates";
 import { mountPlayerFeatures } from "./playerFeatures";
 import { mountIptv } from "./iptv";
 import { mountIptvMiniGuide } from "./iptvMiniGuide";
@@ -39,7 +40,6 @@ import type {
   YouTubeRoomPlaybackStatus,
   YouTubeRoomViewState,
   TrickplayManifest,
-  UpdateCheckStatus,
 } from "../shared/contracts";
 import type { CompanionSettingsState } from "../shared/companionContracts";
 import { BRANDING } from "../shared/branding";
@@ -142,15 +142,6 @@ const downloadsButton = byId<HTMLButtonElement>("downloadsButton");
 const refreshLibrariesButton = byId<HTMLButtonElement>("refreshLibrariesButton");
 const refreshButton = byId<HTMLButtonElement>("refreshButton");
 const logoutButton = byId<HTMLButtonElement>("logoutButton");
-const checkForUpdatesButton = byId<HTMLButtonElement>("checkForUpdatesButton");
-const updateCheckStatus = byId<HTMLElement>("updateCheckStatus");
-const profileVersionLabel = byId<HTMLElement>("profileVersionLabel");
-const applicationVersionLabel = byId<HTMLElement>("applicationVersionLabel");
-const updateBanner = byId<HTMLElement>("updateBanner");
-const updateBannerText = byId<HTMLElement>("updateBannerText");
-const viewUpdateButton = byId<HTMLButtonElement>("viewUpdateButton");
-const dismissUpdateButton = byId<HTMLButtonElement>("dismissUpdateButton");
-
 const contentScroller = byId<HTMLElement>("contentScroller");
 const homeView = byId<HTMLElement>("homeView");
 const libraryView = byId<HTMLElement>("libraryView");
@@ -4721,41 +4712,6 @@ function openDownloads(): void {
   void refreshDownloads().catch((error) => showToast(errorMessage(error, "Downloads could not be refreshed.")));
 }
 
-function updateLabel(status: UpdateCheckStatus): string {
-  return status.releaseName || status.latestVersion || "A new Seeing Stone version";
-}
-
-function renderApplicationVersion(status: UpdateCheckStatus): void {
-  profileVersionLabel.textContent = `Seeing Stone ${status.currentVersion}`;
-  applicationVersionLabel.textContent = `Version ${status.currentVersion}`;
-}
-
-function showAvailableUpdate(status: UpdateCheckStatus): void {
-  if (!status.isUpdateAvailable) return;
-  updateBannerText.textContent = `${updateLabel(status)} is available`;
-  updateBanner.classList.remove("is-hidden");
-  viewUpdateButton.onclick = () => { void window.jellyfin.updates.open().catch(() => showToast("The update page could not be opened.")); };
-}
-
-async function checkForUpdates(): Promise<void> {
-  checkForUpdatesButton.disabled = true;
-  updateCheckStatus.textContent = "Checking for updates…";
-  try {
-    const status = await window.jellyfin.updates.check();
-    renderApplicationVersion(status);
-    if (status.status === "available") {
-      updateCheckStatus.textContent = `${updateLabel(status)} is available.`;
-      showAvailableUpdate(status);
-    } else if (status.status === "current") {
-      updateCheckStatus.textContent = "✓ You're running the latest version.";
-    } else {
-      updateCheckStatus.textContent = status.error || "Couldn't check for updates. Check your internet connection and try again.";
-    }
-  } catch {
-    updateCheckStatus.textContent = "Couldn't check for updates. Check your internet connection and try again.";
-  } finally { checkForUpdatesButton.disabled = false; }
-}
-
 function renderCompanion(status: CompanionSettingsState): void {
   renderCompanionNavStatus(status);
   companionEnabled.checked = status.enabled;
@@ -7560,8 +7516,6 @@ deleteWatchedDownloadsButton.addEventListener("click", () => { void window.jelly
   const result = await window.jellyfin.downloads.deleteWatched(); await refreshDownloads();
   showToast(result.failed ? `Deleted ${result.affected} downloads; ${result.failed} could not be removed.` : `Deleted ${result.affected} watched downloads.`);
 }).catch((error) => showToast(errorMessage(error, "Watched downloads could not be deleted."))); });
-checkForUpdatesButton.addEventListener("click", () => { void checkForUpdates(); });
-dismissUpdateButton.addEventListener("click", () => updateBanner.classList.add("is-hidden"));
 checkSmartDownloadsButton.addEventListener("click", () => { void checkSmartDownloads(); });
 closeCompanionButton.addEventListener("click", closeCompanion);
 const youtubeSettings = mountYouTubeSettings(window.jellyfin.companion);
@@ -7996,11 +7950,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-window.jellyfin.updates.subscribe((status) => {
-  renderApplicationVersion(status);
-  // Automatic failures are deliberately silent; only an available update gets UI.
-  if (status.source === "automatic" && status.status === "available") showAvailableUpdate(status);
-});
+const unmountUpdates = mountUpdates(window.jellyfin.updates);
+window.addEventListener("beforeunload", unmountUpdates, { once: true });
 
 window.jellyfin.downloads.subscribe((downloads) => {
   const completedBefore = new Set(state.downloads

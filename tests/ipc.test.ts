@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerIpcHandlers } from "../src/main/ipc";
+import { registerIpcHandlers, type UpdateCheckerController } from "../src/main/ipc";
 import { IPC } from "../src/shared/contracts";
 import { IPTV_IPC } from "../src/shared/iptv";
 
 type RegisteredHandler = (event: unknown, input?: unknown) => Promise<unknown>;
 
-function createHarness(options: { playerPreferences?: { get: () => Promise<{ adapterMode?: "legacy" | "embedded" | "libmpv" }>; setAdapterMode: (mode: "legacy" | "embedded" | "libmpv") => Promise<void> | void }; adapterSelectionAvailable?: boolean } = {}) {
+function createHarness(options: { updates?: UpdateCheckerController; isShuttingDown?: () => boolean; playerPreferences?: { get: () => Promise<{ adapterMode?: "legacy" | "embedded" | "libmpv" }>; setAdapterMode: (mode: "legacy" | "embedded" | "libmpv") => Promise<void> | void }; adapterSelectionAvailable?: boolean } = {}) {
   const handlers = new Map<string, RegisteredHandler>();
   const frame = { url: "app://bundle/index.html" };
   const webContents = {
@@ -167,15 +167,34 @@ function createHarness(options: { playerPreferences?: { get: () => Promise<{ ada
     playbackMetadata as never,
     trickplay as never,
     options.adapterSelectionAvailable,
-    undefined,
+    options.updates,
     undefined,
     playerFeatures as never,
+    undefined,
+    options.isShuttingDown,
   );
   const validEvent = { sender: webContents, senderFrame: frame };
   return { handlers, frame, webContents, window, api, artwork, playback, downloads, synchronization, downloadLocation, syncPlay, cleanMachineDiagnostics, trailerWindow, smartDownloads, playbackMetadata, trickplay, playerFeatures, login, getSafeSession, validEvent };
 }
 
 describe("IPC authorization and allowlist", () => {
+  it("restricts every updater action to the main app frame and rejects arbitrary inputs", async () => {
+    const updates = { getState: vi.fn(), check: vi.fn(), install: vi.fn(), defer: vi.fn() };
+    const { handlers, validEvent } = createHarness({ updates });
+    for (const [channel, method] of [[IPC.updatesGetState, "getState"], [IPC.updatesCheck, "check"], [IPC.updatesInstall, "install"], [IPC.updatesDefer, "defer"]] as const) {
+      const handler = handlers.get(channel)!;
+      for (const event of [{ ...validEvent, sender: {} }, { ...validEvent, senderFrame: { url: "app://bundle/index.html" } }, { ...validEvent, senderFrame: { url: "https://foreign.test" } }]) expect(await handler(event)).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED_IPC" } });
+      for (const input of [{ url: "https://evil.test" }, { confirmed: true }, { method: "quitAndInstall" }, "check"]) expect(await handler(validEvent, input)).toMatchObject({ ok: false });
+      expect(updates[method]).not.toHaveBeenCalled();
+      expect(await handler(validEvent)).toMatchObject({ ok: true });
+      expect(updates[method]).toHaveBeenCalledOnce();
+    }
+  });
+  it("blocks new player/session requests after restart cleanup begins", async () => {
+    const { handlers, validEvent, playback } = createHarness({ isShuttingDown: () => true });
+    expect(await handlers.get(IPC.playbackStart)!(validEvent, { itemId: "movie" })).toMatchObject({ ok: false, error: { code: "APPLICATION_CLOSING" } });
+    expect(playback.start).not.toHaveBeenCalled();
+  });
   it("guards IPTV setup and rejects privileged catalogue inputs even while signed out", async () => {
     const { handlers, validEvent } = createHarness();
     for (const channel of Object.values(IPTV_IPC)) {

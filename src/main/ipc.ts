@@ -96,8 +96,10 @@ export interface DownloadLocationController {
 }
 
 export interface UpdateCheckerController {
-  check(source: "automatic" | "manual"): Promise<UpdateCheckStatus>;
-  open(): Promise<{ opened: boolean }>;
+  getState(): UpdateCheckStatus;
+  check(): Promise<UpdateCheckStatus>;
+  install(): Promise<UpdateCheckStatus>;
+  defer(): UpdateCheckStatus;
 }
 
 export interface SoloSessionDiagnosticsProvider {
@@ -178,11 +180,13 @@ export function registerIpcHandlers(
   youtubeRooms?: YouTubeRoomService,
   playerFeatures?: PlayerFeaturesService,
   iptv?: IptvService,
+  isShuttingDown: () => boolean = () => false,
 ): void {
   const register = <T>(channel: string, handler: Handler<T>): void => {
     ipcMain.handle(channel, async (event, input) => {
       try {
         assertAuthorizedSender(event, window);
+        if (isShuttingDown() && channel !== IPC.updatesGetState && channel !== IPC.updatesDefer) throw new AppError("APPLICATION_CLOSING", "Seeing Stone is closing. Reopen the app if the update could not start.");
       } catch (error) {
         const safe = toPublicError(error);
         return { ok: false, error: { code: safe.code, message: safe.message, retryable: false } } satisfies RpcResult<never>;
@@ -429,12 +433,22 @@ export function registerIpcHandlers(
   register(IPC.updatesCheck, (input) => {
     emptySchema.strict().parse(input ?? {});
     if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Update checking is unavailable.", 503);
-    return updates.check("manual");
+    return updates.check();
   });
-  register(IPC.updatesOpen, (input) => {
+  register(IPC.updatesGetState, (input) => {
     emptySchema.strict().parse(input ?? {});
     if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Update checking is unavailable.", 503);
-    return updates.open();
+    return updates.getState();
+  });
+  register(IPC.updatesInstall, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Updates are unavailable.", 503);
+    return updates.install();
+  });
+  register(IPC.updatesDefer, (input) => {
+    emptySchema.strict().parse(input ?? {});
+    if (!updates) throw new AppError("UPDATE_CHECK_UNAVAILABLE", "Updates are unavailable.", 503);
+    return updates.defer();
   });
   register(IPC.smartDownloadsGetState, (input) => {
     emptySchema.strict().parse(input ?? {});

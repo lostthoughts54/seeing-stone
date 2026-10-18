@@ -4,6 +4,9 @@ Milestone 8 packages the accepted application as a branded x64 Windows desktop i
 
 ## Release shape
 
+Automatic updates, required channel metadata, release credentials, and the
+installed-upgrade acceptance procedure are documented in [UPDATES.md](UPDATES.md).
+
 - Electron Builder `26.15.3` creates an assisted NSIS installer for x64 Windows.
 - The application ID is `app.seeingstone.client`; the product and executable name are `Seeing Stone`. The standard Electron user-data directory is `%APPDATA%\Seeing Stone` and holds protected sessions, device identity, SQLite state, and player preferences.
 - Application code is stored in `resources\app.asar`. Only the SQLite worker and its runtime constants module are unpacked so Node's worker loader can execute them outside the archive. Before execution, main hashes both loose modules and compares them with a manifest stored inside the integrity-protected ASAR.

@@ -5,7 +5,11 @@ A Windows-first Jellyfin desktop client.
 **[⬇ Download Seeing Stone for Windows](https://github.com/lostthoughts54/seeing-stone/releases/latest)**
 
 > Beta software. Windows 10/11 x64.
-Current application version: `0.7.3`.
+Current application version: `0.7.4`.
+
+Installed releases support **Settings > About / Updates**, quiet background
+downloads, and an explicit **Restart & Update** action. See [UPDATES.md](UPDATES.md)
+for supported installations, required release artifacts, and upgrade verification.
 
 ## One local application
 

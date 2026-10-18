@@ -9,7 +9,7 @@ export const OPEN_SOURCE_LICENSES = {
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
       "redistributionStatus": "source-only"
@@ -920,6 +920,14 @@ export const OPEN_SOURCE_LICENSES = {
     },
     {
       "category": "dependency",
+      "name": "electron-updater",
+      "version": "6.8.9",
+      "license": "MIT",
+      "projectUrl": "https://github.com/electron-userland/electron-builder",
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
       "name": "electron-winstaller",
       "version": "5.4.0",
       "license": "MIT",
@@ -1442,6 +1450,22 @@ export const OPEN_SOURCE_LICENSES = {
       "category": "dependency",
       "name": "locate-path",
       "version": "5.0.0",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "lodash.escaperegexp",
+      "version": "4.1.2",
+      "license": "MIT",
+      "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "lodash.isequal",
+      "version": "4.5.0",
       "license": "MIT",
       "projectUrl": null,
       "redistributionStatus": "source-and-binary"
@@ -2228,6 +2252,14 @@ export const OPEN_SOURCE_LICENSES = {
       "version": "1.3.0",
       "license": "MIT",
       "projectUrl": null,
+      "redistributionStatus": "source-and-binary"
+    },
+    {
+      "category": "dependency",
+      "name": "tiny-typed-emitter",
+      "version": "2.1.0",
+      "license": "MIT",
+      "projectUrl": "https://github.com/binier/tiny-typed-emitter",
       "redistributionStatus": "source-and-binary"
     },
     {

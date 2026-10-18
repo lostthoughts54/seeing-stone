@@ -7,7 +7,7 @@ These tables are generated from pinned component provenance and the frozen insta
 
 | Category | Component | Version/revision | License | Redistribution status |
 | --- | --- | --- | --- | --- |
-| application | Seeing Stone | 0.7.3 | GPL-2.0-or-later | source-only |
+| application | Seeing Stone | 0.7.4 | GPL-2.0-or-later | source-only |
 | font | Inter | 4.1 | OFL-1.1 | source-and-binary |
 | font | Spectral | Google Fonts snapshot 8b0a1d0f5983 | OFL-1.1 | source-and-binary |
 | native | node-addon-api | 8.5.0 | MIT | source-and-binary |
@@ -24,7 +24,8 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 
 | Component | Version | License | Requirement | Source included |
 | --- | --- | --- | --- | --- |
-| Seeing Stone application and libmpv bridge | 0.7.3 | GPL-2.0-or-later | source-required | required corresponding source |
+| Seeing Stone application | 0.7.4 | GPL-2.0-or-later | source-required | required corresponding source |
+| Seeing Stone native libmpv bridge (reused unchanged) | 0.7.2 | GPL-2.0-or-later | source-required | required corresponding source |
 | mpv/libmpv | 0.41.0 | GPL-2.0-or-later | source-required | required corresponding source |
 | FFmpeg controlled runtime | 8.1.2 | LGPL-2.1-or-later | source-required | required corresponding source |
 | Chromium/Electron FFmpeg | Electron 43.1.0 / Chromium 150.0.7871.47 | LGPL-2.1-or-later | source-required | required corresponding source |
@@ -175,6 +176,7 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 | electron-builder-squirrel-windows | 26.15.3 | MIT |
 | electron-builder | 26.15.3 | MIT |
 | electron-publish | 26.15.3 | MIT |
+| electron-updater | 6.8.9 | MIT |
 | electron-winstaller | 5.4.0 | MIT |
 | electron | 43.1.0 | MIT |
 | emoji-regex | 8.0.0 | MIT |
@@ -241,6 +243,8 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 | koffi | 3.1.1 | MIT |
 | lazy-val | 1.0.5 | MIT |
 | locate-path | 5.0.0 | MIT |
+| lodash.escaperegexp | 4.1.2 | MIT |
+| lodash.isequal | 4.5.0 | MIT |
 | lodash | 4.18.1 | MIT |
 | loupe | 3.2.1 | MIT |
 | lowercase-keys | 2.0.0 | MIT |
@@ -339,6 +343,7 @@ The production native binary-to-source mapping, exact binary hashes, source-arch
 | temp | 0.9.4 | MIT |
 | thunky | 1.1.0 | MIT |
 | tiny-async-pool | 1.3.0 | MIT |
+| tiny-typed-emitter | 2.1.0 | MIT |
 | tinybench | 2.9.0 | MIT |
 | tinyexec | 0.3.2 | MIT |
 | tinyglobby | 0.2.17 | MIT |

@@ -14,10 +14,12 @@ This is an engineering checklist for the current Windows x64 beta, not legal adv
 
    - `Seeing-Stone-Setup-<version>-x64.exe`
    - `Seeing-Stone-Setup-<version>-x64.exe.sha256.txt`
+   - `Seeing-Stone-Setup-<version>-x64.exe.blockmap`
+   - `latest.yml` (or the generated prerelease channel YAML)
    - `Seeing-Stone-<version>-corresponding-source.zip`
    - `Seeing-Stone-<version>-corresponding-source.zip.sha256.txt`
 
-The repository release tag/source archive supplies the complete Seeing Stone application source. The separate corresponding-source archive supplies pinned upstream/MSYS2 source archives, Electron FFmpeg source and patch metadata, native bridge source, build scripts/configuration, the binary-to-source manifest, and notices. Do not put the large corresponding-source archive inside the installer.
+The corresponding-source archive includes the complete current application source in `application-source/`, including new working-tree files, with a SHA-256 inventory. It also supplies pinned upstream/MSYS2 source archives, Electron FFmpeg source and patch metadata, native bridge source, build scripts/configuration, the binary-to-source manifest, and notices. Do not put the large corresponding-source archive inside the installer. Commit the release changes before creating its Git tag; do not tag the previous application's source.
 
 The production installer must contain `resources/libmpv`, must not contain the historical `resources/mpv`, and must expose notices under `resources/legal`. Electron's `LICENSE.electron.txt` and `LICENSES.chromium.html` remain alongside the application executable as supplied by Electron.
 

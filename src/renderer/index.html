@@ -73,6 +73,7 @@
             <p id="loginMessage" class="form-message" role="status"></p>
             <p class="login-help">Your credentials are sent only to the server address above.</p>
             <button id="loginIptvButton" class="primary" type="button">Open IPTV · no Jellyfin needed</button>
+            <button type="button" data-open-updates>Settings</button>
             <button id="loginCleanMachineDiagnosticsButton" class="login-diagnostics-button" type="button">Run player diagnostics</button>
           </form>
         </div>
@@ -154,12 +155,7 @@
               <small>Built-in playback engine</small>
             </div>
             <p id="profileAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
-            <section class="application-update-settings" aria-labelledby="applicationUpdateTitle">
-              <strong id="applicationUpdateTitle">Seeing Stone</strong>
-              <small id="applicationVersionLabel">Version</small>
-              <button id="checkForUpdatesButton" type="button">Check for updates</button>
-              <p id="updateCheckStatus" aria-live="polite">Last checked: Never</p>
-            </section>
+            <button type="button" data-open-updates>Settings</button>
             <button id="downloadsButton" type="button">Downloads</button>
             <button id="cleanMachineDiagnosticsButton" type="button">Clean-machine diagnostics</button>
             <button id="licensesButton" type="button">Open Source Licenses</button>
@@ -654,6 +650,7 @@
                     <div id="playerAdapterFixed" class="player-engine-fixed"><span>Player engine</span><strong>Libmpv</strong><small>Built-in playback engine</small></div>
                   </div>
                   <p id="playerAdapterStatus" class="player-adapter-status" aria-live="polite">Checking active player engine&hellip;</p>
+                  <button type="button" data-open-updates>About / Updates</button>
                   <button id="playerSettingsDiagnosticsButton" class="player-settings-diagnostics" type="button">Open playback diagnostics</button>
                 </div>
               </section>
@@ -693,9 +690,25 @@
         </div>
       </section>
 
+      <dialog id="updatesSettings" class="updates-settings" aria-labelledby="applicationUpdateTitle">
+        <header><div><p class="eyebrow">Settings</p><h2 id="applicationUpdateTitle">About / Updates</h2></div><button id="closeUpdatesButton" type="button" aria-label="Close Settings">Close</button></header>
+        <section class="application-update-settings">
+          <strong id="applicationVersionLabel">Seeing Stone · Loading installed version…</strong>
+          <small id="updateChannelLabel"></small>
+          <p id="updateCheckStatus" role="status" aria-live="polite">Loading update status…</p>
+          <div id="updateProgressContainer" class="is-hidden">
+            <progress id="updateProgress" max="100" aria-label="Update download progress"></progress>
+            <p id="updateProgressText"></p>
+          </div>
+          <div class="action-row"><button id="checkForUpdatesButton" type="button">Check for Updates</button></div>
+          <div id="updateReadyActions" class="action-row is-hidden"><button id="installUpdateButton" class="primary" type="button">Restart &amp; Update</button><button id="laterUpdateButton" type="button">Later</button></div>
+          <small id="updateLastChecked">Last checked: Never</small>
+          <p id="updateSessionNotice"></p>
+        </section>
+      </dialog>
       <aside id="updateBanner" class="update-banner is-hidden" aria-live="polite">
         <strong id="updateBannerText"></strong>
-        <div><button id="viewUpdateButton" class="primary" type="button">View update</button><button id="dismissUpdateButton" type="button">Later</button></div>
+        <div><button id="viewUpdateButton" class="primary" type="button">Restart &amp; Update</button><button id="dismissUpdateButton" type="button">Later</button></div>
       </aside>
 
       <dialog id="smartDownloadDialog" class="smart-download-dialog" aria-labelledby="smartDownloadDialogTitle">

@@ -144,6 +144,9 @@ const bundleName = `Seeing-Stone-${packageJson?.version}-corresponding-source`;
 const bundlePath = resolve(root, "artifacts", `${bundleName}.zip`);
 try {
   const entries = await archiveEntries(bundlePath);
+  for (const required of ["application-source.sha256.txt", "application-source/package.json", "application-source/pnpm-lock.yaml", "application-source/src/main/services/updateChecker.ts", "application-source/src/renderer/updates.ts", "application-source/scripts/installer.nsh"]) {
+    if (!entries.has(`${bundleName}/${required}`)) reject(`corresponding-source archive lacks current application source: ${required}`);
+  }
   for (const source of manifest?.sourceArchives ?? []) {
     if (!entries.has(`${bundleName}/source-archives/${source.filename}`)) reject(`corresponding-source archive lacks ${source.filename}`);
   }

@@ -205,8 +205,10 @@ const bridge: JellyfinBridge = {
     },
   },
   updates: {
+    getState: () => invoke<UpdateCheckStatus>(IPC.updatesGetState),
     check: () => invoke<UpdateCheckStatus>(IPC.updatesCheck),
-    open: () => invoke<{ opened: boolean }>(IPC.updatesOpen),
+    install: () => invoke<UpdateCheckStatus>(IPC.updatesInstall),
+    defer: () => invoke<UpdateCheckStatus>(IPC.updatesDefer),
     subscribe: (listener: (status: UpdateCheckStatus) => void) => {
       const receive = (_event: Electron.IpcRendererEvent, status: UpdateCheckStatus) => listener(status);
       ipcRenderer.on(IPC.updatesChanged, receive);

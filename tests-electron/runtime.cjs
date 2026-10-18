@@ -848,7 +848,7 @@ async function runElectronChild() {
         libraries: ["getFilterOptions", "getItems", "list"],
         browse: ["get"],
         people: ["getResults"],
-        updates: ["check", "open", "subscribe"],
+        updates: ["check", "defer", "getState", "install", "subscribe"],
         playerFeatures: ["command", "subscribe"],
         youtubeRooms: ["action", "addToQueue", "advance", "create", "getState", "handoff", "join", "leave", "presence", "queueAction", "setVideo", "setVisible", "subscribe", "testAlone"],
         search: ["query"],
@@ -1269,6 +1269,7 @@ async function runElectronChild() {
     });
 
     await test("episode details open the parent series at the episode season", async () => {
+      const detailRequestsBefore = detailRequests.length;
       const result = await mainWindow.webContents.executeJavaScript(`(async () => {
         const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
         for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -1313,7 +1314,8 @@ async function runElectronChild() {
       assert.equal(result.optionBackground, "rgb(26, 23, 39)");
       assert.equal(result.optionColor, "rgb(247, 247, 248)");
       assert.equal(result.seriesButtonHidden, true);
-      assert.deepEqual(detailRequests.slice(-2), [runtimeEpisode.id, runtimeSeries.id]);
+      // Back navigation above may already have fetched the previous movie.
+      assert.deepEqual(detailRequests.slice(detailRequestsBefore, detailRequestsBefore + 2), [runtimeEpisode.id, runtimeSeries.id]);
       assert.equal(seasonRequests.at(-1), runtimeSeries.id);
       assert.deepEqual(episodeRequests.at(-1), { seriesId: runtimeSeries.id, seasonId: runtimeSeasonTwo.id });
 

@@ -23,7 +23,7 @@ const dependencies = [...artifactsByOwner.entries()].map(([owner, artifacts]) =>
 
   const isMpv = owner === `mpv ${sourceLock.sources.find((entry) => entry.name === "mpv")?.version}`;
   const isFfmpeg = owner === `FFmpeg ${sourceLock.sources.find((entry) => entry.name === "FFmpeg")?.version}`;
-  const isApplication = component.id === "seeing-stone";
+  const isApplication = ["seeing-stone", "seeing-stone-bridge"].includes(component.id);
   const exactCommit = component.revision
     ?? `MSYS2 source package ${component.version}, archive pinned by SHA-256 ${source.sha256}`;
   const buildFlags = isMpv

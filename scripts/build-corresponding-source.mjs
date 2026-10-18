@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { access, cp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -76,9 +77,25 @@ for (const relative of manifest.bundleBuildFiles) {
   await cp(source, resolve(bundleRoot, "build-materials", relative), { recursive: true });
 }
 
+// Include current source, including new files, rather than silently distributing
+// the previous Git commit for a release built from an edited working tree.
+const sourceFiles = [...new Set(execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+  { cwd: root, encoding: "utf8", windowsHide: true }).split("\0").filter(Boolean))].sort();
+const sourceInventory = [];
+for (const relative of sourceFiles) {
+  const source = resolve(root, relative);
+  const info = await stat(source).catch(() => null);
+  if (!info?.isFile()) continue;
+  const target = resolve(bundleRoot, "application-source", relative);
+  await mkdir(dirname(target), { recursive: true });
+  await cp(source, target);
+  sourceInventory.push(`${sha256(await readFile(source))}  ${relative}`);
+}
+await writeFile(resolve(bundleRoot, "application-source.sha256.txt"), `${sourceInventory.join("\n")}\n`);
+
 const readme = `# Seeing Stone ${packageJson.version} corresponding source\n\n`
   + `This archive accompanies the Windows x64 binary release. It contains the pinned source archives, patches, native bridge source, build scripts, configuration, license texts, and binary-to-source manifest used for the bundled native components.\n\n`
-  + `The release tag/source archive supplies the complete Seeing Stone application source under GPL-2.0-or-later. The build-materials directory in this archive contains the native runtime portions needed to understand and rebuild the distributed libmpv/FFmpeg stack. No byte-identical build result is asserted.\n\n`
+  + `The application-source directory supplies the complete current Seeing Stone application source under GPL-2.0-or-later, including working-tree changes used for this release. application-source.sha256.txt records each file. The build-materials directory contains the native runtime portions needed to understand and rebuild the distributed libmpv/FFmpeg stack. No byte-identical build result is asserted.\n\n`
   + `Source archives marked voluntary-source in redistribution-compliance.json are included for completeness; that label does not assert a source-distribution duty for permissively licensed binaries.\n`;
 await writeFile(resolve(bundleRoot, "README.md"), readme, "utf8");
 await setFixedTimes(bundleRoot);

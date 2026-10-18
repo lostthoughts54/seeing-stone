@@ -474,16 +474,20 @@ export interface DownloadBulkResult {
 }
 
 export interface UpdateCheckStatus {
+  revision: number;
+  appName: string;
   currentVersion: string;
+  channel: string;
   latestVersion: string | null;
-  releaseName: string | null;
-  publishedAt: string | null;
-  isUpdateAvailable: boolean;
-  releasePageUrl: string | null;
-  source: "automatic" | "manual";
-  status: "current" | "available" | "failed";
-  error?: string;
+  status: "idle" | "checking" | "current" | "downloading" | "ready" | "installing" | "error" | "unavailable";
+  progress: { percent: number | null; transferred: number; total: number | null } | null;
+  lastCheckedAt: number | null;
+  message: string | null;
+  promptVisible: boolean;
+  sessionActive: boolean;
 }
+
+export interface UpdateSessionActivity { playback: boolean; watchParty: boolean; key: string }
 
 export type RpcResult<T> =
   | { ok: true; data: T }
@@ -937,8 +941,10 @@ export interface JellyfinBridge {
     subscribe(listener: (downloads: DownloadSummary[]) => void): () => void;
   };
   updates: {
+    getState(): Promise<UpdateCheckStatus>;
     check(): Promise<UpdateCheckStatus>;
-    open(): Promise<{ opened: boolean }>;
+    install(): Promise<UpdateCheckStatus>;
+    defer(): Promise<UpdateCheckStatus>;
     subscribe(listener: (status: UpdateCheckStatus) => void): () => void;
   };
   smartDownloads: {
@@ -1071,7 +1077,9 @@ export const IPC = {
   downloadsDeleteWatched: "downloads:delete-watched",
   downloadsChanged: "downloads:changed",
   updatesCheck: "updates:check",
-  updatesOpen: "updates:open",
+  updatesGetState: "updates:get-state",
+  updatesInstall: "updates:install",
+  updatesDefer: "updates:defer",
   updatesChanged: "updates:changed",
   smartDownloadsGetState: "smart-downloads:get-state",
   smartDownloadsFollow: "smart-downloads:follow",

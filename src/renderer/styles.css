@@ -5354,10 +5354,15 @@ button.danger:hover:not(:disabled) {
 .mini-guide-program.is-selected, .mini-guide-program:focus-visible { border-color: #b86cff; box-shadow: 0 0 0 1px rgba(184,108,255,.35); z-index: 5; }
 .player-view.is-controls-idle .player-mini-guide { cursor: default; }
 
-.application-update-settings { border-top: 1px solid rgba(216,192,255,.12); display: grid; gap: .35rem; margin-top: .65rem; padding-top: .75rem; }
-.application-update-settings strong { color: #ece3f7; font-size: .75rem; }
-.application-update-settings small, .application-update-settings p { color: #b9b0c5; font-size: .68rem; margin: 0; }
-.application-update-settings button { font-size: .72rem; justify-self: start; padding: .38rem .58rem; }
+.updates-settings { background: #191322; border: 1px solid rgba(216,192,255,.3); border-radius: 1rem; color: #ece3f7; max-height: calc(100vh - 3rem); padding: 1.5rem; width: min(35rem, calc(100vw - 2rem)); }
+.updates-settings::backdrop { background: rgba(8,5,15,.72); }
+.updates-settings header { align-items: start; display: flex; gap: 1rem; justify-content: space-between; }
+.updates-settings h2 { font-size: 1.5rem; margin: .2rem 0; }
+.application-update-settings { border-top: 1px solid rgba(216,192,255,.12); display: grid; gap: 1rem; margin-top: 1rem; padding-top: 1rem; }
+.application-update-settings strong { color: #ece3f7; }
+.application-update-settings small, .application-update-settings p { color: #c7bdd3; line-height: 1.5; margin: 0; }
+.application-update-settings progress { accent-color: #b87df0; width: 100%; }
+.application-update-settings .action-row { flex-wrap: wrap; }
 .update-banner { align-items: center; background: #21152f; border: 1px solid rgba(199,142,255,.55); border-radius: .65rem; bottom: 1.25rem; box-shadow: 0 14px 38px rgba(0,0,0,.42); display: flex; gap: 1rem; max-width: min(32rem, calc(100vw - 2rem)); padding: .8rem; position: fixed; right: 1.25rem; z-index: 80; }
 .update-banner strong { color: #f5effb; font-size: .82rem; }
 .update-banner div { display: flex; gap: .45rem; flex: none; }

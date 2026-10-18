@@ -23,6 +23,7 @@ $runtimeManifestPath = Join-Path $root "libmpv-runtime.json"
 $sourceLockPath = Join-Path $root "native\libmpv-runtime\source-lock.json"
 $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
 $applicationVersion = (Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
+$existingResult = if (Test-Path -LiteralPath $resultPath) { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json } else { $null }
 
 if (-not (Test-Path -LiteralPath $addon)) { throw "LIBMPV_NATIVE_ADDON_MISSING" }
 if (Test-Path -LiteralPath $stageRoot) {
@@ -103,12 +104,19 @@ $artifacts = @(Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name | 
     elseif ($_.Extension -eq ".node") { "native-addon" }
     elseif ($_.Name -match '^(av|sw).+-\d+\.dll$') { "ffmpeg-companion" }
     else { "runtime-companion" }
+  $artifactName = $_.Name
+  $artifactHash = Get-Sha256 $_.FullName
+  # An application version bump does not rebuild the native add-on. Preserve
+  # its original provenance when the exact binary is reused.
+  $priorAddon = @($existingResult.artifacts | Where-Object {
+    $_.filename -eq $artifactName -and $_.role -eq "native-addon" -and $_.sha256 -eq $artifactHash
+  }) | Select-Object -First 1
   [ordered]@{
     filename = $_.Name
     role = $role
-    sha256 = Get-Sha256 $_.FullName
+    sha256 = $artifactHash
     bytes = $_.Length
-    owner = if ($packageOwners.ContainsKey($_.Name)) { $packageOwners[$_.Name] } elseif ($role -eq "ffmpeg-companion") { "FFmpeg 8.1.2" } elseif ($role -eq "native-addon") { "Seeing Stone $applicationVersion" } else { "mpv 0.41.0" }
+    owner = if ($packageOwners.ContainsKey($_.Name)) { $packageOwners[$_.Name] } elseif ($role -eq "ffmpeg-companion") { "FFmpeg 8.1.2" } elseif ($role -eq "native-addon" -and $priorAddon.owner) { $priorAddon.owner } elseif ($role -eq "native-addon") { "Seeing Stone $applicationVersion" } else { "mpv 0.41.0" }
   }
 })
 
@@ -126,7 +134,6 @@ $result = [ordered]@{
 }
 $json = $result | ConvertTo-Json -Depth 8
 $json = $json.Replace("`r`n", "`n")
-$existingResult = if (Test-Path -LiteralPath $resultPath) { Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json } else { $null }
 $existingCanonical = if ($existingResult) { $existingResult | ConvertTo-Json -Depth 8 -Compress } else { $null }
 $resultCanonical = $result | ConvertTo-Json -Depth 8 -Compress
 if ($existingCanonical -ne $resultCanonical) {
