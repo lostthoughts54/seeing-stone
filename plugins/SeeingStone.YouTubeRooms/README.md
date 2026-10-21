@@ -1,12 +1,13 @@
-# Seeing Stone Player Features — 2.0.0
+# Seeing Stone Player Features — 2.1.0
 
 The expanded Seeing Stone companion plugin for Jellyfin **10.11.11**. It keeps
 the existing plugin ID, `SeeingStone.YouTubeRooms.dll` assembly name, and v3
 YouTube routes so it can replace the original YouTube Rooms plugin.
 
-The new **Seeing Stone rooms** section in Watch Parties supports:
+The main **Watch Party** section in Watch Parties supports:
 
 - Persistent rooms, mixed Jellyfin/YouTube queues, votes, and host/everyone controls.
+- **Watch now** switches everyone between Jellyfin, YouTube and trailers in the same room. **Back to [title]** restores the queued movie's saved position, including after a server restart.
 - Access and exact media-version preflight, delivery information, and subtitle discovery.
 - Participant readiness, buffering and disconnect status; a shared 2.5-second start.
 - A 1.5-second buffering grace period and coordinated recovery. Disconnected
@@ -55,7 +56,7 @@ PDB, XML and deps files are build metadata; Jellyfin provides its own dependenci
 2. Stop Jellyfin and replace the DLL **in the existing plugin folder**. Do not
    install a second copy under a new name; the assembly and plugin ID are unchanged.
 3. Start Jellyfin and confirm **Seeing Stone Player Features** appears in Plugins.
-4. Run the updated Seeing Stone player and open **Watch Parties → Seeing Stone rooms**.
+4. Run Seeing Stone 0.7.5 or later on both computers and open **Watch Parties → Watch Party**. Version 2.1.0 advertises the `watch-now` capability; older plugins prompt clients to update before switching.
 
 For a new installation, create a folder under the configured Jellyfin plugins
 directory and place the DLL there. No additional public port is required.
@@ -80,7 +81,7 @@ users of this server; they are not private invitation-only rooms.
 
 YouTube continues to use its official iframe, including its ads and availability
 rules. No YouTube videos are downloaded, proxied or stripped of ads. A viewer may
-need to click **Load YouTube player** to satisfy browser playback restrictions.
+need to click **Enable YouTube playback** to satisfy browser playback restrictions.
 Content identity and stable duration must be reported before synchronization.
 
 The new rooms and ordinary Jellyfin SyncPlay are separate modes; leave one before

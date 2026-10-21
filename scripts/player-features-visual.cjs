@@ -54,6 +54,44 @@ async function run() {
   })()`);
   await window.webContents.executeJavaScript(readFileSync(join(output, "fixture.js"), "utf8"));
   await window.webContents.executeJavaScript("FeatureRoomUI.mountPlayerFeatures(document.getElementById('watch'))");
+  const switching = await window.webContents.executeJavaScript(`(async () => {
+    const delay = () => new Promise(r => setTimeout(r, 20));
+    await delay();
+    const panel = document.querySelector('.player-features');
+    const url = panel.querySelector('[data-role=url]');
+    url.value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    url.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await delay();
+    const watchNow = window.fixtureCalls.some(c => c.operation === 'watch-now' && c.kind === 'youtube' && c.itemId === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    const cleared = url.value === '';
+    const movie = window.fixtureState.room.media;
+    window.fixtureState.room.media = { kind: 'youtube', itemId: 'dQw4w9WgXcQ', title: 'Trailer', version: 'yt', durationTicks: 0, mediaSourceId: null };
+    window.fixtureState.room.queue.unshift({ id: '1'.repeat(32), media: window.fixtureState.room.media, addedBy: 'Alice', votes: 0, voted: false });
+    window.fixtureState.room.timeline.generation++;
+    window.fixtureRender(window.fixtureState);
+    const back = panel.querySelector('[data-command=return-jellyfin]');
+    const backVisible = !back.hidden && back.textContent.includes(movie.title);
+    back.click(); await delay();
+    const backIntent = window.fixtureCalls.some(c => c.operation === 'action' && c.action.action === 'watch-item' && c.action.queueItemId === 'b'.repeat(32));
+    window.fixtureState.room.hostOnly = true; window.fixtureState.room.owner = false; window.fixtureRender(window.fixtureState);
+    const hostPolicy = back.disabled && panel.querySelector('[data-command=youtube-watch]').disabled;
+    window.fixtureState.room.hostOnly = false; window.fixtureState.room.owner = true;
+    window.fixtureState.room.media = movie; window.fixtureState.room.queue.shift(); window.fixtureState.room.timeline.generation++;
+    window.fixtureRender(window.fixtureState);
+    const noBackForMovie = back.hidden;
+    window.jellyfin.search.query = async () => [{ id: '2'.repeat(32), name: 'A movie to watch', type: 'Movie' }];
+    panel.querySelector('[data-role=search]').value = 'movie';
+    panel.querySelector('[data-command=search]').click(); await delay();
+    [...panel.querySelectorAll('[data-role=results] button')].find(b => b.textContent === 'Watch now').click(); await delay();
+    const libraryWatch = window.fixtureCalls.some(c => c.operation === 'watch-now' && c.kind === 'jellyfin' && c.itemId === '2'.repeat(32));
+    panel.querySelector('[data-role=search]').value = ''; panel.querySelector('[data-role=results]').replaceChildren();
+    const original = window.jellyfin.playerFeatures.command;
+    window.jellyfin.playerFeatures.command = async () => { throw new Error('Switch failed'); };
+    url.value = 'https://www.youtube.com/watch?v=9bZkp7q19f0'; panel.querySelector('[data-command=youtube-watch]').click(); await delay();
+    const retainedOnError = url.value.includes('9bZkp7q19f0') && panel.querySelector('[data-role=status]').textContent === 'Switch failed';
+    window.jellyfin.playerFeatures.command = original; url.value = ''; window.fixtureState.room.timeline.generation = 1; window.fixtureRender(window.fixtureState);
+    return { watchNow, cleared, backVisible, backIntent, hostPolicy, noBackForMovie, retainedOnError, libraryWatch };
+  })()`);
   const result = await window.webContents.executeJavaScript(`(async () => {
     await new Promise(r => setTimeout(r, 150));
     const panel = document.querySelector('.player-features');
@@ -123,9 +161,10 @@ async function run() {
     const youtubeOverlay = document.querySelectorAll('[data-role=youtube-surface] .party-reaction-burst').length === 1;
     return { expired, left, noReplayOnRejoin, offlineDisabled, sendError, youtubeOverlay };
   })()`);
-  const report = { ...result, ...player, reactions, cleanup };
+  const report = { ...result, ...player, reactions, cleanup, switching };
   writeFileSync(join(output, "result.json"), JSON.stringify(report, null, 2));
   if (!report.preserved || !report.escaped || !report.playbackIntent || !report.moved || !report.visible || report.overflow || report.desktopOverflow) throw new Error(JSON.stringify(report));
   if (![...Object.values(reactions), ...Object.values(cleanup)].every(Boolean)) throw new Error(JSON.stringify(report));
+  if (!Object.values(switching).every(Boolean)) throw new Error(JSON.stringify(report));
   console.log("Player Features UI fixture passed:", report); app.exit(0);
 }

@@ -5,23 +5,28 @@ import { mountPartyReactions } from "./partyReactions";
 export function mountPlayerFeatures(parent: HTMLElement): void {
   if (!window.jellyfin.playerFeatures) return;
   const panel = document.createElement("section"); panel.className = "player-features";
-  panel.innerHTML = `<h1>Seeing Stone rooms</h1>
-    <p>Persistent movie nights with a shared queue, readiness checks and chat.</p>
+  panel.innerHTML = `<h1>Watch Party</h1>
+    <p>One room for Jellyfin, YouTube and trailers. Join once and switch together.</p>
     <p data-role="status" role="status" aria-live="polite">Refresh to find rooms on your server.</p>
     <div class="feature-row"><label>Room name <input data-role="name" maxlength="80" placeholder="Movie night" required></label><button data-command="create">Create room</button><button data-command="refresh">Refresh rooms</button></div>
     <div data-role="rooms" class="feature-list"></div>
     <div data-role="joined" hidden>
       <div class="feature-row"><h2 data-role="title"></h2><button data-command="leave">Leave room</button><button data-command="delete">Delete room</button></div>
       <p data-role="phase" class="feature-phase" aria-live="polite"></p>
+      <section class="feature-watch-next" aria-label="Choose what to watch">
+        <h3>What shall we watch?</h3>
+        <div class="feature-row"><label>YouTube or trailer link <input data-role="url" type="url" maxlength="2048" placeholder="Paste a YouTube link" required></label><button data-command="youtube-watch" class="primary">Watch now</button><button data-command="youtube-add">Add to queue</button></div>
+        <div class="feature-row"><label>Jellyfin library <input data-role="search" maxlength="200" placeholder="Find a movie or episode"></label><button data-command="search">Search</button><button data-command="return-jellyfin" hidden>Back to Jellyfin</button></div>
+        <div data-role="results" class="feature-list" role="status" aria-live="polite"></div>
+        <p>Watch now switches everyone together and saves your place in the current video.</p>
+      </section>
       <div data-role="members" class="feature-list"></div>
       <p data-role="preflight"></p><button data-command="retry">Retry preparation</button>
-      <div data-role="youtube" hidden><div data-role="youtube-surface" class="party-reaction-surface"><iframe title="Official YouTube room player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div><button data-command="prime">Load YouTube player</button><p>YouTube handles ads and availability. The room waits until the selected video is ready.</p></div>
+      <div data-role="youtube" hidden><div data-role="youtube-surface" class="party-reaction-surface"><iframe title="Official YouTube room player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div><button data-command="prime">Enable YouTube playback</button><p>If YouTube needs a click to load, enable playback above. The room waits until everyone is ready.</p></div>
       <div class="feature-row"><button data-action="play">Play together</button><button data-action="pause">Pause</button><button data-action="continue">Continue with ready viewers</button><button data-command="skip">Skip intro / recap together</button><button data-action="next">Next in queue</button></div>
       <div class="feature-row"><label>Seek to seconds <input data-role="seek" type="number" min="0" max="86400" step="1" value="0" required></label><button data-command="seek">Seek together</button></div>
       <details><summary>Room settings</summary><div class="feature-row"><label><input data-setting="host-only" type="checkbox"> Host controls playback</label><label><input data-setting="wait-for-all" type="checkbox"> Wait when someone buffers</label><label><input data-setting="auto-next" type="checkbox"> Next video countdown</label><label><input data-setting="minimum" type="checkbox"> Allow starting alone</label></div></details>
-      <h3>Shared queue</h3><div class="feature-row"><label>Search library <input data-role="search" maxlength="200" placeholder="Movie or episode title"></label><button data-command="search">Search</button></div>
-      <div data-role="results" class="feature-list" role="status" aria-live="polite"></div>
-      <div class="feature-row"><label>YouTube link <input data-role="url" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…"></label><button data-command="youtube-add">Add YouTube video</button><button data-action="sort-votes">Order upcoming videos by votes</button></div>
+      <h3>Shared queue</h3><button data-action="sort-votes">Order upcoming videos by votes</button>
       <div data-role="queue" class="feature-list"></div>
       <details><summary>Prepare for movie night</summary><p>Download the Jellyfin videos in this queue on this computer, including available subtitles. This uses your download storage and connection.</p><button data-action="prepare">Invite everyone to prepare</button><button data-command="prepare">Download this queue on my computer</button><p data-role="downloads"></p></details>
       <details><summary>My subtitle timing</summary><p>Applies to the currently selected subtitle track. Positive values show subtitles later. Saved for your account and this media version.</p><label>Delay in seconds <input data-role="delay" type="number" min="-120" max="120" step="0.1" value="0" required></label><button data-command="timing">Save timing</button></details>
@@ -108,6 +113,12 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
     }
     for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-action]")) b.disabled = b.dataset.action === "prepare" || b.dataset.action === "continue" ? !room.owner : room.hostOnly && !room.owner;
     const hostControlsPlayback = room.hostOnly && !room.owner;
+    panel.querySelector<HTMLButtonElement>('[data-command="youtube-watch"]')!.disabled = hostControlsPlayback;
+    const returnButton = panel.querySelector<HTMLButtonElement>('[data-command="return-jellyfin"]')!;
+    const returnItem = room.media?.kind === "youtube" ? room.queue.slice(1).find(q => q.media.kind === "jellyfin") : null;
+    returnButton.hidden = !returnItem;
+    returnButton.disabled = hostControlsPlayback;
+    returnButton.textContent = returnItem ? `Back to ${returnItem.media.title}` : "Back to Jellyfin";
     el<HTMLInputElement>("seek").disabled = hostControlsPlayback;
     panel.querySelector<HTMLButtonElement>('[data-command="seek"]')!.disabled = hostControlsPlayback;
     panel.querySelector<HTMLButtonElement>('[data-command="skip"]')!.disabled = hostControlsPlayback || room.media?.kind !== "jellyfin";
@@ -116,9 +127,9 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
       queueSignature = signature;
       el("queue").replaceChildren(...room.queue.map((q, i) => {
         const row = document.createElement("div"); row.className = "feature-row";
-        const action = (action: "vote" | "play-item" | "remove") => void send({ operation: "action", action: { action, queueItemId: q.id } });
+        const action = (action: "vote" | "watch-item" | "remove") => void send({ operation: "action", action: { action, queueItemId: q.id } });
         row.append(line(`${i === 0 ? "Now: " : ""}${q.media.title} · ${q.votes} vote(s)`), button(q.voted ? "Remove vote" : "Vote", () => action("vote")));
-        if (i > 0) row.append(button("Prepare this video", () => action("play-item"), room.hostOnly && !room.owner));
+        if (i > 0) row.append(button("Watch now", () => action("watch-item"), room.hostOnly && !room.owner));
         row.append(button("Remove", () => action("remove"), room.hostOnly && !room.owner)); return row;
       }));
     }
@@ -130,7 +141,7 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
     el("youtube").hidden = !key;
     if (key !== frameKey) {
       frameKey = key; videoId = room.media?.kind === "youtube" ? room.media.itemId : ""; reportedVideo = ""; playerReady = false; playerState = -1; position = 0; duration = 0; stableDuration = 0; youtubeError = false; lastMessage = 0;
-      if (key) frame.src = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?enablejsapi=1&autoplay=0&playsinline=1&controls=0&rel=0`;
+      if (key) frame.src = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&rel=0`;
       else frame.removeAttribute("src");
     }
     updatePhase();
@@ -150,15 +161,22 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
       const playable = items.filter(i => ["Movie", "Episode", "Video"].includes(i.type)).slice(0, 20);
       el("results").replaceChildren(...playable.map(item => {
         const row = document.createElement("div"); row.className = "feature-row"; row.append(line(item.name));
+        let mediaSourceId: string | undefined;
+        const watch = button("Watch now", () => void send({ operation: "watch-now", kind: "jellyfin", itemId: item.id, ...(mediaSourceId ? { mediaSourceId } : {}) }), Boolean(state?.room?.hostOnly && !state.room.owner));
+        const add = button("Add to queue", () => void send({ operation: "add", kind: "jellyfin", itemId: item.id, ...(mediaSourceId ? { mediaSourceId } : {}) }));
         const choose = button("Choose version", () => {
           choose.disabled = true;
           void window.jellyfin.mediaSources.getCapabilities({ itemId: item.id }).then(cap => {
             if (revision !== searchRevision) return;
             const select = document.createElement("select"); select.setAttribute("aria-label", `Version of ${item.name}`);
             for (const s of cap.sources) { const option = document.createElement("option"); option.value = s.id; option.textContent = s.name || [s.container, s.height ? `${s.height}p` : null, s.videoCodec].filter(Boolean).join(" · ") || "Original"; select.append(option); }
-            row.append(select, button("Add to room", () => void send({ operation: "add", kind: "jellyfin", itemId: item.id, mediaSourceId: select.value }), cap.sources.length === 0)); choose.remove();
+            mediaSourceId = select.value;
+            select.addEventListener("change", () => { mediaSourceId = select.value; });
+            watch.disabled = cap.sources.length === 0 || Boolean(state?.room?.hostOnly && !state.room.owner);
+            add.disabled = cap.sources.length === 0;
+            row.append(select); choose.remove();
           }).catch(() => { if (revision === searchRevision) { choose.disabled = false; el("status").textContent = "Could not load the versions for that video. Try Choose version again."; } });
-        }); row.append(choose); return row;
+        }); row.append(watch, add, choose); return row;
       }));
       if (!playable.length) el("results").append(line("No playable videos match your search. Try another title."));
     } catch { if (revision === searchRevision) el("results").replaceChildren(line("Library search failed. Select Search to try again.")); }
@@ -169,7 +187,19 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
     const op = b.dataset.command;
     if (op === "create") { const input = el<HTMLInputElement>("name"); input.value = input.value.trim(); if (input.reportValidity()) void send({ operation: "create", name: input.value }); }
     else if (op === "search") void search();
-    else if (op === "youtube-add") void send({ operation: "add", kind: "youtube", itemId: value("url") });
+    else if (op === "youtube-add" || op === "youtube-watch") {
+      const input = el<HTMLInputElement>("url"); input.value = input.value.trim();
+      if (!input.reportValidity()) return;
+      const draft = input.value; const sentRoom = roomId;
+      b.disabled = true;
+      void send({ operation: op === "youtube-watch" ? "watch-now" : "add", kind: "youtube", itemId: draft }).then(sent => {
+        if (sent && roomId === sentRoom && input.value === draft) input.value = "";
+      }).finally(() => { b.disabled = op === "youtube-watch" && Boolean(state?.room?.hostOnly && !state.room.owner); });
+    }
+    else if (op === "return-jellyfin") {
+      const item = state?.room?.queue.slice(1).find(q => q.media.kind === "jellyfin");
+      if (item) void send({ operation: "action", action: { action: "watch-item", queueItemId: item.id } });
+    }
     else if (op === "seek") { if (el<HTMLInputElement>("seek").reportValidity()) void send({ operation: "action", action: { action: "seek", positionTicks: Math.round(Number(value("seek")) * 10_000_000) } }); }
     else if (op === "timing") { if (el<HTMLInputElement>("delay").reportValidity()) void send({ operation: "timing", delaySeconds: Number(value("delay")) }); }
     else if (op === "chat" || op === "comment") {
@@ -188,7 +218,7 @@ export function mountPlayerFeatures(parent: HTMLElement): void {
   el<HTMLInputElement>("search").addEventListener("input", () => { searchRevision++; el("results").replaceChildren(); });
   panel.addEventListener("keydown", event => {
     if (event.key !== "Enter" || event.isComposing || !(event.target instanceof HTMLInputElement)) return;
-    const command = ({ name: "create", search: "search", message: "chat", url: "youtube-add", seek: "seek", delay: "timing" } as Record<string, string>)[event.target.dataset.role ?? ""];
+    const command = ({ name: "create", search: "search", message: "chat", url: "youtube-watch", seek: "seek", delay: "timing" } as Record<string, string>)[event.target.dataset.role ?? ""];
     if (command) { event.preventDefault(); event.stopPropagation(); panel.querySelector<HTMLButtonElement>(`[data-command="${command}"]`)?.click(); }
   });
   panel.addEventListener("change", event => {

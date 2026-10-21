@@ -29,7 +29,7 @@ function harness() {
     getMediaSourceCapabilities: vi.fn(async () => ({ sources: [{ id: "chosen", supportsDirectPlay: true }] })),
     getMediaSegments: vi.fn(async () => [{ type: "Intro", startTicks: 0, endTicks: 300_000_000 }]),
     playerFeaturesRequest: vi.fn(async (body?: Record<string, unknown>): Promise<unknown> => {
-      if (!body) return { protocolVersion: 1 };
+      if (!body) return { protocolVersion: 1, features: ["watch-now"] };
       if (body.operation === "list") return [];
       if (body.operation === "preflight") return { media: room.media, subtitles: [], delaySeconds: 0 };
       if (body.operation === "timing") return { delaySeconds: body.delaySeconds ?? 0 };
@@ -43,6 +43,41 @@ function harness() {
 async function settle(ms = 1200) { await vi.advanceTimersByTimeAsync(ms); }
 
 describe("Seeing Stone player features", () => {
+  it("sends Watch now as one guarded request and normalizes the pasted YouTube link", async () => {
+    const h = harness(); await h.service.command({ operation: "join", roomId: h.room.id });
+    h.api.playerFeaturesRequest.mockClear();
+    await h.service.command({ operation: "watch-now", kind: "youtube", itemId: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+    expect(h.api.playerFeaturesRequest).toHaveBeenCalledWith({
+      operation: "watch-now", kind: "youtube", itemId: "dQw4w9WgXcQ", roomId: h.room.id, expectedGeneration: 1,
+    });
+    expect(h.api.playerFeaturesRequest.mock.calls.filter(([b]) => b?.operation === "watch-now")).toHaveLength(1);
+    expect(h.api.playerFeaturesRequest.mock.calls.some(([b]) => b?.operation === "add" || b?.operation === "action")).toBe(false);
+  });
+  it("leaves playback and the queue untouched when the server needs an upgrade", async () => {
+    const h = harness(); const request = h.api.playerFeaturesRequest.getMockImplementation()!;
+    h.api.playerFeaturesRequest.mockImplementation(async body => body ? request(body) : { protocolVersion: 1 });
+    await h.service.command({ operation: "join", roomId: h.room.id });
+    h.api.playerFeaturesRequest.mockClear();
+    await expect(h.service.command({ operation: "watch-now", kind: "youtube", itemId: "dQw4w9WgXcQ" })).rejects.toThrow("Update");
+    await expect(h.service.command({ operation: "action", action: { action: "watch-item", queueItemId: "b".repeat(32) } })).rejects.toThrow("Update");
+    expect(h.api.playerFeaturesRequest.mock.calls.some(([b]) => b?.operation === "watch-now" || b?.operation === "action" || b?.operation === "add")).toBe(false);
+    expect(h.service.getState().room?.media?.itemId).toBe(itemId);
+  });
+  it("pauses the movie for YouTube and returns to the room's saved position without leaving", async () => {
+    const h = harness(); await h.service.command({ operation: "join", roomId: h.room.id }); await settle();
+    const movie = h.room.media!;
+    h.setPlayback({ paused: false, phase: "playing", positionTicks: 420_000_000 });
+    h.room.media = { kind: "youtube", itemId: "dQw4w9WgXcQ", mediaSourceId: null, title: "Trailer", durationTicks: 0, version: "dQw4w9WgXcQ" };
+    h.room.timeline = { ...h.room.timeline, version: 2, generation: 2, targetRevision: 2, positionTicks: 0 };
+    await h.service.command({ operation: "watch-now", kind: "youtube", itemId: "dQw4w9WgXcQ" }); await settle();
+    expect(h.player.setPaused).toHaveBeenCalledWith("playback", true, { origin: "remote-sync" });
+    h.room.media = movie;
+    h.room.timeline = { ...h.room.timeline, version: 3, generation: 3, targetRevision: 3, positionTicks: 420_000_000 };
+    await h.service.command({ operation: "action", action: { action: "watch-item", queueItemId: "b".repeat(32) } }); await settle();
+    expect(h.player.seek).toHaveBeenLastCalledWith("playback", 420_000_000, { origin: "remote-sync" });
+    expect(h.service.getState().room?.id).toBe(h.room.id);
+    expect(h.api.playerFeaturesRequest.mock.calls.some(([b]) => b?.operation === "leave")).toBe(false);
+  });
   it("preflights the selected version and loads paused using the group origin", async () => {
     const h = harness(); await h.service.command({ operation: "join", roomId: h.room.id }); await settle();
     expect(h.api.playerFeaturesRequest).toHaveBeenCalledWith(expect.objectContaining({ operation: "preflight", mediaSourceId: "chosen" }));

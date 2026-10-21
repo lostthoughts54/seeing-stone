@@ -14,12 +14,12 @@ export const featureRoomSchema = z.object({
   events: z.array(z.object({ id, at: time, text: z.string().max(512) })).max(300),
 });
 export const featureSummarySchema = z.object({ id, name: z.string().max(80), title: z.string().max(512).nullable(), connected: z.number().int().min(0).max(32), updatedAt: time });
-export const featureActionSchema = z.object({ action: z.enum(["play", "pause", "continue", "seek", "next", "play-item", "remove", "sort-votes", "vote", "host-only", "wait-for-all", "minimum", "auto-next", "prepare"]), queueItemId: id.optional(), positionTicks: ticks.optional(), enabled: z.boolean().optional(), minimumParticipants: z.number().int().min(1).max(2) }).partial({ minimumParticipants: true }).strict();
+export const featureActionSchema = z.object({ action: z.enum(["play", "pause", "continue", "seek", "next", "play-item", "watch-item", "remove", "sort-votes", "vote", "host-only", "wait-for-all", "minimum", "auto-next", "prepare"]), queueItemId: id.optional(), positionTicks: ticks.optional(), enabled: z.boolean().optional(), minimumParticipants: z.number().int().min(1).max(2) }).partial({ minimumParticipants: true }).strict();
 export const featureInputSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.enum(["refresh", "leave", "delete", "prepare", "retry", "skip"]) }).strict(),
   z.object({ operation: z.literal("create"), name: z.string().trim().min(1).max(80) }).strict(),
   z.object({ operation: z.literal("join"), roomId: id }).strict(),
-  z.object({ operation: z.literal("add"), kind: z.enum(["jellyfin", "youtube"]), itemId: z.string().min(1).max(2048), mediaSourceId: z.string().max(128).optional() }).strict(),
+  z.object({ operation: z.enum(["add", "watch-now"]), kind: z.enum(["jellyfin", "youtube"]), itemId: z.string().min(1).max(2048), mediaSourceId: z.string().max(128).optional() }).strict(),
   z.object({ operation: z.literal("action"), action: featureActionSchema }).strict(),
   z.object({ operation: z.literal("message"), kind: z.enum(["chat", "reaction", "comment"]), text: z.string().trim().min(1).max(500) }).strict(),
   z.object({ operation: z.literal("timing"), delaySeconds: z.number().finite().min(-120).max(120) }).strict(),

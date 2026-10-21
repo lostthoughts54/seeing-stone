@@ -5441,6 +5441,11 @@ button.danger:hover:not(:disabled) {
 .player-features details { padding: .8rem; margin: .8rem 0; border: 1px solid #ffffff20; border-radius: 8px; }
 .player-features summary { cursor: pointer; }
 .feature-list { margin: .6rem 0; }
+.feature-watch-next { padding: 1rem; border: 1px solid #ffffff30; border-radius: 12px; background: #0c141d; }
+.feature-watch-next .feature-row > label { flex: 1 1 17rem; min-width: 0; }
+.feature-watch-next input { flex: 1 1 12rem; min-width: 0; }
+.feature-watch-next > p { color: #bbc4ce; font-size: .9rem; }
+.legacy-watch-parties > summary { padding: 1rem; cursor: pointer; }
 .feature-phase { font-weight: 600; color: #c1ddff; }
 .feature-log { max-height: 16rem; overflow: auto; padding: .5rem 1rem; background: #0003; border-radius: 8px; }
 .player-features iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }

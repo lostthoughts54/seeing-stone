@@ -5,7 +5,7 @@ A Windows-first Jellyfin desktop client.
 **[⬇ Download Seeing Stone for Windows](https://github.com/lostthoughts54/seeing-stone/releases/latest)**
 
 > Beta software. Windows 10/11 x64.
-Current application version: `0.7.4`.
+Current application version: `0.7.5`.
 
 Installed releases support **Settings > About / Updates**, quiet background
 downloads, and an explicit **Restart & Update** action. See [UPDATES.md](UPDATES.md)
@@ -75,6 +75,19 @@ contains the Electron client built from the accepted `0.3.0` interface baseline.
 - Produces a branded x64 Windows installer with the sandboxed application and pinned mpv runtime packaged together.
 
 ## Try it
+
+For a movie night that mixes Jellyfin and YouTube, open **Watch Parties** and
+create a room in the main **Watch Party** section. Your friend joins that same
+room once. Paste a trailer link and choose **Watch now**, or search the Jellyfin
+library and choose **Watch now** on a result. **Back to [title]** returns from
+YouTube to a queued Jellyfin video at its saved position. Switching retains the
+room, chat and queue, and waits for participant readiness. With automatic next
+enabled, a finished trailer advances to the next queued video after the countdown.
+
+This flow requires the updated Seeing Stone Player Features server plugin with
+the `watch-now` capability and updated clients for both viewers. The separate
+YouTube and Jellyfin SyncPlay room controls remain in the expandable section
+below. Existing separate parties are not automatically migrated.
 
 Companion Remote is disabled by default. After signing in, choose **Phone Remote**
 in the primary navigation, select a trusted private network, enable it,

@@ -8,6 +8,7 @@ import { youtubeVideoId } from "./trailerWindow";
 
 const empty = (): FeatureState => ({ connection: "signed-out", room: null, rooms: [], error: null, local: { preparation: "", issue: null, delivery: null, subtitles: 0, delaySeconds: 0, downloads: "" } });
 const remote = { origin: "remote-sync" as const };
+const healthSchema = z.object({ protocolVersion: z.literal(1), features: z.array(z.string()).optional() });
 const preflightSchema = z.object({ media: featureMediaSchema, subtitles: z.array(z.object({ index: z.number().int(), language: z.string().nullable(), codec: z.string().nullable(), isExternal: z.boolean() })).nullable(), delaySeconds: z.number().finite().min(-120).max(120) });
 type Api = Pick<JellyfinApi, "playerFeaturesRequest" | "getAuthenticatedContext" | "getMediaSourceCapabilities" | "getMediaSegments">;
 
@@ -31,6 +32,7 @@ export class PlayerFeaturesService {
   private preparing = false;
   private ownedPlaybackId: string | null = null;
   private completed: { generation: number; positionTicks: number } | null = null;
+  private supportsWatchNow: boolean | null = null;
 
   constructor(private readonly api: Api, private readonly player: PlayerController, private readonly downloads: Pick<DownloadManager, "start">, private readonly otherRoomJoined: () => boolean = () => false) {
     player.onEvent((event) => {
@@ -49,6 +51,7 @@ export class PlayerFeaturesService {
     this.epoch++; if (this.pollTimer) clearInterval(this.pollTimer); if (this.playbackTimer) clearInterval(this.playbackTimer);
     this.pollTimer = null; this.playbackTimer = null; this.loadedGeneration = -1; this.targetRevision = -1; this.youtube = null; this.completed = null;
     if (this.isJoined()) this.player.setAutomaticTransitionsEnabled(true);
+    this.supportsWatchNow = null;
     this.state = empty(); this.emit();
   }
   async activate(): Promise<FeatureState> {
@@ -83,8 +86,9 @@ export class PlayerFeaturesService {
   private async execute(input: FeatureInput, revision: number): Promise<void> {
     this.api.getAuthenticatedContext();
     if (input.operation === "refresh") {
-      const health = z.object({ protocolVersion: z.literal(1) }).parse(await this.api.playerFeaturesRequest());
+      const health = healthSchema.parse(await this.api.playerFeaturesRequest());
       if (revision !== this.epoch || !health) return;
+      this.supportsWatchNow = health.features?.includes("watch-now") ?? false;
       const rooms = z.array(featureSummarySchema).max(64).parse(await this.api.playerFeaturesRequest({ operation: "list" }));
       if (revision !== this.epoch) return;
       this.state.rooms = rooms; this.state.connection = "connected"; this.state.error = null; this.emit(); return;
@@ -98,6 +102,15 @@ export class PlayerFeaturesService {
     }
     const room = this.state.room;
     if (!room) throw new AppError("FEATURE_ROOM_REQUIRED", "Join a Seeing Stone room first.", 409);
+    if (input.operation === "watch-now" || input.operation === "action" && input.action.action === "watch-item") {
+      // Check older servers before mutating the queue; they do not support source switching.
+      if (this.supportsWatchNow !== true) {
+        const health = healthSchema.parse(await this.api.playerFeaturesRequest());
+        if (revision !== this.epoch) return;
+        this.supportsWatchNow = health.features?.includes("watch-now") ?? false;
+      }
+      if (!this.supportsWatchNow) throw new AppError("FEATURE_PLUGIN_UPDATE_REQUIRED", "Update the Seeing Stone Player Features plugin on your Jellyfin server to use Watch now.", 409);
+    }
     if (input.operation === "leave" || input.operation === "delete") {
       try { await this.api.playerFeaturesRequest({ ...input, roomId: room.id }); }
       finally { if (revision === this.epoch) { const s = this.player.getState(); if (s.playbackId && room.media?.kind === "jellyfin") await this.player.setPaused(s.playbackId, true, remote).catch(() => undefined); this.deactivate(); this.state.connection = "connected"; this.emit(); } }
@@ -116,11 +129,13 @@ export class PlayerFeaturesService {
       await this.action({ action: "seek", positionTicks: segment.endTicks }, revision); return;
     }
     if (input.operation === "action") { await this.action(input.action, revision); return; }
-    if (input.operation === "add") {
+    if (input.operation === "add" || input.operation === "watch-now") {
       let itemId = input.itemId;
       if (input.kind === "youtube") { itemId = youtubeVideoId(input.itemId) || (/^[A-Za-z0-9_-]{11}$/.test(input.itemId) ? input.itemId : ""); }
       if (!itemId) throw new AppError("INVALID_VIDEO", "Choose a library item or paste a YouTube video link.", 400);
-      await this.exchange({ ...input, itemId, roomId: room.id }, revision); return;
+      await this.exchange({ ...input, itemId, roomId: room.id,
+        ...(input.operation === "watch-now" ? { expectedGeneration: room.timeline.generation } : {}),
+      }, revision); return;
     }
     if (input.operation === "message") await this.exchange({ ...input, roomId: room.id, positionTicks: input.kind === "comment" ? featurePosition(room) : undefined }, revision);
   }

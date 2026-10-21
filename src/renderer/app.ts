@@ -1,5 +1,6 @@
 import { mountUpdates } from "./updates";
 import { mountPlayerFeatures } from "./playerFeatures";
+import type { FeatureRoom } from "../shared/playerFeatures";
 import { mountIptv } from "./iptv";
 import { mountIptvMiniGuide } from "./iptvMiniGuide";
 import { mountYouTubeSettings } from "./youtubeSettings";
@@ -1049,6 +1050,8 @@ function watchPartyOffsetLabel(offsetMilliseconds: number): string {
 
 function renderWatchParties(): void {
   const value = state.watchParties;
+  const legacyParties = watchPartyList.closest("details");
+  if (value?.joinedGroup && legacyParties) legacyParties.open = true;
   watchPartyList.innerHTML = "";
   joinedWatchParty.innerHTML = "";
   joinedWatchParty.classList.add("is-hidden");
@@ -1223,6 +1226,8 @@ function renderYouTubeRegion(container: HTMLElement, values: unknown, build: () 
 function renderYouTubeRoom(): void {
   const value = state.youtubeRooms;
   const room = value?.room ?? null;
+  const legacyRooms = youtubeRoomPanel.closest("details");
+  if (room && legacyRooms) legacyRooms.open = true;
   const leavingFocusedRoom = !room && youtubeRoomPanel.contains(document.activeElement);
   youtubeCreateButton.disabled = value?.connection === "checking";
   youtubeRefreshButton.disabled = value?.connection === "checking";
@@ -6485,6 +6490,16 @@ async function seekPlayerBy(seconds: number): Promise<void> {
 }
 
 async function startPresentedPlayback(presentation: PlaybackPresentation): Promise<void> {
+  if (currentFeatureRoom && !presentation.iptvIdentity && !presentation.liveChannelId) {
+    try {
+      await window.jellyfin.playerFeatures.command({
+        operation: "watch-now", kind: "jellyfin", itemId: presentation.itemId,
+        ...(presentation.preferredMediaSourceId ? { mediaSourceId: presentation.preferredMediaSourceId } : {}),
+      });
+      showToast("Preparing this video for everyone in your party.");
+    } catch (error) { showToast(errorMessage(error, "The video could not be started for your party.")); }
+    return;
+  }
   const requestId = ++state.playbackRequestId;
   if (playerView.classList.contains("is-hidden")) {
     state.lastFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -7998,7 +8013,10 @@ window.jellyfin.watchParties.subscribe((watchParties) => {
 });
 
 let featureRoomShown: string | null = null;
+let currentFeatureRoom: FeatureRoom | null = null;
+let featureMediaShown: string | null = null;
 window.jellyfin.playerFeatures?.subscribe((features) => {
+  currentFeatureRoom = features.room;
   if (features.room && features.room.media?.kind !== "jellyfin" && !playerView.classList.contains("is-hidden")) {
     dismissedPlaybackId = state.playbackId;
     playerView.classList.add("is-hidden");
@@ -8007,6 +8025,8 @@ window.jellyfin.playerFeatures?.subscribe((features) => {
   }
   if (!features.room) featureRoomShown = null;
   const key = features.room ? `${features.room.id}:${features.room.timeline.generation}` : null;
+  if (features.room?.media?.kind === "youtube" && key !== featureMediaShown) setRoute("watch-parties");
+  featureMediaShown = key;
   if (features.room?.media?.kind === "jellyfin" && key !== featureRoomShown && !playerView.classList.contains("is-hidden")) { featureRoomShown = key; setSessionPanelCollapsed(false); }
 });
 

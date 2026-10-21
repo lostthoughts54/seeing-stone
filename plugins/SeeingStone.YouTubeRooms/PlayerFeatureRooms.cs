@@ -104,14 +104,25 @@ public sealed class PlayerFeatureRooms
         }
     }
 
-    public FeatureRoomView Add(string id, Guid user, string session, FeatureMedia media)
+    public FeatureRoomView Add(string id, Guid user, string session, FeatureMedia media, bool watchNow = false, long? expectedGeneration = null)
     {
         lock (_gate)
         {
             var r = RequireMember(id, user, session);
+            if (watchNow && r.HostOnly) Host(r, user);
+            if (watchNow && expectedGeneration != r.Generation) throw new RoomAccessException(409, "The room changed. Try Watch now again.");
             if (r.Queue.Count >= 100) throw new RoomAccessException(409, "The room queue is full.");
-            r.Queue.Add(new QueueEntry { Id = Guid.NewGuid().ToString("N"), Media = media, AddedBy = r.Members[session].Name });
-            if (r.Queue.Count == 1) SelectCurrent(r);
+            var entry = new QueueEntry { Id = Guid.NewGuid().ToString("N"), Media = media, AddedBy = r.Members[session].Name };
+            if (watchNow)
+            {
+                RememberPosition(r);
+                r.Queue.Insert(0, entry); SelectCurrent(r); r.WantsPlay = true;
+            }
+            else
+            {
+                r.Queue.Add(entry);
+                if (r.Queue.Count == 1) SelectCurrent(r);
+            }
             Event(r, "An item was added to the queue."); Save(true); return View(r, user, session);
         }
     }
@@ -149,9 +160,12 @@ public sealed class PlayerFeatureRooms
                         if (r.Queue.Count == 0) break;
                         r.Queue.RemoveAt(0); SelectCurrent(r); r.WantsPlay = r.Queue.Count > 0; break;
                     case "play-item":
+                    case "watch-item":
                         var selected = r.Queue.FindIndex(q => q.Id == action.QueueItemId);
                         if (selected < 0) throw new RoomAccessException(404, "Queue item not found.");
-                        var item = r.Queue[selected]; r.Queue.RemoveAt(selected); r.Queue.Insert(0, item); SelectCurrent(r); break;
+                        RememberPosition(r);
+                        var item = r.Queue[selected]; r.Queue.RemoveAt(selected); r.Queue.Insert(0, item); SelectCurrent(r);
+                        r.WantsPlay = action.Action == "watch-item"; break;
                     case "remove":
                         var index = r.Queue.FindIndex(q => q.Id == action.QueueItemId);
                         if (index < 0) throw new RoomAccessException(404, "Queue item not found.");
@@ -232,8 +246,14 @@ public sealed class PlayerFeatureRooms
     private void Freeze(Room r) { r.Position = Position(r, _now()); r.Playing = false; r.StartAt = null; r.Anchor = _now(); }
     private static long Position(Room r, long now) => Math.Clamp(r.Position + (r.Playing ? Math.Max(0, now - r.Anchor) * 10_000 : 0), 0, 864_000_000_000);
     private static void InvalidateReady(Room r) { foreach (var m in r.Members.Values) m.Report = m.Report with { Ready = false }; }
+    private void RememberPosition(Room r)
+    {
+        if (r.Queue.FirstOrDefault() is not { } current) return;
+        current.ResumePositionTicks = r.Phase == "ended" || r.NextAt is not null ? 0
+            : Math.Min(Position(r, _now()), current.Media.DurationTicks > 0 ? current.Media.DurationTicks : 864_000_000_000);
+    }
     private void SelectCurrent(Room r)
-    { r.Position = 0; r.Playing = false; r.WantsPlay = false; r.StartAt = null; r.NextAt = null; r.Anchor = _now(); r.Generation++; r.Version++; r.TargetRevision++; r.HasStarted = false; r.Phase = r.Queue.Count > 0 ? "preparing" : "idle"; InvalidateReady(r); }
+    { r.Position = r.Queue.FirstOrDefault()?.ResumePositionTicks ?? 0; r.Playing = false; r.WantsPlay = false; r.StartAt = null; r.NextAt = null; r.Anchor = _now(); r.Generation++; r.Version++; r.TargetRevision++; r.HasStarted = false; r.Phase = r.Queue.Count > 0 ? "preparing" : "idle"; InvalidateReady(r); }
     private static string Text(string? value, int max) { if (string.IsNullOrWhiteSpace(value) || value.Length > max || value.Any(char.IsControl)) throw new RoomAccessException(400, "Text is empty or too long."); return value.Trim(); }
     private static string? Short(string? value, int max) => string.IsNullOrWhiteSpace(value) ? null : new string(value.Where(c => !char.IsControl(c)).Take(max).ToArray());
     private void Save(bool force)
@@ -255,6 +275,6 @@ public sealed class PlayerFeatureRooms
         public List<QueueEntry> Queue { get; set; } = []; public List<FeatureMessage> Messages { get; set; } = []; public List<FeatureEvent> Events { get; set; } = [];
         [System.Text.Json.Serialization.JsonIgnore] public Dictionary<string, Member> Members { get; set; } = new();
     }
-    public sealed class QueueEntry { public string Id { get; set; } = ""; public FeatureMedia Media { get; set; } = new("youtube", "", null, "", 0, ""); public string AddedBy { get; set; } = ""; public HashSet<Guid> Votes { get; set; } = []; }
+    public sealed class QueueEntry { public string Id { get; set; } = ""; public FeatureMedia Media { get; set; } = new("youtube", "", null, "", 0, ""); public string AddedBy { get; set; } = ""; public HashSet<Guid> Votes { get; set; } = []; public long ResumePositionTicks { get; set; } }
     public sealed class Member { public Guid User { get; set; } public string Name { get; set; } = ""; public long SeenAt { get; set; } public long StateSince { get; set; } public long LastMessageAt { get; set; } public FeatureReport Report { get; set; } = new(0, "idle", false, 0, null, null, null, null, ""); }
 }

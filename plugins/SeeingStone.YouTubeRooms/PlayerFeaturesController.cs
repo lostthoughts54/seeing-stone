@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace SeeingStone.YouTubeRooms;
 
 public sealed record FeatureCommand(string Operation, string? RoomId, string? Name, string? Kind, string? ItemId, string? MediaSourceId,
-    FeatureReport? Report, FeatureAction? Action, string? Text, long? PositionTicks, string? Stream, double? DelaySeconds, string? Version);
+    FeatureReport? Report, FeatureAction? Action, string? Text, long? PositionTicks, string? Stream, double? DelaySeconds, string? Version, long? ExpectedGeneration = null);
 
 [ApiController, Authorize, Route("SeeingStone/PlayerFeatures")]
 public sealed class PlayerFeaturesController(PlayerFeatureRooms rooms, FeatureCorrections corrections, IAuthorizationContext authorizationContext, ILibraryManager library) : ControllerBase
@@ -17,7 +17,7 @@ public sealed class PlayerFeaturesController(PlayerFeatureRooms rooms, FeatureCo
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
 
     [HttpGet]
-    public IActionResult Capabilities() => new JsonResult(new { protocolVersion = 1, name = "Seeing Stone Player Features", features = new[] { "persistent-rooms", "readiness", "preflight", "queue-votes", "download-preparation", "subtitle-timing", "shared-skips", "chat", "diagnostics", "youtube-v3" } }, JsonOptions);
+    public IActionResult Capabilities() => new JsonResult(new { protocolVersion = 1, name = "Seeing Stone Player Features", features = new[] { "persistent-rooms", "readiness", "preflight", "queue-votes", "download-preparation", "subtitle-timing", "shared-skips", "chat", "diagnostics", "youtube-v3", "watch-now" } }, JsonOptions);
 
     [HttpPost("command"), RequestSizeLimit(16384)]
     public async Task<IActionResult> Command([FromBody] JsonElement body)
@@ -43,6 +43,7 @@ public sealed class PlayerFeaturesController(PlayerFeatureRooms rooms, FeatureCo
                 case "delete": rooms.Delete(id, auth.UserId, session); result = new { ok = true }; break;
                 case "report": result = rooms.Report(id, auth.UserId, session, request.Report ?? throw new RoomAccessException(400, "Missing report.")); break;
                 case "add": result = rooms.Add(id, auth.UserId, session, Resolve(request.Kind, request.ItemId, request.MediaSourceId, auth)); break;
+                case "watch-now": result = rooms.Add(id, auth.UserId, session, Resolve(request.Kind, request.ItemId, request.MediaSourceId, auth), true, request.ExpectedGeneration); break;
                 case "action": result = rooms.Action(id, auth.UserId, session, request.Action ?? throw new RoomAccessException(400, "Missing action.")); break;
                 case "message": result = rooms.Message(id, auth.UserId, session, request.Kind ?? "chat", request.Text ?? "", request.PositionTicks); break;
                 case "preflight":

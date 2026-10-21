@@ -4,10 +4,10 @@
     {
       "category": "application",
       "name": "Seeing Stone",
-      "version": "0.7.4",
+      "version": "0.7.5",
       "license": "GPL-2.0-or-later",
       "projectUrl": null,
-      "sourceRevision": "0.7.4 working-tree snapshot in corresponding-source archive",
+      "sourceRevision": "0.7.5 working-tree snapshot in corresponding-source archive",
       "redistributionStatus": "source-only",
       "artifacts": [
         {

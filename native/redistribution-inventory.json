@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "0.7.4",
+  "applicationVersion": "0.7.5",
   "packageDirectory": ".runtime/release/win-unpacked",
   "generatedFrom": "production package plus redistribution-compliance.json",
   "artifacts": [
     {
       "packagePath": "Seeing Stone.exe",
-      "sha256": "a6805c7fb518e96f8fd139f3d0c3660405785d9101b20207701019c4190c7833",
+      "sha256": "00da2318218bf756402083407fe94d6a0a9db367afc2e36eb13fd57c42557d87",
       "bytes": 225526272,
       "componentIds": [
         "seeing-stone",

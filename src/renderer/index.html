@@ -299,6 +299,8 @@
           </section>
 
           <section id="watchPartiesView" class="view watch-parties-view is-hidden">
+            <details id="legacyWatchParties" class="legacy-watch-parties">
+              <summary>Separate YouTube rooms and Jellyfin SyncPlay parties</summary>
             <section class="youtube-together" aria-labelledby="youtubeTogetherHeading">
               <header class="page-heading youtube-together-heading">
                 <p class="eyebrow">YouTube · Jellyfin rooms</p>
@@ -363,6 +365,7 @@
             <div id="watchPartyStatus" class="watch-party-status" role="status"></div>
             <section id="joinedWatchParty" class="joined-watch-party is-hidden" aria-live="polite"></section>
             <div id="watchPartyList" class="watch-party-list" aria-live="polite"></div>
+            </details>
           </section>
 
           <section id="detailsView" class="view details-view is-hidden">

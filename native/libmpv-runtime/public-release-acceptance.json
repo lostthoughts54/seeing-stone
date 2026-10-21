@@ -1,12 +1,22 @@
 {
   "schemaVersion": 1,
   "result": "waived",
-  "release": "0.7.4",
-  "packagedArtifactSha256": "9b09a44eef2e0c8c09e4a166e48f2da0e1dce7ee962c7e05e20beb16550bb788",
-  "inventorySha256": "664dd2f88cfe351def46a9d8bca9b0ac91c634cb0f17f350bf43256fb377fa18",
-  "correspondingSourceSha256": "eb74df6752772476a71c0e460e4ece9f9ef4ee99787c7254dbe39e7789875a34",
-  "waiverReason": "The release owner elects to publish the prepared 0.7.4 artifacts and perform testing after publication instead of completing the separate clean-machine install/playback/uninstall gate first.",
+  "release": "0.7.5",
+  "packagedArtifactSha256": "4e0cf715f69a16ead8be0e8d44c670adf099107409d7b113f486157fdccd57ec",
+  "inventorySha256": "3354554bf56f7f89e3379c64c17da755fb7b9b7c9d5be5a74c30c43696979fe3",
+  "correspondingSourceSha256": "5af89ed26bb24d7183d9af26c262cd4ae4d9d2bfafb309a76a81ff1b9448f55f",
+  "waiverReason": "Owner-authorized publication for the two-viewer testing workflow previously recorded for 0.7.4. Automated client, plugin, interface, updater, source and package verification passed. A fresh clean-machine install/playback/uninstall test and installed two-computer source-switching trial are not claimed and remain follow-up checks.",
   "authorizedBy": "release owner",
-  "authorization": "Explicit user instruction on 2026-10-18: just go ahead. ill check it and fix it if there is an issue, this is how im testing it",
-  "waivedAtUtc": "2026-10-18T20:35:32.252Z"
+  "authorization": "User instruction on 2026-10-21: Go ahead and update the plugin and get it pushed to fit so Kayla’s will update.",
+  "priorTestingPreference": "The previous release records the owner preference to publish and test afterward. This release continues that workflow; it does not mark the deferred checks as passed.",
+  "waivedAtUtc": "2026-10-21T08:40:04.359Z",
+  "verification": {
+    "unitTests": 707,
+    "coreTests": 52,
+    "pluginChecks": 42,
+    "updaterScenarios": 10,
+    "interface": "passed",
+    "package": "verification-only passed; no installer executed",
+    "serverPlugin": "2.1.0.0 Active; watch-now capability verified"
+  }
 }

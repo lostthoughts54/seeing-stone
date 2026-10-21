@@ -70,6 +70,12 @@ try
     Denied(() => restored.Get(saved.Id, owner, "session"), 403, "server restart requires fresh membership");
     var joined = restored.Join(saved.Id, owner, "session", "Alice");
     Check(joined.Queue.Length == 1 && joined.Timeline.PositionTicks == 123_000_000 && !joined.Timeline.Playing, "room queue and paused position survive restart");
+    var savedMovieId = joined.Queue[0].Id;
+    var interrupted = restored.Add(saved.Id, owner, "session", new("youtube", "dQw4w9WgXcQ", null, "Trailer", 0, "dQw4w9WgXcQ"), true, joined.Timeline.Generation);
+    var restoredAgain = new PlayerFeatureRooms(path, () => now + 400_000);
+    restoredAgain.Join(saved.Id, owner, "session", "Alice");
+    var returned = restoredAgain.Action(saved.Id, owner, "session", new("watch-item", QueueItemId: savedMovieId, ExpectedGeneration: interrupted.Timeline.Generation));
+    Check(returned.Media == media && returned.Timeline.PositionTicks == 123_000_000, "movie bookmark survives server restart during a trailer");
 }
 finally { if (File.Exists(path)) File.Delete(path); }
 
@@ -105,4 +111,37 @@ for (var i = 1; i < 32; i++) rooms.Join(fullRoom.Id, Guid.NewGuid(), $"session-{
 now += 600_001;
 var reopened = rooms.Join(fullRoom.Id, guest, "fresh-session", "Bob");
 Check(reopened.Members.Length == 1, "expired membership does not block joining a formerly full room");
+var switchRooms = new PlayerFeatureRooms(now: () => now);
+var switchRoom = switchRooms.Create(owner, "switch-owner", "Trailers together", "Alice");
+var switchId = switchRoom.Id;
+switchRoom = switchRooms.Add(switchId, owner, "switch-owner", media);
+switchRooms.Join(switchId, guest, "switch-guest", "Bob");
+var movieQueueId = switchRoom.Queue[0].Id;
+switchRoom = switchRooms.Action(switchId, owner, "switch-owner", new("seek", PositionTicks: 420_000_000));
+var trailer = new FeatureMedia("youtube", "dQw4w9WgXcQ", null, "Trailer", 0, "dQw4w9WgXcQ");
+var movieGeneration = switchRoom.Timeline.Generation;
+switchRoom = switchRooms.Add(switchId, owner, "switch-owner", trailer, true, movieGeneration);
+Check(switchRoom.Id == switchId && switchRoom.Members.Length == 2 && switchRoom.Media == trailer && switchRoom.Queue.Length == 2, "Watch now keeps both members and the movie in the same room");
+Check(!switchRoom.Timeline.Playing && switchRoom.Timeline.PositionTicks == 0 && switchRoom.Members.All(m => !m.Ready), "trailer waits for fresh readiness from both viewers");
+Denied(() => switchRooms.Add(switchId, owner, "switch-owner", trailer, true, movieGeneration), 409, "stale Watch now cannot interrupt a newer selection");
+Check(switchRooms.Get(switchId, owner, "switch-owner").Queue.Length == 2, "stale selection does not add a duplicate");
+var trailerReady = new FeatureReport(switchRoom.Timeline.Generation, "paused", true, 0, null, "YouTube", trailer.Version, null, "Loaded", switchRoom.Timeline.TargetRevision);
+switchRoom = switchRooms.Report(switchId, owner, "switch-owner", trailerReady);
+Check(!switchRoom.Timeline.Playing, "one ready viewer cannot start the trailer");
+switchRoom = switchRooms.Report(switchId, guest, "switch-guest", trailerReady);
+Check(switchRoom.Timeline.StartAt == now + 2500, "Watch now automatically schedules playback when both are ready");
+switchRoom = switchRooms.Action(switchId, owner, "switch-owner", new("watch-item", QueueItemId: movieQueueId, ExpectedGeneration: switchRoom.Timeline.Generation));
+Check(switchRoom.Media == media && switchRoom.Timeline.PositionTicks == 420_000_000 && !switchRoom.Timeline.Playing, "Back to movie restores its saved position and waits for readiness");
+switchRoom = switchRooms.Report(switchId, guest, "switch-guest", trailerReady);
+Check(!switchRoom.Timeline.Playing && switchRoom.Members.All(m => !m.Ready), "late trailer readiness cannot start the restored movie");
+switchRooms.Action(switchId, owner, "switch-owner", new("host-only", Enabled: true));
+Denied(() => switchRooms.Add(switchId, guest, "switch-guest", trailer, true, switchRoom.Timeline.Generation), 403, "host-only applies before Watch now changes the queue");
+Denied(() => switchRooms.Add(switchId, owner, "another-session", trailer, true, switchRoom.Timeline.Generation), 403, "Watch now requires exact session membership");
+switchRoom = switchRooms.Add(switchId, owner, "switch-owner", trailer, true, switchRoom.Timeline.Generation);
+switchRoom = switchRooms.Action(switchId, owner, "switch-owner", new("continue"));
+switchRoom = switchRooms.Report(switchId, owner, "switch-owner", new(switchRoom.Timeline.Generation, "ended", false, 900_000_000, null, "YouTube", trailer.Version, null, "", switchRoom.Timeline.TargetRevision));
+Check(switchRoom.Timeline.NextAt == now + 5000, "trailer completion starts the existing next countdown");
+now += 5100;
+switchRoom = switchRooms.Get(switchId, owner, "switch-owner");
+Check(switchRoom.Media == media && switchRoom.Timeline.PositionTicks == 420_000_000, "automatic return also restores the movie position");
 Console.WriteLine($"{count} behavioral checks passed.");
